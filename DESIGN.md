@@ -9,13 +9,17 @@ A terminal remote for the Kurzweil **K2000 / K2000R** that mirrors the hardware
 LCD pixel-for-pixel and drives every front-panel button from the computer
 keyboard, over MIDI SysEx.
 
-> Status: **Phases 1–3 implemented and hardware-verified** on Jan's K2000R
-> (2026-06-19). Locked decisions held: **Textual** TUI · **pixel-accurate**
-> display (GETGRAPHICS) · **portable from day one**. Eight modules, 102 synthetic
-> tests, plus live verification (probes in `probes/`): screen mirror, all menus,
-> button presses, feedback-driven naming, the Save flow (created program 300),
-> device id 0. Residual open items (physical-panel mirroring needs a human press;
-> rig audio routing) are tracked in [TODO.md](TODO.md) /
+> Status: **implemented and hardware-verified** on a real K2000R (2026-06-19/21).
+> Locked decisions held: **Textual** TUI · **pixel-accurate** display
+> (GETGRAPHICS) · **portable from day one**. The usable remote (mirror, keymap,
+> event-driven refresh), feedback-driven name entry, a one-shot **SysEx rename
+> tool**, five render modes (braille / blocks-half / blocks-quad / text / image)
+> with **automatic per-page selection**, terminal-safe key alternates
+> (`--alt-keys` / `--super-alt-keys` + an `m` mode leader), and a MIDI panic — all
+> covered by a synthetic test suite (no hardware needed) and verified live (probes
+> in `probes/`). The `psobot/k2000` SysEx library is **vendored in-tree** (MIT).
+> Residual open items (physical-panel mirroring needs a human press; rig audio
+> routing) are tracked in [TODO.md](TODO.md) /
 > [docs/RESOLUTION_NOTES.md](docs/RESOLUTION_NOTES.md).
 
 Protocol/RE foundation lives in the author's sibling mpc2emu project
@@ -44,18 +48,37 @@ requests, so typing always feels responsive and the device never floods.
 
 ---
 
-## Display: pixel-accurate via braille
+## Display: five render modes, auto-selected per page
 
 `GETGRAPHICS` (msg `0x18`) returns the real **240×64** pixel buffer (2560 bytes,
-low 6 bits/byte). Rendered with Unicode **braille** (2×4 dots per cell) → a
-**120×16** character mirror showing cursor highlight, envelope curves —
-everything the hardware shows.
+low 6 bits/byte); `ALLTEXT` (`0x15`) returns the 8×40 characters plus a high-bit
+reverse-video mask. The app renders the LCD in any of five modes (`F10` cycles;
+`braille.py` does the heavy lifting):
 
-- **Terminal width:** 1:1 braille needs **≥120 columns**. The app detects width
-  and, if narrower, either down-scales or shows a "widen terminal" hint.
-  (Half-block / quadrant rendering is wider still, so braille is the right pick.)
-- `psobot/k2000`'s `image.py` already decodes the pixel layer into an array —
-  feed that straight into the braille renderer; no decode work of our own.
+| Mode | Mapping | Size | Notes |
+|---|---|---|---|
+| **braille** | 2×4 pixels / cell (Unicode braille dots) | 120×16 | densest; fits a short terminal |
+| **blocks** (half) | 1×2 px / cell (`▀▄█`) | 240×16 | 1:1 LCD width, sharpest; needs a wide terminal |
+| **blocks** (quad) | 2×2 px / cell (quadrant chars) | 120×32 | normal width, coarser; needs a tall terminal |
+| **text** | the real ALLTEXT characters | 8×40 | crisp for menus/lists; cursor as reverse video |
+| **image** | pixel-perfect colour bitmap | — | kitty/sixel/iTerm2 only (`screenshot.live_image`) |
+
+- **auto** (`_effective_mode`): on a graphics terminal → **image** for every page;
+  otherwise **text** for text-heavy pages and **braille** for graphics pages,
+  decided by `_is_text_page` (below). `blocks` auto-picks half vs quad by width.
+- **`_is_text_page`** distinguishes a page whose *content* is graphics (the big
+  program name, an envelope) from a text page that merely has graphics *chrome*.
+  It counts graphics pixels in blank, non-reverse cells — after dropping
+  full-width **horizontal rules** (the divider the K2000 draws above the soft
+  labels on every page), skipping (near-)**solid** cells (reverse-video
+  highlights), and ignoring high-bit-flagged cells — and only calls a page
+  *graphics* when those pixels **dominate the text** present. **Song mode** is a
+  named exception (its channel-number strip is graphics-only) and is always
+  rendered in braille on a text terminal. See `docs/RESOLUTION_NOTES.md §9`.
+- The text plane is **composited** onto the graphics plane (`braille._composite`)
+  because GETGRAPHICS is an overlay (it omits the ALLTEXT characters).
+- `psobot/k2000`'s `image.py` decodes the pixel layer into an array — fed straight
+  into the renderers; no decode work of our own.
 
 ---
 

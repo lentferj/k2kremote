@@ -242,8 +242,44 @@ python -m k2kremote.app                  # reuses the saved port/rig
 ```
 
 Selection precedence: an explicit `--port` / `--rig auto` overrides the config
-file, which overrides the first-bidirectional-port fallback. See `--help` for
-every option, and `--long-help` for a full prose manual.
+file, which overrides the first-bidirectional-port fallback.
+
+---
+
+## Command-line options
+
+Run `python -m k2kremote.app --help` for this list, or `--long-help` for a full
+prose manual (setup, terminals, controls, safety).
+
+**Connection**
+
+| Option | Default | Description |
+|---|---|---|
+| `--rig {auto,standard}` | `standard` | How to find the K2000: `standard` uses one bidirectional MIDI port; `auto` probes every port for a K2000 that answers SysEx. |
+| `--port NAME` | — | Exact MIDI port name to use (implies `--rig standard`). List names with `python -m k2kremote.midi_bridge ports`. |
+| `--config FILE` | `config.toml` | TOML file remembering the port/rig selection (ignored if absent). |
+| `--save-config` | off | Write the effective port/rig selection to `--config`, so later runs need no flags. |
+| `-i, --sysex-interval MS` | `500` | Minimum delay between outgoing SysEx messages (like `amidi -i`). Lower = snappier UI, but more risk of garbling the K2000's LCD. |
+
+**Display**
+
+| Option | Default | Description |
+|---|---|---|
+| `--text` | off (auto) | Start in fast text (ALLTEXT) mode instead of auto. Cycle modes live with `F10`. |
+| `--image-protocol {auto,tgp,sixel,halfcell}` | `auto` | Terminal graphics protocol for image mode. Force `tgp` (kitty), `sixel` (WezTerm/Windows Terminal), or `halfcell` (universal text fallback). |
+| `--image-cols N` | `120` | Cap the pixel image at N columns so it isn't huge on wide monitors (height follows the LCD aspect). |
+| `--model NAME` | `K2000R` | Model label shown in the title bar. |
+
+**Behaviour**
+
+| Option | Default | Description |
+|---|---|---|
+| `--settle MS` | `350` | Delay after a keypress before reading the redrawn LCD. Lower = snappier; too low may read the screen mid-redraw. |
+| `--alt-keys` | off | Show terminal-safe key alternates (`a`–`h` soft keys, `Ctrl+e/x/n/v/g`) in the legend and soft-key bar — for terminals that intercept the F-keys (Alt-chords stay). |
+| `--super-alt-keys` | off | Everything `--alt-keys` does, plus move the mode buttons to the `m` leader (press `m`, then `p/s/q/m/i/d/g/e`) — for terminals that also grab the `Alt+letter` mode chords. |
+| `--demo` | off | Run against a static synthetic frame with no MIDI — try the UI and render modes without any hardware. |
+| `--long-help` | — | Print the full prose user manual and exit. |
+| `-h, --help` | — | Print the option summary and exit. |
 
 ---
 
