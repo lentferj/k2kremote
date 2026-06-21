@@ -114,11 +114,16 @@ KEYMAP: Dict[str, KeyAction] = {
     "minus": _button("Minus", Button.Minus),
     "-": _button("Minus", Button.Minus),
     "pagedown": _button("Minus", Button.Minus),
-    # Chan / Bank -/+.
+    # Chan / Bank -/+ (the panel's CHAN/BANK pair, doubling as Layer/Zone in the
+    # editors). The both-at-once combo (jump bank / Guitar-Wind / select-all) is
+    # the K2000's dedicated single code, not two buttons together; it sits on the
+    # bracket-adjacent backslash.
     "left_square_bracket": _button("Chan/Bank−", Button.ChanBankDec),
     "[": _button("Chan/Bank−", Button.ChanBankDec),
     "right_square_bracket": _button("Chan/Bank+", Button.ChanBankInc),
     "]": _button("Chan/Bank+", Button.ChanBankInc),
+    "backslash": _button("Chan/Bank±", Button.ChanBankIncDec),
+    "\\": _button("Chan/Bank±", Button.ChanBankIncDec),
     # Alpha wheel (PageUp/Down are now +/-, so the wheel lives on Ctrl+arrows).
     "ctrl+up": _wheel("Wheel +1", +1),
     "ctrl+down": _wheel("Wheel −1", -1),
@@ -187,8 +192,9 @@ MODE_BAR_ALT: List[Tuple[str, str]] = [
 # inside one — so a label like "Alt+X panic" is never split across a line.
 LEGEND_BLOCKS: Tuple[str, ...] = (
     "↑↓←→ cursor", "+/- or PgUp/Dn value", "Enter", "Esc=Exit", "Del=Cancel",
-    "Ctrl+↑/↓ wheel", "F1-F6 soft", "F7 Edit", "F8 Exit", "F9 name", "F10 view",
-    "F12 png", "Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
+    "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "F1-F6 soft", "F7 Edit",
+    "F8 Exit", "F9 name", "F10 view", "F12 png", "Alt+x panic", "p pause",
+    "Ctrl+r refresh", "Ctrl+o rename",
 )
 LEGEND = " · ".join(LEGEND_BLOCKS)
 
@@ -196,9 +202,9 @@ LEGEND = " · ".join(LEGEND_BLOCKS)
 # the F-keys (shown by the app's --alt-keys option). Only the F-key blocks change.
 LEGEND_BLOCKS_ALT: Tuple[str, ...] = (
     "↑↓←→ cursor", "+/- or PgUp/Dn value", "Enter", "Esc=Exit", "Del=Cancel",
-    "Ctrl+↑/↓ wheel", "a-h soft", "Ctrl+e Edit", "Ctrl+x Exit", "Ctrl+n name",
-    "Ctrl+v view", "Ctrl+g png", "Alt+x panic", "p pause", "Ctrl+r refresh",
-    "Ctrl+o rename",
+    "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "a-h soft", "Ctrl+e Edit",
+    "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view", "Ctrl+g png", "Alt+x panic",
+    "p pause", "Ctrl+r refresh", "Ctrl+o rename",
 )
 
 # Soft-key prefixes for the live F1-F6 label bar: the F-keys by default, or the

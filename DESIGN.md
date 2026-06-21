@@ -120,7 +120,7 @@ Dangerous messages — **DEL (0x07), DELBANK (0x0E), MOVEBANK (0x0F)** — are
 | Enter      | Enter (0x0D)            | | `[` / `]` | Chan/Bank −/+ (0x14/15)|
 | Esc        | Cancel (0x0B)           | | PgUp/PgDn | alpha-wheel ±1        |
 | Backspace  | Clear (0x0C)            | | Ctrl+↑/↓  | alpha-wheel ±5        |
-| F7 / F8    | Edit (0x20) / Exit (0x21)| |           |                       |
+| F7 / F8    | Edit (0x20) / Exit (0x21)| | `\`       | Chan/Bank both (0x1C) |
 
 **Mode buttons** via Alt-chords (Textual handles these portably — the reason it
 was chosen over curses/urwid):

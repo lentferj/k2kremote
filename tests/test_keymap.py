@@ -45,6 +45,14 @@ def test_value_and_chanbank_aliases():
     assert keymap.resolve("[").button == Button.ChanBankDec
     assert keymap.resolve("left_square_bracket").button == Button.ChanBankDec
     assert keymap.resolve("]").button == Button.ChanBankInc
+    assert keymap.resolve("right_square_bracket").button == Button.ChanBankInc
+
+
+def test_chanbank_combo_uses_dedicated_code():
+    # Both CHAN/BANK buttons at once (jump bank / Guitar-Wind / select-all) is the
+    # K2000's single combo code, not two presses together. Lives on backslash.
+    assert keymap.resolve("\\").button == Button.ChanBankIncDec
+    assert keymap.resolve("backslash").button == Button.ChanBankIncDec
 
 
 def test_edit_keys():
