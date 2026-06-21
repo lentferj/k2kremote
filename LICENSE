@@ -1,0 +1,50 @@
+k2kremote — Terminal remote for the Kurzweil K2000 / K2000R
+Copyright (C) 2026  k2kremote contributors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+-------------------------------------------------------------------------------
+Third-party references and their licenses
+-------------------------------------------------------------------------------
+
+k2kremote/midi_bridge.py
+  Wraps the psobot/k2000 SysEx library as a runtime dependency (no source
+  code copied):
+    k2000 — Python library for the Kurzweil K2 series
+    Copyright (C) 2022-2023  Peter Sobot
+    https://github.com/psobot/k2000
+    License: MIT
+  The throttled-output queue, the MultiIn merged-input facade, and the split
+  send/receive connection logic are ported from:
+    mpc2emu (tests/re_banks/krz_sysex_live.py)
+    Copyright (C) 2025-2026  mpc2emu contributors
+    License: GNU General Public License v2.0 or later (GPL-2.0-or-later)
+  The reverse-engineered MIDI behaviour these encode (the 120 ms SysEx flood
+  floor, dynamic multi-port sub-port reassignment, broadcast device id) is
+  documented in the mpc2emu project's docs/k2000r_midi_comms.md, verified on real
+  K2000R hardware. Released under GPL-2.0-or-later.
+
+k2kremote/braille.py
+  Original work. Renders the 240x64 pixel array produced at runtime by
+  psobot/k2000's ScreenReply.to_pixel_array (MIT, Peter Sobot).
+  No third-party source code used. Released under GPL-2.0-or-later.
+
+All other files (k2kremote/__init__.py, tests)
+  Original work. Released under GPL-2.0-or-later.
+
+-------------------------------------------------------------------------------
+Trademarks
+-------------------------------------------------------------------------------
+Kurzweil is a trademark of Young Chang Co. Ltd.
+All other trademarks are property of their respective owners.

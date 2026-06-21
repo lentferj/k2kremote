@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: Copyright (C) 2026  k2kremote contributors
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "k2kremote"
+version = "0.1.0"
+description = "Terminal remote for the Kurzweil K2000 / K2000R — pixel-accurate LCD mirror over MIDI SysEx"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "GPL-2.0-or-later" }
+authors = [{ name = "Jan Lentfer", email = "jan.lentfer@web.de" }]
+dependencies = [
+    "textual>=0.80",
+    "python-rtmidi>=1.5",
+    "numpy>=1.24",
+    "attrs>=23",
+    "pillow>=9",            # used by the vendored k2000 SysEx/image library
+    # The psobot/k2000 SysEx protocol library is VENDORED in-tree (see ./k2000,
+    # MIT-licensed) so there is no separate manual/git install step.
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-asyncio>=0.23"]
+# Pixel-perfect "image" render mode (kitty/sixel/iTerm2; falls back to blocks):
+image = ["textual-image>=0.6"]
+
+[project.scripts]
+k2kremote = "k2kremote.app:main"
+
+[tool.setuptools]
+# "k2000" is the vendored psobot/k2000 library (MIT); shipped so the app runs
+# without any manual dependency install.
+packages = ["k2kremote", "k2000"]
+
+[tool.setuptools.package-data]
+k2000 = ["LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
