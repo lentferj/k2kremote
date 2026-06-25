@@ -24,6 +24,9 @@ class FakeBridge:
         self.refreshed = threading.Event()
         self._panels = 0  # number of pending unsolicited PANEL "events"
         self._names = {}  # idno -> current object name, for rename/lookup tests
+        # The mirrored screen text get_screen_text() returns; tests mutate it to
+        # simulate navigating onto a destructive (delete/object-utility) screen.
+        self.screen_text = "\n".join([""] * 7 + ["A B C D E F"])
 
     def press_button(self, button):
         with self.lock:
@@ -61,8 +64,9 @@ class FakeBridge:
     def get_screen_text(self):
         with self.lock:
             self.calls.append(("text", None))
+            text = self.screen_text
         self.refreshed.set()
-        return "\n".join([""] * 7 + ["A B C D E F"])
+        return text
 
     def poll_panel(self):
         with self.lock:
@@ -406,3 +410,134 @@ def test_error_is_reported_and_thread_survives():
     finally:
         worker.stop()
         worker.join(timeout=1.0)
+
+
+def test_is_destructive_screen_flags_only_the_confirm_prompt():
+    from k2kremote.refresh import is_destructive_screen
+
+    # The actual commit prompt that precedes the rewrite (2026-06-25 flow):
+    # "Are You sure?  Yes | No" — caught by the text and by the bare Yes/No row.
+    assert is_destructive_screen(["Are You sure?"] + [""] * 5 + ["Yes      No"])
+    assert is_destructive_screen(["Delete dependent objects?", "Yes  No"])
+    # Structural Yes/No detection alone (wording unknown) is enough.
+    assert is_destructive_screen(["Proceed?"] + [""] * 6 + ["Yes   No"])
+
+    # Idle EARLIER screens in the delete flow are safe to poll, so they must stay
+    # LIVE (not flagged) — freezing them just forces a Ctrl+r per line while you
+    # navigate the ~12-line range list.
+    assert not is_destructive_screen(
+        ["Delete Selection:", "200...299|300...399|...|Everything", "", "OK  Cancel"])
+    assert not is_destructive_screen(["Func:DELETE      Sel:4/4", "Select Next OK Cancel"])
+    assert not is_destructive_screen(["Select database function:",
+                                      "Move Copy Name Delete Dump Done"])
+    # OK/Cancel is the *accept* button on ordinary dialogs — deliberately NOT a
+    # trigger (it appears on the safe selection screen above).
+    assert not is_destructive_screen(["Overwrite 201?"] + [""] * 6 + ["OK    Cancel"])
+    # The name-edit dialog's six-label row (with its per-char Delete button) and a
+    # plain screen are not flagged.
+    assert not is_destructive_screen(
+        ["Name: MYSOUND", "Delete Insert <<< >>> OK Cancel"])
+    assert not is_destructive_screen(["", "A B C D E F"])
+
+
+def test_heartbeat_gated_off_on_destructive_screen():
+    bridge = FakeBridge()
+    bridge.screen_text = "Delete dependent objects?\nYes  No"
+    frames = []
+    # Fast heartbeat: without the gate it would re-read many times.
+    worker = _worker(bridge, frames, heartbeat=0.05, mirror_panel=False)
+    worker.start()
+    try:
+        assert bridge.refreshed.wait(timeout=2.0)  # the one startup read
+        time.sleep(0.4)  # several heartbeats would have fired if not gated
+        assert worker.danger
+        assert bridge.kinds().count("graphics") == 1  # startup only; gated after
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_destructive_screen_auto_pauses_then_resumes_on_force_refresh():
+    bridge = FakeBridge()
+    bridge.screen_text = "Are You sure?\n" + "\n" * 5 + "Yes      No"
+    frames = []
+    # Fast heartbeat + panel mirroring on: nothing must fire while auto-paused.
+    worker = _worker(bridge, frames, heartbeat=0.05, settle=0.05, inbound_poll=0.03)
+    worker.start()
+    try:
+        assert bridge.refreshed.wait(timeout=2.0)  # the startup read flags danger
+        time.sleep(0.1)
+        assert worker.danger
+        # Auto-paused: no reads at all, even with a fast heartbeat and a panel event.
+        with bridge.lock:
+            bridge.calls.clear()
+        bridge.queue_panel()        # a front-panel echo is ignored while auto-paused
+        worker.request_refresh()    # so is an ordinary refresh request
+        time.sleep(0.3)
+        assert bridge.kinds().count("graphics") == 0
+        # Leave the screen and force a refresh (Ctrl+r) — it reads, clears danger,
+        # and the heartbeat resumes on its own.
+        bridge.screen_text = "\n".join([""] * 7 + ["A B C D E F"])
+        worker.force_refresh()
+        deadline = time.time() + 2.0
+        while worker.danger and time.time() < deadline:
+            time.sleep(0.01)
+        assert not worker.danger
+        with bridge.lock:
+            bridge.calls.clear()
+        time.sleep(0.2)
+        assert bridge.kinds().count("graphics") >= 1
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_force_refresh_reads_while_auto_paused_but_request_refresh_does_not():
+    bridge = FakeBridge()
+    # A confirmation prompt (bare Yes/No row) auto-pauses; Ctrl+r is the escape hatch.
+    bridge.screen_text = "Are you sure?\n" + "\n" * 5 + "Yes      No"
+    frames = []
+    worker = _worker(bridge, frames, heartbeat=100.0, mirror_panel=False)
+    worker.start()
+    try:
+        _drain_startup(bridge)      # startup read set danger
+        assert worker.danger
+        # An ordinary refresh request is ignored while auto-paused.
+        bridge.refreshed.clear()
+        worker.request_refresh()
+        assert not bridge.refreshed.wait(timeout=0.3)
+        assert bridge.kinds().count("graphics") == 0
+        # ...but Ctrl+r (force_refresh) still reads.
+        worker.force_refresh()
+        assert bridge.refreshed.wait(timeout=2.0)
+        assert "graphics" in bridge.kinds()
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_manual_refresh_mode_skips_heartbeat_but_honours_events():
+    bridge = FakeBridge()
+    frames = []
+    worker = _worker(bridge, frames, heartbeat=None, settle=0.05, inbound_poll=0.03)
+    worker.start()
+    try:
+        assert bridge.refreshed.wait(timeout=2.0)  # startup still draws once
+        time.sleep(0.05)
+        assert bridge.kinds().count("graphics") == 1
+        with bridge.lock:
+            bridge.calls.clear()
+        bridge.refreshed.clear()
+        # No periodic heartbeat in manual mode: nothing fires on its own.
+        time.sleep(0.4)
+        assert bridge.kinds().count("graphics") == 0
+        # A front-panel event still refreshes the mirror.
+        bridge.queue_panel()
+        assert bridge.refreshed.wait(timeout=2.0)
+        time.sleep(0.05)
+        assert bridge.kinds().count("graphics") >= 1
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+

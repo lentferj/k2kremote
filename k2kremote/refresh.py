@@ -46,6 +46,7 @@ which a Textual app should marshal with ``call_from_thread``.
 
 from __future__ import annotations
 
+import re
 import threading
 from collections import deque
 from time import monotonic
@@ -59,6 +60,51 @@ from k2000.definitions import Button
 SETTLE = 0.35       # seconds to wait after a press before reading the redrawn LCD
 HEARTBEAT = 2.5     # idle refresh cadence; well under the flood threshold
 INBOUND_POLL = 0.25  # how often to drain the local RX buffer for inbound PANEL
+
+# We gate **only on the final confirmation prompt** — the screen whose next
+# keypress (Yes) actually commits the destructive change and starts the object
+# rewrite that crashes the K2000's CPU if polled. Earlier, *idle* screens in the
+# flow (the "Delete Selection: 200...299 | … | Everything" range list, object
+# menus) are SAFE to poll — the unit isn't rewriting anything there — so we leave
+# the mirror fully live on them; freezing them just forces a Ctrl+r per line while
+# navigating, which is useless. Verified live 2026-06-25: the lockup needs a poll
+# *during the rewrite*, which only begins after the Yes on "Are You sure? Yes|No".
+# See the project memory `lockup-heartbeat-during-deletes`.
+#
+# Two signals, both pointing at that confirmation step:
+#  * body text containing "are you sure" (the prompt itself), and
+#  * the soft-key row reduced to a bare **Yes/No** pair (structural — robust to
+#    wording, and it doesn't trip the name-edit dialog's six-label row, nor the
+#    selection screen, which proceeds with OK rather than Yes/No).
+# OK/Cancel is deliberately NOT a trigger: it is the *accept* button on ordinary
+# (idle, safe) dialogs including the delete-selection screen, so gating on it would
+# re-freeze navigation. Destructive commits on the K2000 confirm with Yes/No.
+_DESTRUCTIVE_MARKERS = ("are you sure",)
+_CONFIRM_SOFT_PAIR = {"yes", "no"}
+
+
+def _is_confirm_dialog(text_rows) -> bool:
+    """True when the bottom soft-key row is a bare Yes/No pair (a commit prompt)."""
+    bottom = text_rows[-1] if text_rows else ""
+    words = {w.lower() for w in re.findall(r"[A-Za-z]+", bottom)}
+    return words == _CONFIRM_SOFT_PAIR
+
+
+def is_destructive_screen(text_rows) -> bool:
+    """True when the mirrored LCD is at a destructive **commit** prompt.
+
+    Two independent signals for the confirmation step (the keypress after it starts
+    the object rewrite that crashes the K2000): the body text "are you sure", or a
+    structural :func:`_is_confirm_dialog` (a bare Yes/No soft-key pair). Used to
+    auto-pause all device polling while that prompt is shown. Idle earlier screens
+    (range/selection lists, object menus) are intentionally NOT flagged so the
+    mirror stays live for navigation. Conservative by design: a false positive only
+    freezes the mirror until Ctrl+r; a false negative risks a hardware lockup.
+    """
+    joined = " ".join(text_rows).lower()
+    if any(marker in joined for marker in _DESTRUCTIVE_MARKERS):
+        return True
+    return _is_confirm_dialog(text_rows)
 
 # Internal command kinds queued ahead of refreshes.
 _Press = Tuple[str, Button]   # ("press", button)
@@ -98,7 +144,7 @@ class RefreshWorker(threading.Thread):
         on_connection: Optional[Callable[[bool], None]] = None,
         *,
         settle: float = SETTLE,
-        heartbeat: float = HEARTBEAT,
+        heartbeat: Optional[float] = HEARTBEAT,
         inbound_poll: float = INBOUND_POLL,
         mirror_panel: bool = True,
     ):
@@ -108,7 +154,11 @@ class RefreshWorker(threading.Thread):
         self._on_error = on_error
         self._on_connection = on_connection
         self._settle = settle
-        self._heartbeat = heartbeat
+        # heartbeat=None => manual-refresh-only mode: no periodic poll at all; the
+        # mirror updates solely on front-panel events and explicit refreshes. The
+        # numeric value is still kept as the error-backoff base.
+        self._heartbeat_enabled = heartbeat is not None
+        self._heartbeat = heartbeat if heartbeat is not None else HEARTBEAT
         self._inbound_poll = inbound_poll
         self._mirror_panel = mirror_panel
 
@@ -119,6 +169,10 @@ class RefreshWorker(threading.Thread):
         self._next_heartbeat = 0.0
         self._running = False
         self._paused = False
+        # The mirrored screen is a destructive/object-table op (delete/confirm/
+        # erase). While true the worker is fully quiescent — it auto-pauses, sending
+        # nothing, until an explicit force_refresh (Ctrl+r) reads a safe screen.
+        self._danger = False
         self._backoff = 0.0  # grows while the device isn't answering (e.g. mid-load)
         self._last_pixels = None  # most recent GETGRAPHICS, for the text-first frame
         self._connected: Optional[bool] = None  # unknown until the first refresh
@@ -211,7 +265,11 @@ class RefreshWorker(threading.Thread):
             self._prioritize_graphics = on
 
     def request_refresh(self) -> None:
-        """Ask for a screen refresh as soon as the output stream is free."""
+        """Ask for a screen refresh as soon as the output stream is free.
+
+        Ignored while a destructive screen is mirrored (the worker is auto-paused);
+        use :meth:`force_refresh` (Ctrl+r) to read once the operation is done.
+        """
         with self._cond:
             self._refresh_pending = True
             self._cond.notify()
@@ -244,6 +302,16 @@ class RefreshWorker(threading.Thread):
     def paused(self) -> bool:
         return self._paused
 
+    @property
+    def danger(self) -> bool:
+        """True while the mirrored screen is a destructive/object-table op.
+
+        In this state the worker is auto-paused — it sends nothing at all (like a
+        manual pause) until a force_refresh (Ctrl+r) reads a safe screen. The app
+        surfaces it so the user knows the mirror is intentionally frozen.
+        """
+        return self._danger
+
     def stop(self) -> None:
         with self._cond:
             self._running = False
@@ -252,14 +320,20 @@ class RefreshWorker(threading.Thread):
     # -- thread body ---------------------------------------------------------
     def run(self) -> None:
         self._running = True
-        # Draw once at startup so the mirror isn't blank before the heartbeat.
-        self._next_heartbeat = monotonic()
+        # Draw once at startup so the mirror isn't blank before the first event
+        # (a plain refresh request, not the heartbeat, so manual-refresh mode —
+        # which has no heartbeat — still gets its initial frame).
+        with self._cond:
+            self._refresh_pending = True
         while True:
             # Drain the local RX buffer for unsolicited PANEL messages (the K2000
             # echoes its own front-panel presses when XMIT Buttons=On). This is a
             # local read, not device traffic, so it doesn't count toward the flood
             # floor. Done outside the lock and only when no command is queued.
-            if self._mirror_panel and not self._paused and not self._commands:
+            # Skipped while quiescent (manual pause or a destructive screen) so a
+            # front-panel press can't trigger a read into an object rewrite.
+            if (self._mirror_panel and not self._paused and not self._danger
+                    and not self._commands):
                 try:
                     if self._bridge.poll_panel():
                         self.request_refresh()
@@ -271,8 +345,11 @@ class RefreshWorker(threading.Thread):
                     return
                 command = self._commands.popleft() if self._commands else None
                 if command is None:
-                    if self._paused:
-                        self._cond.wait()  # no device traffic at all while paused
+                    # Quiescent: a manual pause, or a destructive screen we have
+                    # auto-paused on. Send nothing until a command (e.g. Ctrl+r
+                    # force_refresh, or resume) wakes us.
+                    if self._paused or self._danger:
+                        self._cond.wait()
                         continue
                     timeout = self._idle_timeout()
                     if timeout != 0:
@@ -295,15 +372,23 @@ class RefreshWorker(threading.Thread):
 
     # -- internals -----------------------------------------------------------
     def _idle_timeout(self) -> Optional[float]:
-        """Seconds to wait before the next refresh; 0 = due now; None = wait."""
+        """Seconds to wait before the next refresh; 0 = due now; None = wait.
+
+        Only reached when not quiescent (see ``run``); a destructive screen is
+        handled there as a full auto-pause. The heartbeat is omitted in
+        manual-refresh mode (``heartbeat=None``).
+        """
         now = monotonic()
-        deadlines = [self._next_heartbeat]
+        deadlines: List[float] = []
+        if self._heartbeat_enabled:
+            deadlines.append(self._next_heartbeat)
         if self._settle_due is not None:
             deadlines.append(self._settle_due)
         if self._refresh_pending:
             deadlines.append(now)  # do it immediately
-        due = min(deadlines)
-        return max(0.0, due - now)
+        if not deadlines:
+            return None  # nothing scheduled — wait until an event notifies us
+        return max(0.0, min(deadlines) - now)
 
     def _run_command(self, command: _Command) -> None:
         kind, payload = command
@@ -371,6 +456,9 @@ class RefreshWorker(threading.Thread):
         except Exception as exc:
             self._on_refresh_error(exc)
             return
+        # Gate the heartbeat on what's on screen: if this is a destructive /
+        # object-table operation, stop polling until it clears (see _idle_timeout).
+        self._danger = is_destructive_screen(text_rows)
         self._on_frame(Frame(pixels=self._last_pixels, text_rows=text_rows, reverse=reverse))
 
         # If a keypress is already waiting, don't block ~0.8 s on the full

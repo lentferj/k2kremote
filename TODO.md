@@ -91,3 +91,27 @@ Nothing open. See RESOLUTION_NOTES §8.
 since `Clear` advances rather than blanks on this unit, a new name shorter than
 the old one leaves the tail intact. The app types a full-width name to avoid it;
 a `Delete`-to-end pass would be tidier. See RESOLUTION_NOTES §2.
+
+## Heartbeat lockup during deletes — gating fix needs live HW verification
+
+**Status:** root cause **verified live 2026-06-25**; a v1 string-marker gate
+**failed live** (Master → Delete → Bank 200…299 still locked up — the guessed
+strings didn't match and a *timed* deferral clipped the rewrite). **v2 implemented
+synthetically:** on a destructive screen the worker now **auto-pauses entirely**
+(no MIDI), detecting it via real wording (`are you sure`, `delete selection`, …)
+**and** a structural confirm check (bare Yes/No or OK/Cancel soft-key pair); resume
+is manual via `Ctrl+r`. `--manual-refresh` drops the periodic poll entirely.
+**Blocked on:** confirming on hardware that a real Master delete (bank *and*
+Everything) now shows `⚠ AUTO-PAUSED` on the "Delete Selection"/"Are You sure?"
+screens and stays clean. **Known limits (so `p` pause is still the only guarantee):**
+detection must happen before you press Yes/OK; a delete with no on-screen confirm
+wouldn't be caught.
+
+## Heartbeat safety: switch to default-deny polling (follow-up)
+
+**Status:** open. **Why:** the auto-pause above is a denylist of destructive
+screens — a screen we fail to recognise still gets polled (that's how v1 crashed).
+Safer: only fire the heartbeat when the screen matches a recognised **safe** layout
+(e.g. Program/Setup play screens), so an unrecognised screen means "don't poll".
+Needs RE of the safe-screen signatures. See RESOLUTION_NOTES §9.
+

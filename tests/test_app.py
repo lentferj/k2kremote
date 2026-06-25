@@ -335,6 +335,10 @@ class _RecordingWorker:
     def paused(self):
         return False
 
+    @property
+    def danger(self):
+        return False
+
 
 @pytest.mark.asyncio
 async def test_name_dialog_opens_and_renders_software_cursor():
@@ -857,6 +861,7 @@ async def test_heavy_op_press_autopauses_before_sending():
     class FakeWorker:
         def __init__(self):
             self.paused = False
+            self.danger = False
             self.presses = []
             self.order = []
 
@@ -920,6 +925,37 @@ async def test_force_refresh_binding():
         await pilot.pause()
         assert sent["forced"] is True
         assert "refresh" in app.last_status.lower()
+
+
+@pytest.mark.asyncio
+async def test_p_resumes_confirm_autopause_via_force_refresh():
+    """`p` is the universal resume: while auto-paused on a confirm screen it
+    releases via force_refresh (a read), not by toggling the manual pause."""
+    from k2kremote.app import K2KRemoteApp
+
+    calls = {"forced": 0, "set_paused": 0}
+
+    class FakeWorker:
+        paused = False
+        danger = True  # auto-paused on a confirm prompt
+
+        def force_refresh(self):
+            calls["forced"] += 1
+
+        def set_paused(self, p):
+            calls["set_paused"] += 1
+
+        def stop(self):
+            pass
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._worker = FakeWorker()
+        await pilot.press("p")
+        await pilot.pause()
+        assert calls["forced"] == 1        # resumed by re-reading
+        assert calls["set_paused"] == 0    # did NOT stack a manual pause
 
 
 @pytest.mark.asyncio

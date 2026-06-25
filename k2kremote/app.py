@@ -523,12 +523,18 @@ class K2KRemoteApp(App):
     def __init__(self, bridge=None, *, demo: bool = False, model: str = "K2000R",
                  text_mode: bool = False, settle: Optional[float] = None,
                  image_protocol: str = "auto", image_cols: int = 120,
-                 alt_keys: bool = False, super_alt_keys: bool = False):
+                 alt_keys: bool = False, super_alt_keys: bool = False,
+                 manual_refresh: bool = False):
         super().__init__()
         self._bridge = bridge
         self._demo = demo
         self._model = model
         self._settle = settle
+        # Manual-refresh-only: no periodic heartbeat at all (the worker gets
+        # heartbeat=None). The mirror then updates only on front-panel events and
+        # explicit refreshes — the strongest guard against the heartbeat polling
+        # the K2000 during a destructive op. See refresh.RefreshWorker.
+        self._manual_refresh = manual_refresh
         # --alt-keys: show the F-key alternates (a-h soft keys, Ctrl-chords) in the
         # soft bar + legend, for terminals that swallow the F-keys. The Alt+letter
         # mode chords are left as-is.
@@ -553,6 +559,10 @@ class K2KRemoteApp(App):
         self._mode = "text" if text_mode else "auto"
         self._connected: Optional[bool] = None
         self._last_frame: Optional[Frame] = None
+        self._danger_shown = False  # last destructive-screen state reflected in the UI
+        # Why the (manual) pause is engaged, for the unified "⏸ PAUSED · <reason>"
+        # badge. The confirm-screen auto-pause is tracked by the worker's `danger`.
+        self._pause_reason = "manual"
         # Last values pushed to the widgets — readable without poking Textual
         # internals (handy for tests and for resizing).
         self.last_render: str = ""
@@ -588,13 +598,14 @@ class K2KRemoteApp(App):
             return
         if self._bridge is None:
             return
-        from k2kremote.refresh import SETTLE
+        from k2kremote.refresh import HEARTBEAT, SETTLE
         self._worker = RefreshWorker(
             self._bridge,
             on_frame=lambda frame: self.call_from_thread(self.show_frame, frame),
             on_error=lambda exc: self.call_from_thread(self._set_status, f"MIDI: {exc}"),
             on_connection=lambda ok: self.call_from_thread(self._set_connection, ok),
             settle=self._settle if self._settle is not None else SETTLE,
+            heartbeat=None if self._manual_refresh else HEARTBEAT,
         )
         self._worker.start()
         self._worker.request_refresh()
@@ -673,10 +684,11 @@ class K2KRemoteApp(App):
         # the user resume with P once the operation finishes.
         op = self._heavy_op_for(action.button)
         if op is not None:
+            self._pause_reason = "disk op"
             self._worker.set_paused(True)
             self._worker.press(action.button)
             self._set_status(f" {op!r} sent — mirror PAUSED while the K2000 works; "
-                             "press P to resume when it's done")
+                             "press p to resume when it's done")
             self.query_one("#titlebar", Static).update(self._titlebar_text())
             return
 
@@ -797,13 +809,26 @@ class K2KRemoteApp(App):
         self._set_status(" forcing full refresh…")
 
     def action_pause(self) -> None:
-        """Freeze/unfreeze all automatic mirror traffic (do this before disk ops)."""
+        """Freeze/unfreeze all automatic mirror traffic — the universal resume key.
+
+        `p` lifts whichever pause is in effect: a manual/disk-op pause toggles off,
+        and a confirm-screen auto-pause is released via a force_refresh (which only
+        lifts it once the screen is no longer a destructive confirm — so pressing
+        `p` while the prompt is still up safely re-reads rather than barging on)."""
         if self._worker is None:
             self._set_status(" pause (no device)")
             return
+        # Auto-paused on a confirm screen: resume the same way Ctrl+r does — read
+        # once; the worker clears the hold if the screen is now safe.
+        if self._worker.danger:
+            self._worker.force_refresh()
+            self._set_status(" resuming — re-reading; confirm the K2000 has finished")
+            return
         paused = not self._worker.paused
+        if paused:
+            self._pause_reason = "manual"
         self._worker.set_paused(paused)
-        self._set_status(" PAUSED — mirror frozen; press P before SCSI load/save"
+        self._set_status(" PAUSED — mirror frozen; press p before SCSI load/save"
                          if paused else " resumed")
         self.query_one("#titlebar", Static).update(self._titlebar_text())
 
@@ -913,6 +938,21 @@ class K2KRemoteApp(App):
             self.query_one("#display", Display).update(self.last_render)
         if frame.text_rows:
             self.query_one("#softbar", SoftBar).labels = soft_labels(frame.text_rows)
+        self._reflect_danger()
+
+    def _reflect_danger(self) -> None:
+        """When the worker enters/leaves a destructive screen, repaint the
+        titlebar indicator and flash a one-line status hint."""
+        danger = self._worker is not None and self._worker.danger
+        if danger == self._danger_shown:
+            return
+        self._danger_shown = danger
+        self.query_one("#titlebar", Static).update(self._titlebar_text())
+        if danger:
+            self._set_status(" ⏸ PAUSED · confirm — mirror frozen (no MIDI); press "
+                             "p (or Ctrl+r) when the K2000 has finished")
+        elif self.last_status.startswith(" ⏸ PAUSED · confirm"):
+            self._show_legend()
 
     def _effective_reverse(self, frame: Frame) -> List[str]:
         """Device-reported reverse-video cells OR'd with the software cursor cell."""
@@ -991,7 +1031,17 @@ class K2KRemoteApp(App):
             conn = "connecting…"
         else:
             conn = "connected" if self._connected else "disconnected"
-        paused = "  ·  ⏸ PAUSED" if (self._worker is not None and self._worker.paused) else ""
+        # One unified "⏸ PAUSED · <reason>" badge whether the freeze was manual, a
+        # disk op, or the automatic confirm-screen hold — all resumed with `p`.
+        if self._worker is not None and self._worker.danger:
+            state = "  ·  ⏸ PAUSED · confirm"      # auto-paused on a Yes/No prompt
+        elif self._worker is not None and self._worker.paused:
+            state = f"  ·  ⏸ PAUSED · {self._pause_reason}"
+        elif self._manual_refresh:
+            state = "  ·  manual refresh"
+        else:
+            state = ""
+        paused = state
         width = self._display_width()
         mirror = self._mode
         if self._mode == "blocks":
@@ -1206,10 +1256,23 @@ CONTROLS (your keyboard drives the K2000's front panel)
 
 WHY PAUSE MATTERS
   The K2000's CPU can be overwhelmed by MIDI traffic while it is busy — for
-  example during a SCSI Load or Save. k2kremote automatically pauses the mirror
-  when you press a soft key whose label is a heavy disk operation, and backs off
-  when the device stops answering. Press p to pause manually before anything
-  risky, and p again (or Ctrl+r) to resume.
+  example during a SCSI Load or Save, or while it rewrites its object table for a
+  delete. A screen poll landing in that window can LOCK UP the unit. k2kremote
+  guards against this several ways:
+    * it automatically pauses the mirror when you press a soft key whose label is
+      a heavy disk operation, and backs off when the device stops answering;
+    * it AUTO-PAUSES the mirror entirely (no MIDI at all) when a CONFIRMATION
+      prompt is on screen — a bare Yes/No soft-key pair, or the text "are you
+      sure" — because the next press commits the rewrite. Earlier idle screens
+      (the delete selection list, object menus) stay LIVE so you can navigate
+      them;
+    * --manual-refresh disables the periodic refresh entirely (the mirror then
+      updates only on front-panel events and Ctrl+r) — the strongest guard.
+  All of these show one "⏸ PAUSED · <reason>" badge (manual / disk op / confirm)
+  and all resume with p (the confirm pause also releases on Ctrl+r).
+  Best-effort caveat: the auto-pause must read the confirm screen BEFORE you press
+  Yes, so for guaranteed safety press p yourself before any delete/save — that
+  stops all MIDI regardless of what is on screen.
 
 SAFETY — USE AT YOUR OWN RISK
   This software is provided "as is", with NO WARRANTY and NO LIABILITY of any
@@ -1286,6 +1349,11 @@ def main(argv: Optional[List[str]] = None) -> None:
                       help="everything --alt-keys does, plus move the mode buttons "
                            "to the 'm' leader (press m, then p/s/q/m/i/d/g/e) — for "
                            "terminals that also grab the Alt+letter mode chords")
+    misc.add_argument("--manual-refresh", action="store_true",
+                      help="disable the periodic heartbeat entirely; refresh the "
+                           "mirror only on front-panel events and explicit Ctrl+r. "
+                           "Strongest guard against polling the K2000 during a "
+                           "delete/save (the heartbeat can lock up the unit there)")
     misc.add_argument("--demo", action="store_true",
                       help="run against a static synthetic frame with no MIDI — try "
                            "the UI and render modes without any hardware")
@@ -1302,7 +1370,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     app = K2KRemoteApp(bridge=bridge, demo=args.demo, model=args.model,
                        text_mode=args.text, settle=settle,
                        image_protocol=args.image_protocol, image_cols=args.image_cols,
-                       alt_keys=args.alt_keys, super_alt_keys=args.super_alt_keys)
+                       alt_keys=args.alt_keys, super_alt_keys=args.super_alt_keys,
+                       manual_refresh=args.manual_refresh)
     try:
         app.run()
     finally:

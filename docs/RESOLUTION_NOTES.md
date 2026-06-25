@@ -213,3 +213,72 @@ fully visible on the panel.) To make that visible, the tool colours any
 characters past the `NAME_MAX_LEN` (16) display field in **bold orange**
 (`_name_preview` / `_OVERFLOW_STYLE`) — both in the current-name preview and live
 in the hint as a new name is typed.
+
+## 9. Heartbeat locks up the K2000 during deletes — context-aware gating + manual mode
+
+**Root cause (verified live 2026-06-25, firmware 3.87J).** The ~2.5 s GETGRAPHICS
+**heartbeat** in `refresh.py` crashes the K2000 when it lands while the unit is
+inside a destructive critical section (delete / save rewriting its object table).
+Reproduces even when the operator drives the *front panel* directly — the
+background poll alone is enough; recovery needs ~2 factory-reset cycles. With
+k2kremote **not** running, every delete succeeds. This was the long-standing
+mpc2emu "delete lockup" wrongly blamed on the KRZ converter / bank corruption;
+the converter is exonerated. **Confirmation experiment:** launching paused
+(`p` → no outbound SysEx, ports still open) made both targeted deletes **and**
+*Delete Everything* clean, isolating the periodic poll (not the cable) as cause.
+See project memory `lockup-heartbeat-during-deletes`.
+
+**First attempt FAILED live 2026-06-25.** A v1 gate keyed on body-text markers
+RE'd from the *manual* (`Func:DELETE`, `Select database function:`, …) and merely
+deferred reads 1.5 s. Doing **Master → Delete → Bank 200…299** locked the unit up
+anyway: the badge never appeared because the real K2000 screens didn't match the
+guessed strings, and a poll fired into the rewrite. The actual flow is
+**"Delete Selection: 200…299 | … | Everything"** → OK → **"Are You sure? Yes | No"**
+→ rewrite. Lesson: guessed body strings are unreliable, and a *timed* deferral can
+still clip a long (bank / Everything) rewrite.
+
+**v2 (auto-pause on *every* destructive-context screen) was too aggressive.** It
+also froze the idle **"Delete Selection:"** range list — and since the list is
+~10–12 lines, navigating it cost a manual `Ctrl+r` per line (Jan: "up to 12
+refreshes"). Idle screens (the range list, object menus) are SAFE to poll — the
+K2000 isn't rewriting anything there — so freezing them buys no safety and wrecks
+usability.
+
+**Fix — current design (gate ONLY the commit prompt; synthetic, live verify
+pending):**
+
+1. **Auto-pause only on the confirmation prompt (always on).**
+   `is_destructive_screen()` flags **just the final commit step** — the screen
+   whose next press (Yes) starts the rewrite — via two signals: body text
+   `are you sure`, or a **structural bare Yes/No soft-key pair**. The mirror stays
+   **fully live everywhere else**, including the selection/range list and object
+   menus, so navigation is normal. OK/Cancel is *not* a trigger (it is the accept
+   button on the safe selection screen; only destructive commits use Yes/No).
+   On the confirm prompt the worker goes **fully quiescent (no heartbeat, no
+   settle, no inbound-PANEL read)**, exactly like a manual `p`; the press that
+   follows (Yes) and the rewrite then happen with zero outbound MIDI. It does
+   **not** time-resume — the user presses **`p`** or **`Ctrl+r`** once the K2000
+   has finished (both trigger a `force_refresh`, which reads even while paused and
+   lifts the hold only if the screen is now safe). **Unified pause UI:** manual
+   pause, the heavy-disk-op auto-pause, and this confirm auto-pause all show one
+   `⏸ PAUSED · <reason>` badge (manual / disk op / confirm) and all resume with
+   `p` — `action_pause` routes to `force_refresh` when `worker.danger` so it
+   doesn't stack a manual pause on top of the content-driven hold.
+2. **`--manual-refresh` (opt-in).** Passes `heartbeat=None` → no periodic poll at
+   all; the mirror updates only on front-panel events and explicit `Ctrl+r`.
+
+**Residual risk / limits.** The confirm prompt must be *read* before the operator
+presses Yes (the OK press that summons it normally triggers that read via the
+panel echo, beating human reaction; but with XMIT Buttons off it relies on the
+heartbeat, so a very fast Yes could still slip through). A destructive op that
+commits with **no Yes/No confirm** wouldn't be caught either. So **`p` pause
+before panel surgery remains the only guaranteed safety** (zero dependence on
+screen content); the auto-pause is best-effort. A planned follow-up (§ TODO) is
+**default-deny polling** — only poll on a recognised *safe* screen. Synthetic
+coverage in `tests/test_refresh.py`
+(`test_is_destructive_screen_flags_only_the_confirm_prompt`,
+`test_heartbeat_gated_off_on_destructive_screen`,
+`test_destructive_screen_auto_pauses_then_resumes_on_force_refresh`,
+`test_force_refresh_reads_while_auto_paused_but_request_refresh_does_not`,
+`test_manual_refresh_mode_skips_heartbeat_but_honours_events`).
+

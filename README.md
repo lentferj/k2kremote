@@ -277,6 +277,7 @@ prose manual (setup, terminals, controls, safety).
 | `--settle MS` | `350` | Delay after a keypress before reading the redrawn LCD. Lower = snappier; too low may read the screen mid-redraw. |
 | `--alt-keys` | off | Show terminal-safe key alternates (`a`–`h` soft keys, `Ctrl+e/x/n/v/g`) in the legend and soft-key bar — for terminals that intercept the F-keys (Alt-chords stay). |
 | `--super-alt-keys` | off | Everything `--alt-keys` does, plus move the mode buttons to the `m` leader (press `m`, then `p/s/q/m/i/d/g/e`) — for terminals that also grab the `Alt+letter` mode chords. |
+| `--manual-refresh` | off | Disable the periodic heartbeat entirely; refresh only on front-panel events and `Ctrl+r`. The strongest guard against polling the K2000 during a delete/save (a poll landing mid-rewrite can lock up the unit). |
 | `--demo` | off | Run against a static synthetic frame with no MIDI — try the UI and render modes without any hardware. |
 | `--long-help` | — | Print the full prose user manual and exit. |
 | `-h, --help` | — | Print the option summary and exit. |
@@ -324,15 +325,24 @@ they mirror the K2000's own soft-key row for the current page.
 | `F12` | Save the current screen as a PNG (`k2kremote-<timestamp>.png`) |
 | `Alt+x` | **Panic** — MIDI all-notes-off on all 16 channels |
 | `Alt+End` | In a name dialog: jump the cursor to the end of the name |
-| `p` | **Pause** the mirror (no MIDI traffic) — do this before SCSI load/save |
-| `Ctrl+r` | **Force** a full screen refresh now (works even while paused) |
+| `p` | **Pause / resume** the mirror (no MIDI traffic) — the universal resume key: lifts a manual, disk-op, or confirm-screen pause |
+| `Ctrl+r` | **Force** a full screen refresh now (works even while paused; also releases a confirm-screen pause) |
 | `Ctrl+c` | Quit |
 
-> **⚠ Disk operations.** The K2000's CPU can crash under MIDI traffic while it is
-> busy (e.g. a SCSI **Load**/**Save**). k2kremote **auto-pauses** the mirror when
-> you press a soft key whose label is a heavy op (Load/Save/Move/Format/…), so no
-> poll follows it — press **`p`** to resume once the K2000 finishes. You can also
-> pause manually before anything risky.
+> **⚠ Disk & delete operations.** The K2000's CPU can crash under MIDI traffic
+> while it is busy — a SCSI **Load**/**Save**, or rewriting its object table for a
+> **delete**. A screen poll landing in that window can **lock up** the unit (needs
+> a factory reset to clear). Guards: (1) k2kremote **auto-pauses** when you press a
+> soft key whose label is a heavy op (Load/Save/Move/Format/…); (2) it **auto-pauses
+> the mirror entirely** when a **confirmation prompt** is on screen — a bare
+> **Yes/No** pair, or text "are you sure" — since the next press commits the
+> rewrite; earlier idle screens (the delete *selection* list, object menus) stay
+> live so you can navigate them; (3) **`--manual-refresh`** drops the periodic poll
+> entirely. All three show one **`⏸ PAUSED · <reason>`** badge (manual / disk op /
+> confirm) and all resume with **`p`** (the confirm pause also releases on
+> `Ctrl+r`). **Best-effort caveat:** the auto-pause depends on reading the confirm
+> screen *before* you press Yes, so for guaranteed safety press **`p`** yourself
+> before any delete/save — that stops all MIDI regardless of what's on screen.
 
 ### If your terminal eats F-keys
 
