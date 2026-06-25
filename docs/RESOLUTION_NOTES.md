@@ -301,15 +301,53 @@ rename tool. Three functions (the ones that map to a single K2000 SysEx):
   every object type whose ID is in that 100-id range — `delete_bank(None, bank)`.
   (This is by ID range, NOT a dependency walk; "delete program + dependents" is a
   different, non-bank-scoped operation with no single SysEx.)
-* **Delete EVERYTHING** → `DelBank` with `type` = 0 **and bank = 127** = every RAM
-  object of every type, all banks (the SysEx equivalent of the LCD's "Everything")
-  — `delete_bank(None, 127)`. No type/bank field; double-confirm only.
+* **Delete all objects** (labelled "Delete all objects (Program RAM)") → `DelBank`
+  with `type` = 0 **and bank = 127** = every object of every type, all banks
+  — `delete_bank(None, 127)`. No type/bank field; double-confirm only. **Does NOT
+  reclaim sample RAM** — see the sample-RAM caveat below.
 
-`DelBank` is **not acknowledged** by the K2000 (verified live 2026-06-25 — the bank
-is wiped but no INFO returns), so `delete_bank` uses a short grace wait and **treats
-the timeout as success** (returns `None`); otherwise it surfaced a misleading "no
-response" error. The "Everything" `type` = 0 has no `ObjectType` enum member, so a
-tiny `.value == 0` stand-in (`_ALL_OBJECT_TYPES`) supplies it for encoding.
+`DelBank` returns **no INFO** (verified live 2026-06-25 — the bank is wiped but no
+INFO comes back), so `delete_bank` uses a short grace wait and **treats the timeout
+as success** (returns `None`); otherwise it surfaced a misleading "no response"
+error. The "Everything" `type` = 0 has no `ObjectType` enum member, so a tiny
+`.value == 0` stand-in (`_ALL_OBJECT_TYPES`) supplies it for encoding.
+
+**ENDOFBANK decode crash on "Delete all objects" — FIXED (verified live 2026-06-26).**
+The all-types/Everything delete (`type` 0) is in fact *acknowledged*: the K2000
+replies with an **ENDOFBANK** (0x0D) whose `type` field is **0** ("all object
+types"). Decoding that as `ObjectType(0)` raised (`0 is not a valid ObjectType`),
+which `_send_and_receive` re-raised after the grace loop — surfacing as
+`Failed to decode 9-byte packet as 'EndOfBank' message` (a `ValueError`, not the
+`TimeoutError` `delete_bank` was catching). Fix: `_decode_object_type()` in
+`k2000/messages.py` maps a `type`-0 field to `None` ("all types") for `EndOfBank`,
+`DelBank`, and `MoveBank`, so the reply decodes; it isn't an `Info`, so the grace
+wait still times out → success. Regression:
+`test_delete_everything_endofbank_reply_is_not_a_crash`.
+
+### Sample RAM is NOT reclaimed by `DelBank` — power-cycle or a front-panel "Everything" delete (verified live 2026-06-26)
+
+The K2000 has **two memory pools** (manual ch. 27): battery-backed **Program RAM**
+(programs, keymaps, setups, and *sample objects* — type 134 "Soundblock", the
+header carrying Start/Alt/Loop/End + MISC params) and volatile **Sample RAM** (the
+raw audio of loaded RAM samples). The F11 "Delete all objects" `DelBank` clears
+Program RAM, so the sample objects vanish from both the object DB and Master →
+Sample (only ROM remains) — **but the sample-RAM allocator is not told to release
+those blocks**, so free Sample RAM is unchanged ("a few KB", as before). With the
+referencing objects already gone, the bytes are **orphaned** (resident but
+unreachable). `DelBank` is a blunt object-table wipe; it skips the sample-RAM
+reclamation that the firmware's own delete path runs.
+
+**Recovery (no save needed):**
+* A front-panel **Master → Object → Delete → Everything** afterwards **does**
+  reclaim the orphaned sample RAM — free RAM is reported correctly again, and it's
+  **fast** (verified live 2026-06-26). The firmware's Delete-Objects path runs the
+  sample-RAM GC even when the objects are already gone.
+* Or **power-cycle** the K2000 — Sample RAM is volatile, so it clears entirely.
+
+There is **no SysEx that reclaims sample RAM** (DELBANK doesn't; no documented
+alternative), so the app cannot do it over MIDI. The F11 confirm, the field
+placeholder, and the help text all warn that "Delete all objects" frees Program
+RAM only and leaves sample RAM for a front-panel delete or a power-cycle.
 
 "Copy" is intentionally absent (no single SysEx for it); "Name" is the Ctrl+O tool.
 
@@ -328,12 +366,15 @@ Synthetic coverage: `test_delete_object_sends_del`,
 `test_delete_bank_sends_delbank_for_one_type`,
 `test_delete_bank_treats_missing_ack_as_success`,
 `test_delete_everything_uses_type_zero_bank_127`,
+`test_delete_everything_endofbank_reply_is_not_a_crash`,
 `test_delete_bank_all_types_sends_type_zero` (bridge);
 `test_device_op_runs_on_worker_thread_even_while_paused`,
 `test_device_op_reports_errors_without_killing_the_worker` (worker);
 `test_master_tool_two_step_confirm_and_autopause` (app).
 
-**Verified live 2026-06-25:** a bank delete works and `DelBank` is **not** ACKed
-(now handled). **Still unverified:** that `Del` (single object) *does* reply as the
-protocol claims; whether a `Change`-move needs a panel reselect to repaint; and the
-real "Delete EVERYTHING" (`type` 0 / `bank` 127) on hardware.
+**Verified live 2026-06-25 / -26:** a bank delete works; one-type `DelBank` returns
+no INFO; the all-types/Everything delete replies with ENDOFBANK `type` 0 (decode
+crash now fixed); and "Delete all objects" frees Program RAM but orphans sample RAM,
+recovered by a front-panel "Everything" delete or a power-cycle. **Still
+unverified:** that `Del` (single object) *does* reply as the protocol claims, and
+whether a `Change`-move needs a panel reselect to repaint.

@@ -491,7 +491,7 @@ _MASTER_FUNCTIONS = [
     ("Move/relocate object", "move"),
     ("Delete bank — one type", "delete_bank"),
     ("Delete bank — all types", "delete_bank_all"),
-    ("Delete EVERYTHING (all RAM)", "delete_all"),
+    ("Delete all objects (Program RAM)", "delete_all"),
 ]
 
 
@@ -504,7 +504,11 @@ class MasterFunctionScreen(ModalScreen):
     menu flow that can lock it up. These are **destructive**: a two-step Enter
     confirms the fire, and the app auto-pauses the mirror around the op (resume
     with ``p``). **Move** overwrites whatever sits at the destination id; **Delete
-    bank** wipes a whole 100-id bank. See ``docs/RESOLUTION_NOTES.md`` §10.
+    bank** wipes a whole 100-id bank. **Delete all objects** clears every
+    Program-RAM object but DELBANK does *not* reclaim sample RAM — any loaded RAM
+    samples are orphaned (gone from the object DB, but the bytes stay resident)
+    until a front-panel Master → Delete → Everything (fast) or a K2000 power-cycle.
+    See ``docs/RESOLUTION_NOTES.md`` §10.
     """
 
     BINDINGS = [("escape", "close", "Close")]
@@ -561,15 +565,16 @@ class MasterFunctionScreen(ModalScreen):
         newid.display = func == "move"
         # The type applies to delete/move and to a one-type bank delete (DELBANK is
         # type-scoped — verified live: deleting "Program" bank 3 left keymaps and
-        # samples intact). The all-types bank delete and "Delete EVERYTHING" ignore
+        # samples intact). The all-types bank delete and "Delete all objects" ignore
         # it (they send DELBANK type 0 = all object types).
         self.query_one("#mastertype", Select).display = func in (
             "delete", "move", "delete_bank")
         # The target field stays visible for every function: a bank number for the
-        # bank deletes, an object id for delete/move, and (for Delete EVERYTHING) the
-        # Enter-trigger for the confirm.
+        # bank deletes, an object id for delete/move, and (for Delete all objects)
+        # the Enter-trigger for the confirm.
         if func == "delete_all":
-            target.placeholder = "press Enter, then Enter again, to wipe ALL RAM"
+            target.placeholder = ("press Enter twice to delete every Program-RAM "
+                                  "object (sample RAM needs a power-cycle)")
         elif func == "delete_bank":
             target.placeholder = "bank 0-9 (the 200s bank = 2)"
         elif func == "delete_bank_all":
@@ -626,9 +631,15 @@ class MasterFunctionScreen(ModalScreen):
         """Build the op from the fields, then require a second Enter before firing."""
         func, t = self._func(), self._type()
         if func == "delete_all":
-            # type 0 + bank 127 = every RAM object (no id/bank to enter).
-            self._confirm_or_fire("DELETE EVERYTHING — ALL RAM objects!",
-                                  lambda b: b.delete_bank(None, 127))
+            # type 0 + bank 127 = every Program-RAM object (no id/bank to enter).
+            # DELBANK frees Program RAM only; it orphans (does NOT reclaim) any
+            # loaded sample RAM. Reclaim that with a front-panel Master → Object →
+            # Delete → Everything (fast), or a K2000 power-cycle. See §10.
+            self._confirm_or_fire(
+                "DELETE ALL objects — frees Program RAM only; loaded sample RAM "
+                "stays (reclaim via front-panel Master→Delete→Everything, or "
+                "power-cycle)",
+                lambda b: b.delete_bank(None, 127))
             return
         target = self.query_one("#mastertarget", Input).value
         if not target:
@@ -1461,7 +1472,10 @@ CONTROLS (your keyboard drives the K2000's front panel)
                    front-panel menu that can lock the unit up): delete an object;
                    move/relocate an object (OVERWRITES the destination id); delete
                    one type's bank (e.g. all Programs in the 300s); delete every
-                   type in one bank; or delete EVERYTHING (all RAM, all banks).
+                   type in one bank; or delete all objects (all Program-RAM banks
+                   — frees Program RAM only; DELBANK does not reclaim loaded sample
+                   RAM, so reclaim that with a front-panel Master→Delete→Everything
+                   or a K2000 power-cycle).
                    Destructive: two-step Enter confirm + the mirror auto-pauses
                    around the op (resume with p). (Not Ctrl+M — terminals send that
                    as Enter; --alt-keys offers Ctrl+u.)
