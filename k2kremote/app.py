@@ -484,6 +484,205 @@ class RenameObjectScreen(ModalScreen):
         self.app.rename_apply(self._type(), int(idno), new_name, done)
 
 
+# The Master object-utility functions the F11 tool offers (label, key). "Copy" has
+# no single SysEx on the K2000, so it is not offered; "Name" is the Ctrl+O tool.
+_MASTER_FUNCTIONS = [
+    ("Delete object", "delete"),
+    ("Move/relocate object", "move"),
+    ("Delete bank — one type", "delete_bank"),
+    ("Delete bank — all types", "delete_bank_all"),
+    ("Delete EVERYTHING (all RAM)", "delete_all"),
+]
+
+
+class MasterFunctionScreen(ModalScreen):
+    """Standalone Master object-utility tool — fires one SysEx, bypassing the LCD.
+
+    Pick a function (Delete / Move / Delete bank), an object type and an id (or
+    bank), and it is done with a single SysEx (DEL 0x07 / CHANGE 0x08 / DELBANK
+    0x0E) — no front-panel navigation, so it never drives the K2000 through the
+    menu flow that can lock it up. These are **destructive**: a two-step Enter
+    confirms the fire, and the app auto-pauses the mirror around the op (resume
+    with ``p``). **Move** overwrites whatever sits at the destination id; **Delete
+    bank** wipes a whole 100-id bank. See ``docs/RESOLUTION_NOTES.md`` §10.
+    """
+
+    BINDINGS = [("escape", "close", "Close")]
+
+    CSS = """
+    MasterFunctionScreen { align: center middle; }
+    #masterbox { width: 64; height: auto; padding: 1 2; border: round $error;
+                 background: $surface; }
+    #mastertitle { text-style: bold; }
+    #mastercurrent { color: $text-muted; }
+    #masterhint { color: $text-muted; }
+    """
+
+    _armed = False  # set True after the first Enter; second Enter fires
+
+    def compose(self) -> ComposeResult:
+        with Container(id="masterbox"):
+            yield Static("Master functions — SysEx (bypasses the LCD)", id="mastertitle")
+            yield Select(_MASTER_FUNCTIONS, value="delete", allow_blank=False,
+                         id="masterfunc")
+            yield Select(_RENAMEABLE_TYPES, value=ObjectType.Program,
+                         allow_blank=False, id="mastertype")
+            yield Input(placeholder="object id (e.g. 201)", id="mastertarget",
+                        restrict=r"[0-9]*")
+            yield Input(placeholder="new id (move only)", id="masternewid",
+                        restrict=r"[0-9]*")
+            yield Static("", id="mastercurrent")
+            yield Static("Esc to close", id="masterhint")
+
+    def on_mount(self) -> None:
+        self._sync_fields()
+
+    def _func(self) -> str:
+        return self.query_one("#masterfunc", Select).value
+
+    def _type(self) -> ObjectType:
+        return self.query_one("#mastertype", Select).value
+
+    def _set_current(self, text: str) -> None:
+        self.query_one("#mastercurrent", Static).update(text)
+
+    def _reset_hint(self) -> None:
+        self._armed = False
+        self.query_one("#masterhint", Static).update("Esc to close")
+
+    def action_close(self) -> None:
+        self.dismiss()
+
+    def _sync_fields(self) -> None:
+        """Adapt the inputs to the chosen function (id vs bank; show newid for move)."""
+        func = self._func()
+        target = self.query_one("#mastertarget", Input)
+        newid = self.query_one("#masternewid", Input)
+        newid.display = func == "move"
+        # The type applies to delete/move and to a one-type bank delete (DELBANK is
+        # type-scoped — verified live: deleting "Program" bank 3 left keymaps and
+        # samples intact). The all-types bank delete and "Delete EVERYTHING" ignore
+        # it (they send DELBANK type 0 = all object types).
+        self.query_one("#mastertype", Select).display = func in (
+            "delete", "move", "delete_bank")
+        # The target field stays visible for every function: a bank number for the
+        # bank deletes, an object id for delete/move, and (for Delete EVERYTHING) the
+        # Enter-trigger for the confirm.
+        if func == "delete_all":
+            target.placeholder = "press Enter, then Enter again, to wipe ALL RAM"
+        elif func == "delete_bank":
+            target.placeholder = "bank 0-9 (the 200s bank = 2)"
+        elif func == "delete_bank_all":
+            target.placeholder = "bank 0-9 — deletes EVERY type in it"
+        elif func == "move":
+            target.placeholder = "object id to move (e.g. 201)"
+        else:
+            target.placeholder = "object id to delete (e.g. 201)"
+        self._reset_hint()
+        self._lookup()
+
+    def on_select_changed(self, event) -> None:
+        event.stop()
+        self._sync_fields()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._reset_hint()  # any edit disarms the pending confirmation
+        if event.input.id == "mastertarget":
+            self._lookup()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        # Move needs a destination: Enter on the id field advances to newid.
+        if event.input.id == "mastertarget" and self._func() == "move":
+            self.set_focus(self.query_one("#masternewid", Input))
+            return
+        self._attempt()
+
+    def on_descendant_blur(self, event) -> None:
+        if getattr(event.widget, "id", None) == "mastertarget":
+            self._lookup()
+
+    def _lookup(self) -> None:
+        """Preview the target object's current name (only for single-object ops)."""
+        if self._func() not in ("delete", "move"):
+            self._set_current("")
+            return
+        try:
+            idno = self.query_one("#mastertarget", Input).value
+        except Exception:  # screen torn down
+            return
+        if not idno:
+            self._set_current("")
+            return
+        self._set_current("looking up…")
+
+        def done(name, error):  # runs on the UI thread (app marshals it)
+            self._set_current(f"current name: {name!r}" if error is None
+                              else f"lookup failed: {error}")
+
+        self.app.rename_lookup(self._type(), int(idno), done)
+
+    def _attempt(self) -> None:
+        """Build the op from the fields, then require a second Enter before firing."""
+        func, t = self._func(), self._type()
+        if func == "delete_all":
+            # type 0 + bank 127 = every RAM object (no id/bank to enter).
+            self._confirm_or_fire("DELETE EVERYTHING — ALL RAM objects!",
+                                  lambda b: b.delete_bank(None, 127))
+            return
+        target = self.query_one("#mastertarget", Input).value
+        if not target:
+            self._set_current("enter a bank 0-9"
+                              if func in ("delete_bank", "delete_bank_all")
+                              else "enter an id")
+            return
+        if func == "delete":
+            summary = f"DELETE {t.name} {target}"
+            thunk = lambda b, t=t, i=int(target): b.delete_object(t, i)
+        elif func == "move":
+            newid = self.query_one("#masternewid", Input).value
+            if not newid:
+                self._set_current("enter a destination id")
+                return
+            summary = f"MOVE {t.name} {target} → {newid}  (overwrites id {newid})"
+            thunk = lambda b, t=t, i=int(target), n=int(newid): b.move_object(t, i, n)
+        elif func == "delete_bank":  # one type's bank (DELBANK is type-scoped)
+            bank = int(target)
+            if not 0 <= bank <= 9:
+                self._set_current("bank must be 0-9")
+                return
+            summary = f"DELETE all {t.name} in bank {bank} ({bank}00-{bank}99)"
+            thunk = lambda b, t=t, k=bank: b.delete_bank(t, k)
+        else:  # delete_bank_all — every object type in the bank (DELBANK type 0)
+            bank = int(target)
+            if not 0 <= bank <= 9:
+                self._set_current("bank must be 0-9")
+                return
+            summary = (f"DELETE EVERY type in bank {bank} "
+                       f"({bank}00-{bank}99 — Programs, Keymaps, Samples, …)")
+            thunk = lambda b, k=bank: b.delete_bank(None, k)
+        self._confirm_or_fire(summary, thunk)
+
+    def _confirm_or_fire(self, summary: str, thunk) -> None:
+        """First call arms (shows the ⚠ summary); the second actually fires it."""
+        if not self._armed:
+            self._armed = True
+            self.query_one("#masterhint", Static).update(
+                f"⚠ {summary} — press Enter again to FIRE, Esc to cancel")
+            return
+
+        def done(info, error):  # runs on the UI thread (app marshals it)
+            if error is None:
+                self.app._set_status(
+                    f" {summary} — done; mirror PAUSED, press p to resume")
+                self.dismiss()
+            else:
+                self._reset_hint()
+                self._set_current(f"failed: {error}")
+
+        self.app.master_apply(summary, thunk, done)
+
+
 class K2KRemoteApp(App):
     """The k2kremote terminal UI."""
 
@@ -514,9 +713,13 @@ class K2KRemoteApp(App):
         ("p", "pause", "Pause mirror"),
         ("ctrl+r", "refresh", "Force refresh"),
         ("ctrl+o", "rename_object", "Rename object"),
+        # F11 (not Ctrl+M — terminals send that as Enter) opens the Master object
+        # utilities tool (delete / move / delete-bank via one SysEx).
+        ("f11", "master_functions", "Master functions"),
         # Terminal-safe alternates for the app F-keys (F-keys may be intercepted).
         ("ctrl+n", "name_entry", "Name entry"),
         ("ctrl+v", "toggle_text", "View mode"),
+        ("ctrl+u", "master_functions", "Master functions"),
         ("ctrl+g", "screenshot", "Save PNG (grab)"),
     ]
 
@@ -797,6 +1000,27 @@ class K2KRemoteApp(App):
             return
         self._worker.rename(
             obj_type, idno, name, lambda n, e: self.call_from_thread(on_result, n, e))
+
+    # -- standalone Master object-utility tool (delete/move/delete-bank SysEx) -
+    def action_master_functions(self) -> None:
+        """Open the Master functions tool (delete / move / delete-bank via SysEx)."""
+        self.push_screen(MasterFunctionScreen())
+
+    def master_apply(self, summary: str, thunk, on_result) -> None:
+        """Fire a destructive Master op, auto-pausing the mirror around it.
+
+        The op rewrites the object database, so we pause first (no heartbeat/settle
+        follows) and leave the mirror paused — the user resumes with ``p`` once the
+        K2000 has finished. ``on_result(info, error)`` always runs on the UI thread.
+        """
+        if self._worker is None:
+            on_result(None, "no device connected")
+            return
+        self._pause_reason = "master op"
+        self._worker.set_paused(True)
+        self.query_one("#titlebar", Static).update(self._titlebar_text())
+        self._worker.device_op(
+            thunk, lambda r, e: self.call_from_thread(on_result, r, e))
 
     def action_refresh(self) -> None:
         """Force an immediate full screen refresh (works even while paused)."""
@@ -1233,15 +1457,25 @@ CONTROLS (your keyboard drives the K2000's front panel)
                    current name, type a new one, and it is set with a single SysEx
                    message. Characters past the 16-char display field are shown in
                    orange (stored, but not visible on the panel).
+  F11              "Master functions" tool, each via ONE SysEx (bypassing the
+                   front-panel menu that can lock the unit up): delete an object;
+                   move/relocate an object (OVERWRITES the destination id); delete
+                   one type's bank (e.g. all Programs in the 300s); delete every
+                   type in one bank; or delete EVERYTHING (all RAM, all banks).
+                   Destructive: two-step Enter confirm + the mirror auto-pauses
+                   around the op (resume with p). (Not Ctrl+M — terminals send that
+                   as Enter; --alt-keys offers Ctrl+u.)
   F10              Cycle render mode.       (alternate: Ctrl+v)
   F12              Save the current screen as a PNG.   (alternate: Ctrl+g)
   Alt+x            PANIC — MIDI all-notes-off on all 16 channels.
-  p                Pause the mirror (stop all MIDI traffic).
-  Ctrl+r           Force an immediate full refresh (works even while paused).
+  p                Pause / resume the mirror (stop all MIDI traffic). Universal
+                   resume: lifts a manual, disk-op, or confirm-screen pause.
+  Ctrl+r           Force an immediate full refresh (works even while paused; also
+                   releases a confirm-screen auto-pause).
   Ctrl+c           Quit.
 
-  Destructive object commands (delete object / delete bank / move bank) are
-  deliberately NOT bound to any key.
+  Destructive object commands are not on the ordinary keys — they live only behind
+  the F11 "Master functions" tool, gated by a two-step confirm and an auto-pause.
 
   If your terminal steals keys, two options remap the hints (and the keys you
   press) to plain alternates, and the on-screen hints update to match:

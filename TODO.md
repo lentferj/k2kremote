@@ -115,3 +115,28 @@ Safer: only fire the heartbeat when the screen matches a recognised **safe** lay
 (e.g. Program/Setup play screens), so an unrecognised screen means "don't poll".
 Needs RE of the safe-screen signatures. See RESOLUTION_NOTES §9.
 
+## Master functions tool (F11) — SysEx delete/move/delete-bank, needs live verify
+
+**Status:** implemented; **bank delete verified live 2026-06-25** (works; `DelBank`
+sends no ACK — now handled by treating the timeout as success; and DELBANK is
+**type-scoped** — `DelBank(Program,3)`/`DelBank(Sample,3)` each deleted only that
+type in the 300s). Five functions: delete object, move/relocate, delete one type's
+bank, **delete all types in one bank** (`DelBank` type 0 + bank N), and **Delete
+EVERYTHING** (type 0 / bank 127). Stack: `bridge.{delete_object,move_object,delete_bank}` →
+`worker.device_op` → `master_apply` (auto-pauses the mirror). **Still to verify on
+hardware:** (1) does `DelBank` with **type 0** actually delete *all* types (tiers 2
+& 3)? — only the type-scoped tier 1 is confirmed so far; (2) Delete object — does
+`Del` reply with INFO as the protocol claims (if not, give it the same no-ACK
+treatment as `DelBank`)? (3) Move — does `Change` with a new id repaint without a
+panel reselect (rename needed one)? Test against scratch objects with a full backup.
+See RESOLUTION_NOTES §10.
+
+## "Delete object with dependents" (F11) — not planned
+
+**Status:** open, **low priority / high effort / low gain / error-prone.** `Del`
+(0x07) has no recurse flag (only `type`+`idno`), and `Info` exposes no dependent
+list, so a "delete a Program and the keymaps/samples it uses" option would mean
+RE'ing the object structures (`Dump`/`Read` a Program, parse referenced Keymap IDs,
+then each Keymap's Sample IDs — dependents usually live in other banks). That is a
+lot of fragile reverse-engineering for a case the front-panel menu already covers,
+so it is deliberately **not** built. Revisit only if a real need appears.

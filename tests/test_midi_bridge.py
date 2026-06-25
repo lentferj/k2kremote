@@ -262,6 +262,111 @@ def test_rename_rejects_non_ascii():
         bridge.rename(ObjectType.Program, 300, "Café")
 
 
+def _capturing_bridge(captured, *, name="OBJ", idno_from="idno", timeout=0.5):
+    """A MidiBridge whose _send_and_receive round-trips the wire bytes and returns
+    a plausible INFO, recording the decoded message + the timeout it was sent with."""
+    from k2000.messages import Info, SysexMessage
+
+    def fake_send_and_receive(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        captured["msg"] = decoded
+        captured["timeout"] = timeout
+        idno = getattr(decoded, idno_from, 0)
+        return Info(decoded.type, idno, 0, True, name)
+
+    return MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                      "stub", timeout=timeout)
+
+
+def test_delete_object_sends_del():
+    from k2000.definitions import ObjectType
+    from k2000.messages import Del
+
+    captured = {}
+    bridge = _capturing_bridge(captured, name="DOOMED")
+    info = bridge.delete_object(ObjectType.Program, 201)
+
+    msg = captured["msg"]
+    assert isinstance(msg, Del)
+    assert msg.type is ObjectType.Program and msg.idno == 201
+    assert info.name == "DOOMED"          # device-confirmed deleted object
+
+
+def test_move_object_sends_change_with_newid_and_empty_name():
+    from k2000.definitions import ObjectType
+    from k2000.messages import Change
+
+    captured = {}
+    bridge = _capturing_bridge(captured, idno_from="newid", name="MOVED")
+    bridge.move_object(ObjectType.Program, 201, 305)
+
+    msg = captured["msg"]
+    assert isinstance(msg, Change)
+    assert msg.idno == 201 and msg.newid == 305   # relocates to the new id
+    assert msg.name == ""                          # name left unchanged
+
+
+def test_delete_bank_sends_delbank_for_one_type():
+    from k2000.definitions import ObjectType
+    from k2000.messages import DelBank
+
+    captured = {}
+    bridge = _capturing_bridge(captured, timeout=0.5)
+    bridge.delete_bank(ObjectType.Program, 2)   # wipe one type's bank
+
+    msg = captured["msg"]
+    assert isinstance(msg, DelBank)
+    assert msg.type is ObjectType.Program and msg.bank == 2
+
+
+def test_delete_bank_treats_missing_ack_as_success():
+    # The K2000 does not acknowledge DELBANK (verified live): a timeout must be
+    # swallowed and reported as success, not surfaced as "no response".
+    def fake(message, timeout):
+        raise TimeoutError("no reply")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)
+    assert bridge.delete_bank(None, 2) is None        # no exception, returns None
+
+
+def test_delete_everything_uses_type_zero_bank_127():
+    from k2000.messages import DelBank, Info
+    from k2000.definitions import ObjectType
+
+    captured = {}
+
+    def fake(message, timeout):
+        captured["msg"] = message
+        return Info(ObjectType.Program, 0, 0, True, "")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)
+    bridge.delete_bank(None, 127)   # the "Everything" nuke
+
+    msg = captured["msg"]
+    assert isinstance(msg, DelBank)
+    assert msg.type.value == 0 and msg.bank == 127
+
+
+def test_delete_bank_all_types_sends_type_zero():
+    from k2000.definitions import ObjectType
+    from k2000.messages import DelBank, Info
+
+    captured = {}
+
+    def fake(message, timeout):
+        captured["msg"] = message  # raw (an all-types DELBANK can't round-trip
+        captured["timeout"] = timeout  # decode — ObjectType(0) is not a member)
+        return Info(ObjectType.Program, 0, 0, True, "")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)
+    bridge.delete_bank(None, 2)   # obj_type=None -> all object types in the bank
+
+    msg = captured["msg"]
+    assert isinstance(msg, DelBank)
+    assert msg.type.value == 0    # the protocol's "all object types" selector
+    assert msg.bank == 2
+
+
 def test_object_name_reads_dir():
     from k2000.definitions import ObjectType
 

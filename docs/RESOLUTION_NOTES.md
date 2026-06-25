@@ -282,3 +282,58 @@ coverage in `tests/test_refresh.py`
 `test_force_refresh_reads_while_auto_paused_but_request_refresh_does_not`,
 `test_manual_refresh_mode_skips_heartbeat_but_honours_events`).
 
+## 10. Master object utilities via SysEx — the F11 tool (bypasses the LCD)
+
+A standalone alternative to driving the K2000's Master → Object menu flow (the
+flow that can lock the unit up, see §9): fire the destructive op as **one SysEx**
+straight at the object database, no front-panel navigation. Modelled on the §8
+rename tool. Three functions (the ones that map to a single K2000 SysEx):
+
+* **Delete object** → `Del` (0x07) — `MidiBridge.delete_object`.
+* **Move/relocate object** → `Change` (0x08) with an **empty name** (name
+  unchanged) and a non-zero `newid` — `MidiBridge.move_object`. **Destructive at
+  the destination:** the protocol deletes whatever already sits at `newid`.
+* **Delete bank — one type** → `DelBank` (0x0E), **type-scoped** — wipes only the
+  chosen type's 100-id bank. Verified live 2026-06-25: `DelBank(Program, 3)` deleted
+  only programs in the 300s (keymaps/samples intact), same for `DelBank(Sample, 3)`.
+  Type dropdown applies — `MidiBridge.delete_bank(obj_type, bank)`.
+* **Delete bank — all types** → `DelBank` with `type` = 0 and a specific bank =
+  every object type whose ID is in that 100-id range — `delete_bank(None, bank)`.
+  (This is by ID range, NOT a dependency walk; "delete program + dependents" is a
+  different, non-bank-scoped operation with no single SysEx.)
+* **Delete EVERYTHING** → `DelBank` with `type` = 0 **and bank = 127** = every RAM
+  object of every type, all banks (the SysEx equivalent of the LCD's "Everything")
+  — `delete_bank(None, 127)`. No type/bank field; double-confirm only.
+
+`DelBank` is **not acknowledged** by the K2000 (verified live 2026-06-25 — the bank
+is wiped but no INFO returns), so `delete_bank` uses a short grace wait and **treats
+the timeout as success** (returns `None`); otherwise it surfaced a misleading "no
+response" error. The "Everything" `type` = 0 has no `ObjectType` enum member, so a
+tiny `.value == 0` stand-in (`_ALL_OBJECT_TYPES`) supplies it for encoding.
+
+"Copy" is intentionally absent (no single SysEx for it); "Name" is the Ctrl+O tool.
+
+**Stack.** `MidiBridge.{delete_object,move_object,delete_bank}` → a generic
+`RefreshWorker.device_op(fn, on_result)` that runs `fn(bridge)` on the worker
+thread (so no heartbeat can interleave the blocking send) and never schedules a
+follow-up refresh → `K2KRemoteApp.master_apply`, which **pauses the mirror first**
+(reason "master op", unified `⏸ PAUSED` badge) and leaves it paused so no read
+lands during any rewrite; the user resumes with `p`. UI is `MasterFunctionScreen`
+(F11): function + type + id (or bank), a `DIR` name preview, and a **two-step
+Enter confirm** ("⚠ … press Enter again to FIRE"). Bound to **F11**, NOT Ctrl+M —
+terminals deliver Ctrl+M as Enter (a device key).
+
+Synthetic coverage: `test_delete_object_sends_del`,
+`test_move_object_sends_change_with_newid_and_empty_name`,
+`test_delete_bank_sends_delbank_for_one_type`,
+`test_delete_bank_treats_missing_ack_as_success`,
+`test_delete_everything_uses_type_zero_bank_127`,
+`test_delete_bank_all_types_sends_type_zero` (bridge);
+`test_device_op_runs_on_worker_thread_even_while_paused`,
+`test_device_op_reports_errors_without_killing_the_worker` (worker);
+`test_master_tool_two_step_confirm_and_autopause` (app).
+
+**Verified live 2026-06-25:** a bank delete works and `DelBank` is **not** ACKed
+(now handled). **Still unverified:** that `Del` (single object) *does* reply as the
+protocol claims; whether a `Change`-move needs a panel reselect to repaint; and the
+real "Delete EVERYTHING" (`type` 0 / `bank` 127) on hardware.

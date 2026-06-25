@@ -63,7 +63,7 @@ import rtmidi  # noqa: E402
 
 from k2000.client import K2000Client  # noqa: E402
 from k2000.definitions import Button, ButtonEventType, ObjectType  # noqa: E402
-from k2000.messages import ButtonEvent, Change, Panel  # noqa: E402
+from k2000.messages import ButtonEvent, Change, Del, DelBank, Panel  # noqa: E402
 
 # --- defaults (RE'd values; see module docstring) ---------------------------
 # The RE'd hard floor is ~120 ms, but for unattended / overnight hardware runs
@@ -556,6 +556,50 @@ class MidiBridge:
     def object_name(self, obj_type: ObjectType, idno: int) -> str:
         """Current name of an object (DIR → INFO) — the rename tool's preview."""
         return self.client.dir(obj_type, idno).name
+
+    # DELBANK's "all object types" selector: the protocol's type field = 0. No
+    # ObjectType enum member has value 0, so a tiny stand-in supplies `.value`
+    # (the message only reads `type.value` when encoding).
+    _ALL_OBJECT_TYPES = type("_AllObjectTypes", (), {"value": 0})()
+
+    # -- Master object utilities (single SysEx, bypassing the LCD menu) -------
+    # These rewrite the object database directly, so the K2000 menu flow that can
+    # lock the unit up is bypassed entirely. They are destructive; callers must
+    # pause the mirror around them (the worker is single-threaded, so no heartbeat
+    # can interleave the blocking send, and the app stays paused afterwards). Each
+    # returns the device's INFO reply describing the affected object.
+    def delete_object(self, obj_type: ObjectType, idno: int,
+                      timeout: Optional[float] = None):
+        """Delete one object — DEL (0x07). Returns the INFO reply (the deleted
+        object, or the ROM object it uncovers; a ROM object cannot be deleted)."""
+        return self.client._send_and_receive(Del(obj_type, idno),
+                                             timeout or self.timeout)
+
+    def move_object(self, obj_type: ObjectType, idno: int, newid: int,
+                    timeout: Optional[float] = None):
+        """Relocate one object to ``newid`` — CHANGE (0x08) with an empty name (the
+        name is left unchanged). **Destructive at the destination:** the protocol
+        deletes whatever object already sits at ``newid``. Returns the INFO reply."""
+        return self.client._send_and_receive(Change(obj_type, idno, newid, ""),
+                                             timeout or self.timeout)
+
+    def delete_bank(self, obj_type: Optional[ObjectType], bank: int,
+                    timeout: Optional[float] = None):
+        """Delete a whole 100-id bank — DELBANK (0x0E). ``obj_type=None`` sets the
+        DELBANK ``type`` field to 0 = **all object types** in the bank (what a
+        front-panel range delete does); ``bank=127`` with ``obj_type=None`` wipes
+        **every** RAM object. Pass a type to wipe only that type's bank.
+
+        The K2000 **does not acknowledge DELBANK** (verified live 2026-06-25): the
+        bank is deleted but no INFO comes back, so the short grace wait below
+        always times out — we treat that as **success** and return ``None``.
+        """
+        msg = DelBank(obj_type if obj_type is not None else self._ALL_OBJECT_TYPES,
+                      bank)
+        try:
+            return self.client._send_and_receive(msg, timeout or 0.5)
+        except TimeoutError:
+            return None   # no ACK is expected; the wipe still happened
 
     # str -> the matching Number button, for re-entering a program id.
     _DIGIT_BUTTONS = {str(d): getattr(Button, f"Number{d}") for d in range(10)}

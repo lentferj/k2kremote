@@ -1000,3 +1000,110 @@ async def test_auto_uses_image_on_graphics_capable_terminal():
         await pilot.pause()
         assert app.query_one("#imagebox").display is True
         assert app.query_one("#display").display is False
+
+
+@pytest.mark.asyncio
+async def test_master_tool_two_step_confirm_and_autopause():
+    """F11 Master tool: first Enter arms, second fires; firing auto-pauses the
+    mirror and runs the op via device_op (bypassing the LCD menu)."""
+    from k2kremote.app import K2KRemoteApp
+    from k2000.definitions import ObjectType
+
+    calls = {"paused": 0, "ops": []}
+
+    class FakeWorker:
+        paused = False
+        danger = False
+
+        def set_paused(self, p):
+            self.paused = p
+            calls["paused"] += 1
+
+        def device_op(self, fn, on_result):
+            calls["ops"].append(fn)  # don't invoke on_result (no cross-thread here)
+
+        def lookup_name(self, obj_type, idno, cb):
+            pass  # preview is irrelevant to this test
+
+        def stop(self):
+            pass
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._worker = FakeWorker()
+        await pilot.press("f11")
+        await pilot.pause()
+        screen = app.screen
+        screen.query_one("#mastertarget").value = "201"
+
+        screen._attempt()                      # first Enter -> arm only
+        assert screen._armed is True
+        assert calls["ops"] == []
+
+        screen._attempt()                      # second Enter -> fire
+        assert len(calls["ops"]) == 1
+        assert calls["paused"] >= 1            # mirror auto-paused around the op
+        # The queued thunk targets the chosen object via the bridge's delete_object.
+        rec = []
+        SpyBridge = type("SpyBridge", (), {
+            "delete_object": lambda self, t, i: rec.append((t, i))})
+        calls["ops"][0](SpyBridge())
+        assert rec == [(ObjectType.Program, 201)]
+
+
+@pytest.mark.asyncio
+async def test_master_tool_bank_delete_variants():
+    """The three bank-scoped functions build the right DELBANK calls: one type,
+    all types in a bank (type 0), and everything (type 0 / bank 127)."""
+    from k2kremote.app import K2KRemoteApp
+    from k2000.definitions import ObjectType
+
+    ops = []
+
+    class FakeWorker:
+        paused = False
+        danger = False
+
+        def set_paused(self, p):
+            pass
+
+        def device_op(self, fn, on_result):
+            ops.append(fn)
+
+        def lookup_name(self, obj_type, idno, cb):
+            pass
+
+        def stop(self):
+            pass
+
+    bank_calls = []
+    SpyBridge = type("SpyBridge", (), {
+        "delete_bank": lambda self, t, k: bank_calls.append((t, k))})
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._worker = FakeWorker()
+        await pilot.press("f11")
+        await pilot.pause()
+        screen = app.screen
+
+        def fire(func, target=""):
+            screen.query_one("#masterfunc").value = func
+            screen._sync_fields()
+            screen.query_one("#mastertarget").value = target
+            screen._attempt()   # arm
+            screen._attempt()   # fire
+
+        fire("delete_bank", "3")        # one type's bank
+        fire("delete_bank_all", "3")    # every type in bank 3
+        fire("delete_all")              # everything (no target needed)
+
+        for fn in ops:
+            fn(SpyBridge())
+        assert bank_calls == [
+            (ObjectType.Program, 3),    # type-scoped (default type = Program)
+            (None, 3),                  # all types in bank 3 -> DELBANK type 0
+            (None, 127),                # everything -> type 0, bank 127
+        ]

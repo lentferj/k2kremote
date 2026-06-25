@@ -193,8 +193,8 @@ MODE_BAR_ALT: List[Tuple[str, str]] = [
 LEGEND_BLOCKS: Tuple[str, ...] = (
     "↑↓←→ cursor", "+/- or PgUp/Dn value", "Enter", "Esc=Exit", "Del=Cancel",
     "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "F1-F6 soft", "F7 Edit",
-    "F8 Exit", "F9 name", "F10 view", "F12 png", "Alt+x panic", "p pause",
-    "Ctrl+r refresh", "Ctrl+o rename",
+    "F8 Exit", "F9 name", "F10 view", "F11 master", "F12 png", "Alt+x panic",
+    "p pause", "Ctrl+r refresh", "Ctrl+o rename",
 )
 LEGEND = " · ".join(LEGEND_BLOCKS)
 
@@ -203,8 +203,8 @@ LEGEND = " · ".join(LEGEND_BLOCKS)
 LEGEND_BLOCKS_ALT: Tuple[str, ...] = (
     "↑↓←→ cursor", "+/- or PgUp/Dn value", "Enter", "Esc=Exit", "Del=Cancel",
     "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "a-h soft", "Ctrl+e Edit",
-    "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view", "Ctrl+g png", "Alt+x panic",
-    "p pause", "Ctrl+r refresh", "Ctrl+o rename",
+    "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view", "Ctrl+u master", "Ctrl+g png",
+    "Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
 )
 
 # Soft-key prefixes for the live F1-F6 label bar: the F-keys by default, or the

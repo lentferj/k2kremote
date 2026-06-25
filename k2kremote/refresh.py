@@ -236,6 +236,18 @@ class RefreshWorker(threading.Thread):
             self._commands.append(("rename", (obj_type, idno, name, on_result)))
             self._cond.notify()
 
+    def device_op(self, fn, on_result) -> None:
+        """Run a one-shot bridge operation ``fn(bridge)`` on the worker thread.
+
+        For the destructive Master utilities (delete / move / delete-bank), which
+        rewrite the object database directly. The app pauses the worker first so no
+        heartbeat or settle follows the op; the command itself runs even while
+        paused (like ``force_refresh``). ``on_result(result, error)`` is invoked on
+        the worker thread with exactly one set; it must marshal back to the UI."""
+        with self._cond:
+            self._commands.append(("device_op", (fn, on_result)))
+            self._cond.notify()
+
     def submit(self, commands) -> None:
         """Queue a pre-built command sequence atomically (e.g. a name-entry plan).
 
@@ -402,6 +414,16 @@ class RefreshWorker(threading.Thread):
             try:
                 on_result(self._bridge.object_name(obj_type, idno), None)
             except Exception as exc:  # deliver to the tool, not the global error sink
+                on_result(None, f"{type(exc).__name__}: {exc}")
+            return
+        if kind == "device_op":
+            # A one-shot destructive Master op (delete/move/delete-bank). Runs even
+            # while paused; schedules no follow-up refresh — the app keeps the mirror
+            # paused until the user resumes, so no read can land during any rewrite.
+            fn, on_result = payload
+            try:
+                on_result(fn(self._bridge), None)
+            except Exception as exc:
                 on_result(None, f"{type(exc).__name__}: {exc}")
             return
         if kind == "rename":

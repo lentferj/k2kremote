@@ -321,6 +321,7 @@ they mirror the K2000's own soft-key row for the current page.
 |---|---|
 | `F9` | Name-entry overlay — type a name, `Enter` sends it (feedback-driven), `Esc` cancels |
 | `Ctrl+o` | **Rename object** tool — type + id + new name → one SysEx message |
+| `F11` | **Master functions** tool — delete object / move-relocate / delete one type's bank / delete every type in a bank / delete EVERYTHING, each via one SysEx, bypassing the LCD menu. Destructive: two-step confirm + auto-pause. (Not `Ctrl+M` — terminals send that as Enter; `--alt-keys` offers `Ctrl+u`.) |
 | `F10` | Cycle render mode: **auto → braille → blocks → text → image** |
 | `F12` | Save the current screen as a PNG (`k2kremote-<timestamp>.png`) |
 | `Alt+x` | **Panic** — MIDI all-notes-off on all 16 channels |

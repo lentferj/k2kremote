@@ -541,3 +541,53 @@ def test_manual_refresh_mode_skips_heartbeat_but_honours_events():
         worker.join(timeout=1.0)
 
 
+def test_device_op_runs_on_worker_thread_even_while_paused():
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], heartbeat=100.0, mirror_panel=False)
+    worker.start()
+    try:
+        _drain_startup(bridge)
+        worker.set_paused(True)  # destructive Master ops run with the mirror paused
+        results = []
+        done = threading.Event()
+
+        def on_result(result, error):
+            results.append((result, error))
+            done.set()
+
+        worker.device_op(lambda b: ("ran", b), on_result)
+        assert done.wait(timeout=2.0)
+        result, error = results[0]
+        assert error is None
+        assert result[0] == "ran"
+        assert result[1] is bridge   # fn is handed the worker's own bridge
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_device_op_reports_errors_without_killing_the_worker():
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], heartbeat=100.0, mirror_panel=False)
+    worker.start()
+    try:
+        _drain_startup(bridge)
+        results = []
+        done = threading.Event()
+
+        def on_result(result, error):
+            results.append((result, error))
+            done.set()
+
+        def boom(_bridge):
+            raise RuntimeError("device said no")
+
+        worker.device_op(boom, on_result)
+        assert done.wait(timeout=2.0)
+        result, error = results[0]
+        assert result is None
+        assert "device said no" in error
+        assert worker.is_alive()
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
