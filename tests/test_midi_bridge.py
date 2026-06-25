@@ -347,6 +347,31 @@ def test_delete_everything_uses_type_zero_bank_127():
     assert msg.type.value == 0 and msg.bank == 127
 
 
+def test_delete_everything_endofbank_reply_is_not_a_crash():
+    # The K2000 *does* acknowledge the "Delete all objects" nuke (type 0, bank 127)
+    # — with an ENDOFBANK whose type field is 0 ("all object types"). Decoding 0 as
+    # ObjectType(0) used to raise and surface as "Failed to decode 9-byte packet as
+    # 'EndOfBank' message"; the reply must now decode and the op report success.
+    from k2000.client import K2BaseClient
+    from k2000.encoding import encode
+    from k2000.messages import EndOfBank, K2_HEADER, K2_FOOTER, SysexMessage
+
+    # The on-the-wire ENDOFBANK the device sends back: type 0, bank 0.
+    reply = K2_HEADER + bytes([EndOfBank._msg_type_int]) \
+        + encode[7](0, 2) + encode[7](0, 1) + K2_FOOTER
+    decoded = SysexMessage.decode(reply)
+    assert isinstance(decoded, EndOfBank) and decoded.type is None  # no longer raises
+
+    stub = SimpleNamespace(midi_out=FakeOut(), midi_in=SimpleNamespace(
+        get_message=lambda: (list(reply), 0.0)))
+    client = SimpleNamespace(
+        _send_and_receive=lambda msg, timeout: K2BaseClient._send_and_receive(
+            stub, msg, timeout))
+
+    bridge = MidiBridge(client, "stub", timeout=0.5)
+    assert bridge.delete_bank(None, 127) is None        # success, not an exception
+
+
 def test_delete_bank_all_types_sends_type_zero():
     from k2000.definitions import ObjectType
     from k2000.messages import DelBank, Info
@@ -354,8 +379,8 @@ def test_delete_bank_all_types_sends_type_zero():
     captured = {}
 
     def fake(message, timeout):
-        captured["msg"] = message  # raw (an all-types DELBANK can't round-trip
-        captured["timeout"] = timeout  # decode — ObjectType(0) is not a member)
+        captured["msg"] = message      # an all-types DELBANK encodes type 0; on
+        captured["timeout"] = timeout  # decode that maps back to type=None.
         return Info(ObjectType.Program, 0, 0, True, "")
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)

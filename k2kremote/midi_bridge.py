@@ -590,9 +590,13 @@ class MidiBridge:
         front-panel range delete does); ``bank=127`` with ``obj_type=None`` wipes
         **every** RAM object. Pass a type to wipe only that type's bank.
 
-        The K2000 **does not acknowledge DELBANK** (verified live 2026-06-25): the
-        bank is deleted but no INFO comes back, so the short grace wait below
-        always times out — we treat that as **success** and return ``None``.
+        The K2000 sends no INFO for DELBANK: a one-type bank delete is silent, and
+        the all-types / "everything" nuke (type 0) replies only with an ENDOFBANK
+        (itself carrying type 0 = all types). Neither is an INFO, so the short grace
+        wait below always times out — we treat that as **success** and return
+        ``None``. (The ENDOFBANK reply must still *decode*; ``_decode_object_type``
+        in ``k2000/messages.py`` maps its type-0 field to ``None`` so it does not
+        raise — verified live 2026-06-25.)
         """
         msg = DelBank(obj_type if obj_type is not None else self._ALL_OBJECT_TYPES,
                       bank)

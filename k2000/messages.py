@@ -30,6 +30,15 @@ K2_FOOTER: bytes = END_OF_SYSTEM_EXCLUSIVE
 MIN_PACKET_SIZE = len(K2_HEADER) + 1 + len(K2_FOOTER)
 _TYPE_MAP: Dict[int, Type["SysexMessage"]] = {}
 
+# The bank-scoped messages (DELBANK, MOVEBANK, ENDOFBANK) use a 'type' field of 0
+# to mean "all object types". No ObjectType enum member has value 0, so decoding
+# it as ObjectType(0) raises — which crashed the F11 "Delete EVERYTHING" path: the
+# K2000 acknowledges that op with an ENDOFBANK whose type is 0. Decode 0 to None
+# ("all types") so those replies parse instead of blowing up.
+def _decode_object_type(data: bytes) -> Optional[ObjectType]:
+    value = int.from_bytes(decode[7](data), "big")
+    return None if value == 0 else ObjectType(value)
+
 
 class SysexMessage:
     """
@@ -639,7 +648,7 @@ class EndOfBank(SysexMessage):
 
     @classmethod
     def _decode_body(cls, data):
-        _type = ObjectType(int.from_bytes(decode[7](data[:2]), "big"))
+        _type = _decode_object_type(data[:2])
         bank = data[2]
         return cls(_type, bank)
 
@@ -667,7 +676,7 @@ class DelBank(SysexMessage):
 
     @classmethod
     def _decode_body(cls, data):
-        _type = ObjectType(int.from_bytes(decode[7](data[:2]), "big"))
+        _type = _decode_object_type(data[:2])
         bank = data[2]
         return cls(_type, bank)
 
