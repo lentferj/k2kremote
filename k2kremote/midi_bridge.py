@@ -196,23 +196,26 @@ class ThrottledOut:
 
 
 class MultiIn:
-    """An ``rtmidi.MidiIn``-compatible facade polling several ports, merged.
+    """An ``rtmidi.MidiIn``-compatible facade polling one or more ports, merged.
 
-    Some multi-port interfaces reassign their IN sub-ports as traffic flows, so a
-    reply can surface on any of them. We open every matching input and poll them
-    in turn.
+    With ``exact=False`` (the config-driven ``split`` rig) every input whose name
+    *contains* ``name`` is opened and polled in turn — for multi-port interfaces
+    that may reassign which IN sub-port carries a device's replies. With
+    ``exact=True`` (used by autodetect, where the cabling to the device is fixed)
+    only the single input whose name *equals* ``name`` is opened.
     """
 
-    def __init__(self, name_substr: str):
+    def __init__(self, name: str, *, exact: bool = False):
         self.ports: List[rtmidi.MidiIn] = []
-        for index, name in enumerate(_enum_in()):
-            if name_substr.lower() in name.lower():
+        for index, port_name in enumerate(_enum_in()):
+            matches = (port_name == name) if exact else (name.lower() in port_name.lower())
+            if matches:
                 port = rtmidi.MidiIn(queue_size_limit=8192)
                 port.open_port(index)
                 port.ignore_types(sysex=False)
                 self.ports.append(port)
         if not self.ports:
-            raise RuntimeError(f"no input port matching {name_substr!r}")
+            raise RuntimeError(f"no input port matching {name!r}")
 
     def ignore_types(self, **kwargs) -> None:
         for port in self.ports:
@@ -290,7 +293,9 @@ def _looks_like_k2(name: str) -> bool:
 def _await_screen_reply(listeners, timeout, is_screen_reply):
     """Poll the merged scan listeners for a K2 screen reply within ``timeout``.
 
-    Returns the interface (ALSA client) name of the input it arrived on, or None.
+    Returns the exact port name of the input it arrived on, or None. Autodetect
+    binds the receive side to that one sub-port (the K2's cabling is fixed), not
+    the whole interface.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -298,7 +303,7 @@ def _await_screen_reply(listeners, timeout, is_screen_reply):
             message = port.get_message()
             while message is not None:
                 if is_screen_reply(message[0]):
-                    return name.split(":", 1)[0]  # client/interface name
+                    return name  # the exact answering sub-port
                 message = port.get_message()
         time.sleep(0.005)
     return None
@@ -447,12 +452,12 @@ class MidiBridge:
                         while port.get_message() is not None:
                             pass
                     out.send_message(request)
-                    reply_iface = _await_screen_reply(listeners, timeout, is_screen_reply)
+                    reply_port = _await_screen_reply(listeners, timeout, is_screen_reply)
                 finally:
                     out.close_port()
                     _delete_quiet(out)  # don't orphan a probe client per output port
-                if reply_iface is not None:
-                    return cls._connect_split(out_name, reply_iface,
+                if reply_port is not None:
+                    return cls._connect_split(out_name, reply_port,
                                               gap=gap, device_id=device_id, timeout=timeout)
         finally:
             for _, port in listeners:
@@ -465,17 +470,17 @@ class MidiBridge:
         )
 
     @classmethod
-    def _connect_split(cls, send_name: str, recv_iface: str, *, gap: float,
+    def _connect_split(cls, send_name: str, recv_port: str, *, gap: float,
                        device_id: Optional[int], timeout: float) -> "MidiBridge":
         """Build a bridge: send via the exact ``send_name`` port, receive on the
-        merged ``recv_iface`` interface."""
+        single ``recv_port`` the device answered on (its cabling is fixed)."""
         _install_device_id_tolerance()
         out = ThrottledOut(_open_out(send_name), gap=gap, device_id=device_id)
         client = K2000Client.__new__(K2000Client)
         client.midi_out = out
-        client.midi_in = MultiIn(recv_iface)
-        client.port_name = f"{send_name} -> {recv_iface}"
-        return cls(client, f"auto:{send_name} -> {recv_iface}", timeout=timeout)
+        client.midi_in = MultiIn(recv_port, exact=True)
+        client.port_name = f"{send_name} -> {recv_port}"
+        return cls(client, f"auto:{send_name} -> {recv_port}", timeout=timeout)
 
     # -- screen --------------------------------------------------------------
     def get_graphics(self, timeout: Optional[float] = None):

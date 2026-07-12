@@ -570,3 +570,26 @@ def test_bridge_close_frees_backend_clients(monkeypatch):
     bridge.close()
     assert ScanRtmidi.live_in == set()   # merged recv sub-ports deleted
     assert ScanRtmidi.live_out == set()  # send port deleted
+
+
+def test_autodetect_binds_only_the_answering_subport(monkeypatch):
+    # ESI-style: one physical interface exposes several IN sub-ports, but the
+    # K2000 is cabled to exactly one, so its reply always lands on that sub-port.
+    # Autodetect must bind the receive side to just that port — not open all four.
+    monkeypatch.setattr(ScanRtmidi, "IN_NAMES",
+                        ["ESI M4U eX:ESI M4U eX MIDI 1 48:0",
+                         "ESI M4U eX:ESI M4U eX MIDI 2 48:1",
+                         "ESI M4U eX:ESI M4U eX MIDI 3 48:2",
+                         "ESI M4U eX:ESI M4U eX MIDI 4 48:3"])
+    monkeypatch.setattr(ScanRtmidi, "K2_IN", 2)  # answers on the 3rd sub-port
+    ScanRtmidi.pending = {}
+    ScanRtmidi.respond = True
+    ScanRtmidi.live_in = set()
+    ScanRtmidi.live_out = set()
+    monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
+
+    bridge = MidiBridge.autodetect(timeout=0.3)
+
+    assert len(bridge.client.midi_in.ports) == 1     # only the answering sub-port
+    assert "MIDI 3" in bridge.description            # bound to sub-port 3, not "MIDI 1"
+    assert len(ScanRtmidi.live_in) == 1              # the other three scanners freed

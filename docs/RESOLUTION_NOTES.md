@@ -417,3 +417,27 @@ teardown) everywhere a port is transient:
 constructed-but-not-deleted clients). **Not yet verified live** — the running
 session must be restarted on the patched code and the ALSA client count rechecked
 (`grep -c RtMidiIn /proc/asound/seq/clients` should drop to 8).
+
+---
+
+## 12. Autodetect over-listened on the whole interface — bind to the answering sub-port — RESOLVED
+
+Follow-up to §11. After autodetect found the K2000, it bound the receive side to
+the *entire* matched interface via `MultiIn(recv_iface)` — all 8 ESI M4U eX IN
+sub-ports, merged. That was a defensive port from mpc2emu for interfaces that
+reassign which sub-port carries a device's replies. Jan's rig doesn't do that: the
+ESI just lets each port be assigned IN or OUT, but the **cabling to the K2000's
+fixed MIDI IN/OUT is fixed**, so the reply always lands on the same sub-port.
+
+`_await_screen_reply` already knew the exact answering sub-port but discarded it
+(`name.split(":", 1)[0]` → client name). Now it returns the full port name, and
+`_connect_split` opens `MultiIn(recv_port, exact=True)` — a new exact-match mode
+that opens only the single input whose name *equals* `recv_port`. The
+config-driven `split` rig keeps the old substring/merge-all behaviour
+(`exact=False`, the default) for anyone who genuinely needs it.
+
+**Combined with §11, a live `--rig auto` now shows 1 `RtMidiIn` client** (the one
+receive sub-port) instead of ~49. Synthetic coverage:
+`test_autodetect_binds_only_the_answering_subport` (four sub-ports on one
+interface, exactly one opened). **Not yet verified live** that reception stays
+reliable bound to the single sub-port — expected to, since the cabling is fixed.
