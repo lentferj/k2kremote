@@ -462,10 +462,13 @@ class ScanRtmidi:
     K2_IN = 1
     pending = {}  # in_index -> [ (data, ts) ]
     respond = True
+    live_out = set()  # constructed-but-not-deleted MidiOut instances
+    live_in = set()   # constructed-but-not-deleted MidiIn instances
 
     class MidiOut:
         def __init__(self):
             self.idx = None
+            ScanRtmidi.live_out.add(id(self))
 
         def get_ports(self):
             return list(ScanRtmidi.OUT_NAMES)
@@ -482,9 +485,13 @@ class ScanRtmidi:
         def close_port(self):
             pass
 
+        def delete(self):
+            ScanRtmidi.live_out.discard(id(self))
+
     class MidiIn:
         def __init__(self, queue_size_limit=None):
             self.idx = None
+            ScanRtmidi.live_in.add(id(self))
 
         def get_ports(self):
             return list(ScanRtmidi.IN_NAMES)
@@ -501,6 +508,9 @@ class ScanRtmidi:
 
         def close_port(self):
             pass
+
+        def delete(self):
+            ScanRtmidi.live_in.discard(id(self))
 
 
 def test_autodetect_general_scan_finds_device(monkeypatch):
@@ -520,3 +530,43 @@ def test_autodetect_raises_when_nothing_answers(monkeypatch):
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
     with pytest.raises(RuntimeError, match="no K2000 answered"):
         MidiBridge.autodetect(timeout=0.1)
+
+
+def test_autodetect_success_frees_all_scan_clients(monkeypatch):
+    # Regression: the scan opened a listener on every input and a probe out per
+    # output, but only close_port()'d them — leaving the backend ALSA clients
+    # alive until the process exits (open /dev/snd/seq → ENOMEM). Only the ports
+    # of the connected rig may remain live after a successful autodetect.
+    ScanRtmidi.pending = {}
+    ScanRtmidi.respond = True
+    ScanRtmidi.live_in = set()
+    ScanRtmidi.live_out = set()
+    monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
+    bridge = MidiBridge.autodetect(timeout=0.3)
+    assert len(bridge.client.midi_in.ports) == 1
+    assert len(ScanRtmidi.live_in) == 1   # only the merged recv sub-port
+    assert len(ScanRtmidi.live_out) == 1  # only the chosen send port
+
+
+def test_autodetect_failure_frees_all_scan_clients(monkeypatch):
+    ScanRtmidi.pending = {}
+    ScanRtmidi.respond = False
+    ScanRtmidi.live_in = set()
+    ScanRtmidi.live_out = set()
+    monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
+    with pytest.raises(RuntimeError, match="no K2000 answered"):
+        MidiBridge.autodetect(timeout=0.1)
+    assert ScanRtmidi.live_in == set()   # every scan listener freed
+    assert ScanRtmidi.live_out == set()  # every probe out freed
+
+
+def test_bridge_close_frees_backend_clients(monkeypatch):
+    ScanRtmidi.pending = {}
+    ScanRtmidi.respond = True
+    ScanRtmidi.live_in = set()
+    ScanRtmidi.live_out = set()
+    monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
+    bridge = MidiBridge.autodetect(timeout=0.3)
+    bridge.close()
+    assert ScanRtmidi.live_in == set()   # merged recv sub-ports deleted
+    assert ScanRtmidi.live_out == set()  # send port deleted

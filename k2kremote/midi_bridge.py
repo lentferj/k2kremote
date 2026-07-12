@@ -121,6 +121,41 @@ def _install_device_id_tolerance() -> None:
     messages._k2kremote_devid_tolerant = True
 
 
+# --- leak-free rtmidi port helpers ------------------------------------------
+# python-rtmidi creates a backend ALSA sequencer *client* in the MidiIn/MidiOut
+# constructor; ``close_port()`` does NOT tear that client down, and relying on
+# ``del``/GC delays it "for an arbitrary amount of time" (python-rtmidi docs).
+# So every transient MidiIn/MidiOut — even one built only to call get_ports() —
+# orphans a "RtMidiIn Client" until the process exits. On a host with dozens of
+# MIDI ports, a single autodetect scan could exhaust the ALSA sequencer's client
+# slots (open /dev/snd/seq → ENOMEM). We call ``delete()`` to free clients now.
+
+def _delete_quiet(port) -> None:
+    """Immediately free an rtmidi port's backend client; never raise."""
+    try:
+        port.delete()
+    except Exception:
+        pass
+
+
+def _enum_in() -> List[str]:
+    """List input port names without orphaning an ALSA sequencer client."""
+    probe = rtmidi.MidiIn()
+    try:
+        return probe.get_ports()
+    finally:
+        _delete_quiet(probe)
+
+
+def _enum_out() -> List[str]:
+    """List output port names without orphaning an ALSA sequencer client."""
+    probe = rtmidi.MidiOut()
+    try:
+        return probe.get_ports()
+    finally:
+        _delete_quiet(probe)
+
+
 class ThrottledOut:
     """Wrap an ``rtmidi.MidiOut`` so SysEx never floods the K2000's CPU.
 
@@ -170,7 +205,7 @@ class MultiIn:
 
     def __init__(self, name_substr: str):
         self.ports: List[rtmidi.MidiIn] = []
-        for index, name in enumerate(rtmidi.MidiIn().get_ports()):
+        for index, name in enumerate(_enum_in()):
             if name_substr.lower() in name.lower():
                 port = rtmidi.MidiIn(queue_size_limit=8192)
                 port.open_port(index)
@@ -191,11 +226,13 @@ class MultiIn:
         return None
 
     def get_ports(self) -> List[str]:
-        return rtmidi.MidiIn().get_ports()
+        return _enum_in()
 
     def close_port(self) -> None:
         for port in self.ports:
             port.close_port()
+            _delete_quiet(port)  # free the backend ALSA client, not just the port
+        self.ports = []
 
 
 def _to_ascii7(text: str) -> str:
@@ -224,7 +261,7 @@ def _high_bit_rows(text: str) -> List[str]:
 
 def list_ports() -> Tuple[List[str], List[str]]:
     """Return ``(input_port_names, output_port_names)`` available on this host."""
-    return rtmidi.MidiIn().get_ports(), rtmidi.MidiOut().get_ports()
+    return _enum_in(), _enum_out()
 
 
 def bidirectional_ports() -> List[str]:
@@ -318,7 +355,7 @@ class MidiBridge:
         all sub-ports of the ``recv_iface`` interface, merged. Configure it in the
         config file with ``rig = "split"``."""
         _install_device_id_tolerance()
-        out_names = rtmidi.MidiOut().get_ports()
+        out_names = _enum_out()
         match = next((n for n in out_names if send_port.lower() in n.lower()), None)
         if match is None:
             raise RuntimeError(f"no output port matching {send_port!r}; have {out_names}")
@@ -367,8 +404,8 @@ class MidiBridge:
             request[_DEVICE_ID_INDEX] = device_id
         request = bytes(request)
 
-        out_names = rtmidi.MidiOut().get_ports()
-        in_names = rtmidi.MidiIn().get_ports()
+        out_names = _enum_out()
+        in_names = _enum_in()
         # Try K2000-ish named ports first so a labelled rig is found fast.
         order = sorted(range(len(out_names)),
                        key=lambda i: 0 if _looks_like_k2(out_names[i]) else 1)
@@ -376,13 +413,15 @@ class MidiBridge:
         # Open every input once as a merged scan listener.
         listeners: List[Tuple[str, "rtmidi.MidiIn"]] = []
         for index, name in enumerate(in_names):
+            port = None
             try:
                 port = rtmidi.MidiIn(queue_size_limit=8192)
                 port.open_port(index)
                 port.ignore_types(sysex=False)
                 listeners.append((name, port))
             except Exception:
-                pass
+                if port is not None:
+                    _delete_quiet(port)  # don't orphan a half-opened listener
 
         def is_screen_reply(data) -> bool:
             from k2000.messages import SysexMessage
@@ -395,23 +434,30 @@ class MidiBridge:
                 out_name = out_names[i]
                 if on_try is not None:
                     on_try(out_name)
+                out = None
                 try:
                     out = rtmidi.MidiOut()
                     out.open_port(i)
                 except Exception:
+                    if out is not None:
+                        _delete_quiet(out)  # free the client even on open failure
                     continue
-                for _, port in listeners:  # flush stale input
-                    while port.get_message() is not None:
-                        pass
-                out.send_message(request)
-                reply_iface = _await_screen_reply(listeners, timeout, is_screen_reply)
-                out.close_port()
+                try:
+                    for _, port in listeners:  # flush stale input
+                        while port.get_message() is not None:
+                            pass
+                    out.send_message(request)
+                    reply_iface = _await_screen_reply(listeners, timeout, is_screen_reply)
+                finally:
+                    out.close_port()
+                    _delete_quiet(out)  # don't orphan a probe client per output port
                 if reply_iface is not None:
                     return cls._connect_split(out_name, reply_iface,
                                               gap=gap, device_id=device_id, timeout=timeout)
         finally:
             for _, port in listeners:
                 port.close_port()
+                _delete_quiet(port)  # free the backend ALSA client, not just the port
 
         raise RuntimeError(
             f"auto-probe: no K2000 answered on any of {len(out_names)} output ports "
@@ -627,6 +673,11 @@ class MidiBridge:
                 port.close_port()
             except Exception:
                 pass
+            # Free the backend ALSA client, not just the port. MultiIn.close_port
+            # already deletes its sub-ports; ThrottledOut wraps one rtmidi.MidiOut.
+            raw = getattr(port, "_port", None)
+            if raw is not None:
+                _delete_quiet(raw)
 
     def __repr__(self) -> str:
         return f"<MidiBridge {self.description!r}>"

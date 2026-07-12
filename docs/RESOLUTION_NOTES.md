@@ -378,3 +378,42 @@ crash now fixed); and "Delete all objects" frees Program RAM but orphans sample 
 recovered by a front-panel "Everything" delete or a power-cycle. **Still
 unverified:** that `Del` (single object) *does* reply as the protocol claims, and
 whether a `Change`-move needs a panel reselect to repaint.
+
+---
+
+## 11. Autodetect leaked dozens of "RtMidiIn Client"s — free backend clients now — RESOLVED
+
+**Symptom (Jan, 2026-07-12):** starting `k2kremote --rig auto` leaves a few dozen
+disconnected **RtMidiIn Client** entries in qjackctl's ALSA-MIDI panel; only the 8
+that matter (the ESI M4U eX sub-ports the merged `MultiIn` receives on) are wired
+up. On a host with many ports it eventually exhausts the ALSA sequencer's client
+slots — even `aconnect -l` then fails with *"open /dev/snd/seq failed: Cannot
+allocate memory"* (ENOMEM), and no process can open MIDI at all until k2kremote is
+killed. Observed live: **49** `RtMidiIn` clients for one running `--rig auto`.
+
+**Cause:** `MidiBridge.autodetect` opens a listener (`rtmidi.MidiIn`) on *every*
+input port and a probe `rtmidi.MidiOut` per output port, then only `close_port()`s
+them. python-rtmidi creates the backend ALSA sequencer **client** in the
+constructor, and its own docs are explicit: `close_port()` does **not** tear the
+client down, and relying on `del`/GC "may be delayed for an arbitrary amount of
+time." So every transient port — including the one-shot `rtmidi.MidiIn()` built
+just to call `get_ports()` — orphans a client for the life of the process. ~40
+scan listeners + the 8 kept `MultiIn` ports ≈ the dozens seen.
+
+**Fix (`k2kremote/midi_bridge.py`):** call `port.delete()` (immediate backend
+teardown) everywhere a port is transient:
+- `_delete_quiet()` / `_enum_in()` / `_enum_out()` helpers; all bare
+  `rtmidi.MidiIn().get_ports()` / `MidiOut().get_ports()` enumerations now route
+  through the leak-free helpers.
+- `autodetect`: `finally` deletes every scan listener; the per-output probe `out`
+  is deleted in its own `finally` (and on open failure); half-opened listeners are
+  deleted too.
+- `MultiIn.close_port` and `MidiBridge.close` now `delete()` the backend client,
+  not just close the port — a clean disconnect frees ALSA slots.
+
+**Synthetic coverage:** `test_autodetect_success_frees_all_scan_clients`,
+`test_autodetect_failure_frees_all_scan_clients`,
+`test_bridge_close_frees_backend_clients` (the `ScanRtmidi` fake tracks
+constructed-but-not-deleted clients). **Not yet verified live** — the running
+session must be restarted on the patched code and the ALSA client count rechecked
+(`grep -c RtMidiIn /proc/asound/seq/clients` should drop to 8).
