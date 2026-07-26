@@ -121,6 +121,7 @@ Dangerous messages — **DEL (0x07), DELBANK (0x0E), MOVEBANK (0x0F)** — are
 | Esc        | Cancel (0x0B)           | | PgUp/PgDn | alpha-wheel ±1        |
 | Backspace  | Clear (0x0C)            | | Ctrl+↑/↓  | alpha-wheel ±5        |
 | F7 / F8    | Edit (0x20) / Exit (0x21)| | `\`       | Chan/Bank both (0x1C) |
+| `_` (Shift+-) | PlusMinus (0x0A) — pad's dedicated sign/case key, distinct from `+`/`-` above; enters negative numbers (`_ 5 Enter` = -5) and toggles case in name entry | | | |
 
 **Mode buttons** via Alt-chords (Textual handles these portably — the reason it
 was chosen over curses/urwid):

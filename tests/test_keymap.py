@@ -62,6 +62,15 @@ def test_edit_keys():
     assert keymap.resolve("backspace").button == Button.Clear
 
 
+def test_underscore_is_dedicated_plus_minus():
+    # The alphanumeric pad's own +/- key (sign entry / case toggle) is a
+    # separate button from Plus/Minus above, and lives on Shift+- since plain
+    # "-" is already Minus/decrement.
+    assert keymap.resolve("underscore").button == Button.PlusMinus
+    assert keymap.resolve("_").button == Button.PlusMinus
+    assert keymap.resolve("_").button != keymap.resolve("-").button
+
+
 def test_pageupdown_are_value_plus_minus():
     # PageUp = Plus (value up), PageDown = Minus (value down).
     assert keymap.resolve("pageup").button == Button.Plus

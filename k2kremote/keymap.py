@@ -114,6 +114,14 @@ KEYMAP: Dict[str, KeyAction] = {
     "minus": _button("Minus", Button.Minus),
     "-": _button("Minus", Button.Minus),
     "pagedown": _button("Minus", Button.Minus),
+    # The alphanumeric pad's dedicated +/- key (Button.PlusMinus) is a separate
+    # physical button from Plus/Minus above — per the K2vx manual ("The
+    # Plus/Minus Buttons"), it's "used primarily for entering negative numeric
+    # values and switching from uppercase to lowercase letters". Bound on
+    # Shift+- since plain "-" is already Minus/decrement: type "_", "5",
+    # Enter to get -5.
+    "underscore": _button("+/-", Button.PlusMinus),
+    "_": _button("+/-", Button.PlusMinus),
     # Chan / Bank -/+ (the panel's CHAN/BANK pair, doubling as Layer/Zone in the
     # editors). The both-at-once combo (jump bank / Guitar-Wind / select-all) is
     # the K2000's dedicated single code, not two buttons together; it sits on the
@@ -191,20 +199,21 @@ MODE_BAR_ALT: List[Tuple[str, str]] = [
 # window width (k2kremote.app.wrap_blocks), breaking only between blocks — never
 # inside one — so a label like "Alt+X panic" is never split across a line.
 LEGEND_BLOCKS: Tuple[str, ...] = (
-    "↑↓←→ cursor", "+/- or PgUp/Dn value", "Enter", "Esc=Exit", "Del=Cancel",
-    "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "F1-F6 soft", "F7 Edit",
-    "F8 Exit", "F9 name", "F10 view", "F11 master", "F12 png", "Alt+x panic",
-    "p pause", "Ctrl+r refresh", "Ctrl+o rename",
+    "↑↓←→ cursor", "+/- or PgUp/Dn value", "_ sign/case", "Enter", "Esc=Exit",
+    "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "F1-F6 soft",
+    "F7 Edit", "F8 Exit", "F9 name", "F10 view", "F11 master", "F12 png",
+    "Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
 )
 LEGEND = " · ".join(LEGEND_BLOCKS)
 
 # Same legend with the **terminal-safe alternates** for terminals that swallow
 # the F-keys (shown by the app's --alt-keys option). Only the F-key blocks change.
 LEGEND_BLOCKS_ALT: Tuple[str, ...] = (
-    "↑↓←→ cursor", "+/- or PgUp/Dn value", "Enter", "Esc=Exit", "Del=Cancel",
-    "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "a-h soft", "Ctrl+e Edit",
-    "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view", "Ctrl+u master", "Ctrl+g png",
-    "Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
+    "↑↓←→ cursor", "+/- or PgUp/Dn value", "_ sign/case", "Enter", "Esc=Exit",
+    "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "a-h soft",
+    "Ctrl+e Edit", "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view",
+    "Ctrl+u master", "Ctrl+g png", "Alt+x panic", "p pause", "Ctrl+r refresh",
+    "Ctrl+o rename",
 )
 
 # Soft-key prefixes for the live F1-F6 label bar: the F-keys by default, or the
