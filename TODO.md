@@ -92,6 +92,38 @@ since `Clear` advances rather than blanks on this unit, a new name shorter than
 the old one leaves the tail intact. The app types a full-width name to avoid it;
 a `Delete`-to-end pass would be tidier. See RESOLUTION_NOTES §2.
 
+## SAVE → NAME takes no keyboard input
+
+**Status:** open, reported 2026-08-02 from live use. **Blocked on:** a hardware
+session to capture the screen — nothing below has been reproduced or diagnosed,
+it is the report plus the code paths worth suspecting.
+
+**Symptom:** on the name page reached through a **Save** (Save → Name), keyboard
+input does not reach the K2000. The rename dialog reached from the *editor* is
+the one every naming test used, and it works.
+
+Candidates, in the order they are worth checking:
+
+1. **The page isn't recognised as a name dialog.** `is_name_dialog()`
+   (`app.py`) keys off the soft-key row containing both `Delete` **and**
+   `Insert`. If the Save flow's name page labels its soft keys differently, the
+   app never opens the software name cursor, never shows the F9 hint, and F9
+   typing is aimed at a field it does not believe is there.
+2. **The field is located wrongly.** `text_entry._find_name_field()` finds the
+   editable cell by the literal label `"Name:"` and otherwise falls back to the
+   observed Program-rename position **row 3, col 16**. A Save page that labels
+   the field differently (or puts it elsewhere) silently gets that fallback, so
+   the feedback loop reads back the wrong cell — the same class of bug as the
+   mid-cursor garbling fixed on 2026-06-21 (RESOLUTION_NOTES §6).
+3. **Plain keypresses vs. F9.** Worth separating in the report: does *nothing*
+   reach the device on that page (a keymap/focus problem), or do button presses
+   work while only F9 name entry fails (a field-detection problem)?
+
+**Next step:** capture the Save → Name page — `probes/p05b_savedialog.py` and
+`p17_save_explore.py` already drive a Save flow; extend one to dump the eight
+ALLTEXT rows and the six soft labels of the *name* step. That single dump
+settles 1 and 2 outright.
+
 ## Heartbeat lockup during deletes — gating fix needs live HW verification
 
 **Status:** root cause **verified live 2026-06-25**; a v1 string-marker gate
