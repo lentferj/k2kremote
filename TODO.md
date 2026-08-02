@@ -140,3 +140,26 @@ RE'ing the object structures (`Dump`/`Read` a Program, parse referenced Keymap I
 then each Keymap's Sample IDs — dependents usually live in other banks). That is a
 lot of fragile reverse-engineering for a case the front-panel menu already covers,
 so it is deliberately **not** built. Revisit only if a real need appears.
+
+## MAC editor — planned
+
+**Status:** open, not started. Requested 2026-08-02.
+
+A `.MAC` is the K2000's boot/setup macro — `BOOT.MAC` is what the machine
+loads at startup to pull in a set of banks, so it is the file that decides
+what is resident. Editing it today means the front panel or a hex editor.
+
+k2kremote is the natural home: it already speaks the device and mirrors the
+LCD, so an editor could show the macro's steps (which banks load, from where,
+into which id ranges) and let them be reordered, added or removed, then written
+back.
+
+Worth knowing before starting: a MAC drives **bank loading**, so a bad edit is
+a boot that loads the wrong thing or nothing. Treat writes the way the delete
+work is treated — verify against scratch copies with a full backup present, and
+never write a `BOOT.MAC` without the previous one saved alongside.
+
+Reference material: `HD0_K2X_HD2G-20260202.img.lzo` in
+`~/Dokumente/SYNTHS/K2000R/Backups/` is a full disk image of the current
+machine state, so it contains a real `BOOT.MAC` plus the banks it references —
+the format can be RE'd from it offline, with no K2000 attached.
