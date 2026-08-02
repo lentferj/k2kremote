@@ -127,10 +127,12 @@ Characters beyond the K2000's 16-character display field are shown in **orange**
 
 ---
 
-## Installation — step by step
+## Installation (one-time setup)
 
 New to Python or the terminal? Follow these in order. The commands are written
-for Linux/macOS; on Windows use the matching steps noted below.
+for Linux/macOS; on Windows use the matching steps noted below. You only need
+to do this once — after that, jump to [How to run](#how-to-run) every time you
+come back.
 
 **1. Install the prerequisites**
 
@@ -170,18 +172,33 @@ The Kurzweil SysEx protocol library (psobot/k2000, MIT) is **vendored in-tree**
 > create the venv with `python3 -m venv --system-site-packages .venv` before
 > `pip install -e .`.
 
-**4. Run it without any hardware (recommended first step)**
+That's it for setup. Continue to **How to run** below.
+
+---
+
+## How to run
+
+**Every time you open a new terminal**, activate the environment first —
+otherwise `python` resolves to your system interpreter, which doesn't have
+k2kremote's dependencies installed and will fail with `ModuleNotFoundError`:
+
+```bash
+cd k2kremote                          # if not already there
+source .venv/bin/activate             # Windows: .venv\Scripts\activate
+```
+
+(Alternatively, skip activation and call the venv's interpreter directly:
+`.venv/bin/python -m k2kremote.app ...`, Windows: `.venv\Scripts\python -m k2kremote.app ...`.)
+
+**Recommended first run — no hardware needed:**
 
 ```bash
 python -m k2kremote.app --demo        # explore the UI; press F10 to cycle modes
 python -m k2kremote.app --long-help   # full prose manual: setup, controls, safety
 ```
 
-`Ctrl+c` quits. When that works, connect your K2000 (next section).
-
-> Whenever you open a new terminal, re-activate the environment first with
-> `source .venv/bin/activate` (Windows: `.venv\Scripts\activate`) before running
-> `python -m k2kremote.app`.
+`Ctrl+c` quits. When that works, connect your K2000 (see "With a K2000 attached"
+below).
 
 ### Terminals / consoles
 
@@ -219,8 +236,6 @@ and `Alt+letter` for their own menus — that's what `--alt-keys` /
 > welcome.
 
 ### Other things you can run (no hardware needed)
-
-With the environment active (`source .venv/bin/activate`):
 
 ```bash
 python -m k2kremote.braille    # braille renderer self-test

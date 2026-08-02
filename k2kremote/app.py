@@ -1246,26 +1246,31 @@ class K2KRemoteApp(App):
         self._render_keyhints()
         self._set_status("")
 
-    def _set_status(self, text: str) -> None:
-        self.last_status = text
+    def _set_status(self, text: str, *, style: Optional[str] = None) -> None:
+        self.last_status = text  # stays a plain str — callers do e.g. .lower() on it
         # no_wrap: honour the line breaks we folded in, never re-break a block.
-        self.query_one("#status", Static).update(Text(text, no_wrap=True))
+        rendered = Text(text, no_wrap=True)
+        if style:
+            rendered.stylize(style)
+        self.query_one("#status", Static).update(rendered)
 
     def _set_connection(self, connected: bool) -> None:
         self._connected = connected
         self.query_one("#titlebar", Static).update(self._titlebar_text())
         if not connected:
-            self._set_status(" disconnected — retrying…")
+            self._set_status(" disconnected — retrying…", style="bold red")
 
-    def _titlebar_text(self) -> str:
+    def _titlebar_text(self) -> Text:
         if self._demo:
-            conn = "demo"
+            conn, conn_style = "demo", "cyan"
         elif self._bridge is None:
-            conn = "no MIDI"
+            conn, conn_style = "no MIDI", "bold red"
         elif self._connected is None:
-            conn = "connecting…"
+            conn, conn_style = "connecting…", "bold yellow"
+        elif self._connected:
+            conn, conn_style = "connected", "bold green"
         else:
-            conn = "connected" if self._connected else "disconnected"
+            conn, conn_style = "disconnected", "bold red"
         # One unified "⏸ PAUSED · <reason>" badge whether the freeze was manual, a
         # disk op, or the automatic confirm-screen hold — all resumed with `p`.
         if self._worker is not None and self._worker.danger:
@@ -1285,7 +1290,13 @@ class K2KRemoteApp(App):
         elif self._mode == "image":
             proto = self._image_protocol if self._image_protocol != "auto" else _detected_image_protocol()
             mirror = f"image/{proto}"
-        return f" k2kremote · {self._model} · {conn} · {mirror} · {width}w{paused}"
+        # conn is styled so a disconnected/no-MIDI state can't blend into the
+        # rest of the bar and go unnoticed (it did — see the 2026-08-02 report).
+        text = Text(no_wrap=True)
+        text.append(f" k2kremote · {self._model} · ")
+        text.append(conn, style=conn_style)
+        text.append(f" · {mirror} · {width}w{paused}")
+        return text
 
     def _placeholder(self) -> str:
         blank = np.zeros((braille.SCREEN_H, braille.SCREEN_W), dtype=bool)
