@@ -631,6 +631,28 @@ predates the evidence; the busy state is nicer to use and is now known to be
 safe, since a loading K2000 answers nothing at all and cannot be disturbed by a
 poll it never receives. Worth doing when someone is annoyed enough by it.
 
+## Name-entry failures now raise — needs one live pass to confirm it is not noisy
+
+**Status:** open, **blocked on** a hardware check. Both multi-tap branches in
+`type_name` used to give up quietly and leave a garbled name on the device while
+reporting success; they now raise `NameEntryFailed`, and the `Ctrl+O` rename tool
+keeps its dialog open when the INFO reply carries a name different from the one
+asked for. Both are correct against the synthetic fake and both are **untested
+against the real panel.**
+
+Two things a live pass should settle:
+
+* Does a real multi-tap ever need more presses than the ring plus one reset? The
+  budget is now derived (`_passes`), not the old flat 12. If the hardware ever
+  drops a press, the old code silently typed the wrong character and the new code
+  raises — better, but it turns a rare cosmetic fault into a visible failure, and
+  it should be confirmed rare rather than routine.
+* Does the K2000 pad a stored name with trailing blanks? The comparison strips
+  them for that reason, on the assumption that it might. If it does not pad, the
+  strip is harmless; if it pads with something other than blanks, the tool will
+  report a mismatch on every rename. One rename of a short name answers it.
+
+See RESOLUTION_NOTES §20.
 ## README screenshots: one of five still predates the August UI work
 
 **Status:** open, cosmetic. `braille`, `blocks/quad`, `blocks/half` and `text`
