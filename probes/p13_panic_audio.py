@@ -1,5 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Probe 13: does bridge.panic() actually silence a held note? (JACK audio)"""
+"""Probe 13: does bridge.panic() actually silence a held note? (JACK audio)
+
+CLOSED as an open question 2026-08-16 — kept as a record of the method, not as
+something anyone needs to run. panic() sends CC 120 + CC 123 on all 16 channels
+and that is unit-tested; whether the K2000 honours them is a ten-second by-ear
+check (hold a note, press panic, listen), and automating it needs a physical
+audio path no CI machine has. CAPTURE below points at ports the K2000 is not
+routed to; repoint it at live ones before expecting anything. See
+RESOLUTION_NOTES §4.
+"""
 import sys, time, threading; sys.path.insert(0, ".")
 import numpy as np
 from probes.hw import connect
