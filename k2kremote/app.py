@@ -658,11 +658,22 @@ class RenameObjectScreen(ModalScreen):
             return
 
         def done(name, error):  # runs on the UI thread (app marshals it)
-            if error is None:
-                self.app._set_status(f" renamed {self._type().name} {idno} → {name!r}")
-                self.dismiss()
-            else:
+            if error is not None:
                 self._set_current(f"rename failed: {error}")
+                return
+            # The INFO reply says what the device actually stored, and until now
+            # we printed it inside a success line without ever comparing it to
+            # what was asked for. p22 round-tripped an 18-char name intact, so a
+            # difference here is *not* the expected long-name truncation — it is
+            # the device doing something we did not ask for, which is worth
+            # stopping on rather than reporting as done. Trailing blanks are not
+            # a difference: whether the firmware pads the field is untested.
+            if (name or "").rstrip() != new_name.rstrip():
+                self._set_current(_name_preview(f"device stored {name!r}, not: ",
+                                                new_name))
+                return
+            self.app._set_status(f" renamed {self._type().name} {idno} → {name!r}")
+            self.dismiss()
 
         self.app.rename_apply(self._type(), int(idno), new_name, done)
 

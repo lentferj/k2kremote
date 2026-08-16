@@ -567,6 +567,63 @@ async def test_rename_tool_sends_change_through_worker():
         assert app._worker.typed == []
 
 
+async def _rename_and_confirm(app, pilot, asked, confirmed):
+    """Drive the rename tool and hand `done` the name the device claims to have
+    stored. Returns (screen, still_open)."""
+    from textual.widgets import Input
+
+    from k2kremote.app import RenameObjectScreen
+
+    captured = []
+    app._worker = _RecordingWorker()
+    app._worker.rename = lambda t, i, n, on_result: captured.append(on_result)
+    await app.push_screen(RenameObjectScreen())
+    await pilot.pause()
+    screen = app.screen
+    screen.query_one("#renameid", Input).value = "201"
+    screen.query_one("#renamenew", Input).value = asked
+    screen._apply()
+    await pilot.pause()
+    # The INFO reply arrives on the worker thread and the app marshals it back,
+    # so it has to be delivered from a real one — call_from_thread refuses to
+    # run on the app's own thread, and that marshalling is part of the contract.
+    import asyncio
+
+    await asyncio.to_thread(captured[0], confirmed, None)
+    await pilot.pause()
+    return screen, app.screen is screen
+
+
+@pytest.mark.asyncio
+async def test_rename_flags_a_name_the_device_did_not_store():
+    """The INFO reply says what actually landed; a difference must not be
+    reported as success.
+
+    p22 round-tripped 18 characters intact, so this is not the expected
+    long-name truncation — it is the device having done something else, and the
+    old code printed the stored name inside a "renamed ..." line and dismissed."""
+    from k2kremote.app import K2KRemoteApp
+
+    app = K2KRemoteApp(demo=True, text_mode=True)
+    async with app.run_test() as pilot:
+        screen, still_open = await _rename_and_confirm(
+            app, pilot, "Wave Of Mutilation", "Wave Of Mutilat")
+        assert still_open, "a mismatch must keep the dialog up, not dismiss it"
+        assert "Wave Of Mutilat" in str(screen.query_one("#renamecurrent").content)
+
+
+@pytest.mark.asyncio
+async def test_rename_accepts_a_device_name_padded_with_blanks():
+    """Whether the firmware pads the field is untested, so trailing blanks must
+    not read as a mismatch — that would false-alarm on every rename."""
+    from k2kremote.app import K2KRemoteApp
+
+    app = K2KRemoteApp(demo=True, text_mode=True)
+    async with app.run_test() as pilot:
+        _, still_open = await _rename_and_confirm(app, pilot, "Bass", "Bass   ")
+        assert not still_open, "padding is not a difference; this should dismiss"
+
+
 @pytest.mark.asyncio
 async def test_rename_tool_looks_up_on_tab_out_of_id():
     from k2000.definitions import ObjectType
