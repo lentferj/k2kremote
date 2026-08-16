@@ -102,6 +102,22 @@ def _drain_startup(bridge):
     bridge.refreshed.clear()
 
 
+def _wait_for(bridge, kind, count=1, timeout=2.0):
+    """Block until ``kind`` has been called ``count`` times; True if it was.
+
+    The worker now spends as little wire time as it can get away with, so a
+    GETGRAPHICS can legitimately arrive a settle-retry later than the ALLTEXT
+    that preceded it. Waiting for the call we actually care about beats sleeping
+    for a guessed interval.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if bridge.kinds().count(kind) >= count:
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def test_startup_heartbeat_refreshes_once():
     bridge = FakeBridge()
     frames = []
@@ -121,13 +137,12 @@ def test_press_is_sent_before_refresh_and_then_settles():
     bridge = FakeBridge()
     frames = []
     # Long heartbeat so the only refresh we see is the post-press settle one.
-    worker = _worker(bridge, frames, settle=0.1, heartbeat=100.0)
+    worker = _worker(bridge, frames, settle=0.1, settle_retry=0.05, heartbeat=100.0)
     worker.start()
     try:
         _drain_startup(bridge)
         worker.press(Button.Program)
-        assert bridge.refreshed.wait(timeout=2.0)
-        time.sleep(0.05)
+        assert _wait_for(bridge, "graphics")
         kinds = bridge.kinds()
         # The press is delivered, and a graphics refresh follows it.
         assert kinds[0] == "press"
@@ -141,15 +156,15 @@ def test_press_is_sent_before_refresh_and_then_settles():
 def test_burst_of_presses_collapses_to_one_refresh():
     bridge = FakeBridge()
     frames = []
-    worker = _worker(bridge, frames, settle=0.15, heartbeat=100.0)
+    worker = _worker(bridge, frames, settle=0.15, settle_retry=0.05, heartbeat=100.0)
     worker.start()
     try:
         _drain_startup(bridge)
         for _ in range(5):
             worker.press(Button.Plus)
             time.sleep(0.02)  # faster than settle -> deadline keeps moving out
-        assert bridge.refreshed.wait(timeout=2.0)
-        time.sleep(0.05)
+        assert _wait_for(bridge, "graphics")
+        time.sleep(0.1)  # let any further refresh land, so the count means something
         kinds = bridge.kinds()
         assert kinds.count("press") == 5
         # Only one refresh for the whole burst (settle deadline kept resetting).
@@ -161,7 +176,7 @@ def test_burst_of_presses_collapses_to_one_refresh():
 
 def test_submit_runs_a_plan_in_order_and_drops_zero_wheels():
     bridge = FakeBridge()
-    worker = _worker(bridge, [], settle=0.05, heartbeat=100.0)
+    worker = _worker(bridge, [], settle=0.05, settle_retry=0.05, heartbeat=100.0)
     worker.start()
     try:
         _drain_startup(bridge)
@@ -171,10 +186,11 @@ def test_submit_runs_a_plan_in_order_and_drops_zero_wheels():
             ("press", Button.CursorRight),
             ("wheel", -3),
         ])
-        assert bridge.refreshed.wait(timeout=2.0)  # settle refresh after the plan
-        time.sleep(0.05)
+        assert _wait_for(bridge, "graphics")  # settle refresh after the plan
         kinds = bridge.kinds()
-        assert kinds[:3] == ["wheel", "press", "wheel"]  # zero-wheel dropped, order kept
+        # Order kept, zero-wheel dropped — and the two wheel turns stay separate
+        # even though they bracket a press: a plan is replayed exactly as written.
+        assert kinds[:3] == ["wheel", "press", "wheel"]
         assert kinds.count("graphics") == 1
     finally:
         worker.stop()
@@ -281,9 +297,17 @@ def test_inbound_panel_triggers_refresh():
     try:
         _drain_startup(bridge)
         bridge.queue_panel()  # the hardware "was touched"
-        assert bridge.refreshed.wait(timeout=2.0)
-        time.sleep(0.05)
-        assert "graphics" in bridge.kinds()
+        # A physical press goes through the settle, exactly like one of ours, so
+        # a touch that changed nothing costs one cheap text read — not the ~1.1 s
+        # of both planes a forced refresh would buy, on a device already busy
+        # doing whatever the press asked for.
+        assert _wait_for(bridge, "text")
+        time.sleep(0.15)
+        assert bridge.kinds().count("graphics") == 0
+        # When the press did change the screen, the pixels follow.
+        bridge.screen_text = "\n".join(["Program 042"] + [""] * 6 + ["A B C D E F"])
+        bridge.queue_panel()
+        assert _wait_for(bridge, "graphics")
     finally:
         worker.stop()
         worker.join(timeout=1.0)
@@ -321,7 +345,7 @@ def test_connection_recovery_transitions():
     states = []
     worker = RefreshWorker(
         bridge, on_frame=lambda f: None, on_connection=states.append,
-        heartbeat=0.05, mirror_panel=False,
+        heartbeat=0.05, mirror_panel=False, disconnect_grace=0.05,
     )
     worker.start()
     try:
@@ -485,8 +509,12 @@ def test_destructive_screen_auto_pauses_then_resumes_on_force_refresh():
         assert not worker.danger
         with bridge.lock:
             bridge.calls.clear()
-        time.sleep(0.2)
-        assert bridge.kinds().count("graphics") >= 1
+        # The heartbeat is polling again. On a quiet screen it stops at the cheap
+        # ALLTEXT (nothing to repaint), so "is it alive?" is a text read...
+        assert _wait_for(bridge, "text", count=2)
+        # ...and the moment the screen actually changes, it buys the pixels.
+        bridge.screen_text = "\n".join(["MOVED ON"] + [""] * 6 + ["A B C D E F"])
+        assert _wait_for(bridge, "graphics")
     finally:
         worker.stop()
         worker.join(timeout=1.0)
@@ -531,11 +559,13 @@ def test_manual_refresh_mode_skips_heartbeat_but_honours_events():
         # No periodic heartbeat in manual mode: nothing fires on its own.
         time.sleep(0.4)
         assert bridge.kinds().count("graphics") == 0
-        # A front-panel event still refreshes the mirror.
+        # A front-panel event still refreshes the mirror — cheaply when the
+        # screen is unchanged, both planes once it actually moves.
         bridge.queue_panel()
-        assert bridge.refreshed.wait(timeout=2.0)
-        time.sleep(0.05)
-        assert bridge.kinds().count("graphics") >= 1
+        assert _wait_for(bridge, "text")
+        bridge.screen_text = "\n".join(["Program 042"] + [""] * 6 + ["A B C D E F"])
+        bridge.queue_panel()
+        assert _wait_for(bridge, "graphics")
     finally:
         worker.stop()
         worker.join(timeout=1.0)
@@ -588,6 +618,410 @@ def test_device_op_reports_errors_without_killing_the_worker():
         assert result is None
         assert "device said no" in error
         assert worker.is_alive()
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+# --- the cheap-probe refresh strategy ---------------------------------------
+# ALLTEXT (321 bytes) stands in for the delta request the K2000 protocol does
+# not have: a heartbeat that finds it unchanged buys no 2561-byte GETGRAPHICS
+# and repaints nothing. See the refresh module docstring.
+
+def test_quiet_heartbeat_stops_at_the_cheap_text_read():
+    bridge = FakeBridge()
+    frames = []
+    worker = _worker(bridge, frames, heartbeat=0.05, mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "graphics")  # the startup read buys both planes
+        _drain_startup(bridge)
+        frames.clear()
+        assert _wait_for(bridge, "text", count=4)   # the heartbeat keeps polling
+        assert bridge.kinds().count("graphics") == 0  # ...but only the cheap half
+        assert frames == []                           # and the UI is left alone
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_changed_text_buys_the_pixel_plane_again():
+    bridge = FakeBridge()
+    frames = []
+    worker = _worker(bridge, frames, heartbeat=0.05, mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "graphics")
+        _drain_startup(bridge)
+        frames.clear()
+        bridge.screen_text = "\n".join(["Program 999"] + [""] * 6 + ["A B C D E F"])
+        assert _wait_for(bridge, "graphics")
+        assert any(f.pixels is not None for f in frames)
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_reverse_video_change_alone_counts_as_a_change():
+    """The cursor moving inverts a cell without altering any character."""
+    class Attrs(FakeBridge):
+        reverse = ["0" * 40] * 8
+
+        def get_screen_text_attrs(self):
+            with self.lock:
+                self.calls.append(("text", None))
+                text, reverse = self.screen_text, list(self.reverse)
+            self.refreshed.set()
+            return text, reverse
+
+    bridge = Attrs()
+    frames = []
+    worker = _worker(bridge, frames, heartbeat=0.05, mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "graphics")
+        _drain_startup(bridge)
+        assert _wait_for(bridge, "text", count=3)
+        assert bridge.kinds().count("graphics") == 0  # quiet: no pixel read
+        bridge.reverse = ["1" + "0" * 39] * 8         # only the mask moved
+        assert _wait_for(bridge, "graphics")
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_pixel_plane_is_reread_once_it_goes_stale():
+    """A graphics-only change is invisible to the text compare, so bound the age."""
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], heartbeat=0.05, graphics_max_age=0.3,
+                     mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "graphics")
+        _drain_startup(bridge)
+        # Nothing about the screen ever changes, yet the pixels get refetched.
+        assert _wait_for(bridge, "graphics", timeout=2.0)
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_explicit_refresh_always_reads_both_planes():
+    """Ctrl+r means "just ask again" — "nothing changed" is not an answer."""
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], heartbeat=100.0, mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "graphics")
+        _drain_startup(bridge)
+        worker.force_refresh()  # the screen is byte-identical to the last read
+        assert _wait_for(bridge, "graphics")
+        with bridge.lock:
+            bridge.calls.clear()
+        worker.request_refresh()
+        assert _wait_for(bridge, "graphics")
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_settle_takes_a_second_look_before_paying_for_pixels():
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], settle=0.05, settle_retry=0.05, heartbeat=100.0,
+                     mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "graphics")
+        _drain_startup(bridge)
+        worker.press(Button.Program)
+        # First look is cheap and finds nothing; the second gives up guessing
+        # and reads the pixels, so a graphics-only change still lands.
+        assert _wait_for(bridge, "graphics")
+        assert bridge.kinds().count("text") >= 2
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_a_fast_spin_becomes_one_wheel_message():
+    """Ten queued clicks are one PANEL delta, not ten throttled messages."""
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], settle=100.0, heartbeat=100.0, mirror_panel=False)
+    # Queue the burst before the thread starts, so it is all pending at once.
+    for _ in range(10):
+        worker.wheel(1)
+    worker.wheel(-3)
+    worker.start()
+    try:
+        deadline = time.time() + 2.0
+        while ("wheel", 7) not in bridge.calls and time.time() < deadline:
+            time.sleep(0.01)
+        wheels = [c for c in bridge.calls if c[0] == "wheel"]
+        assert wheels == [("wheel", 7)]  # 10 x +1 and one -3, summed and sent once
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_a_plan_is_never_merged_or_split_by_a_keystroke():
+    bridge = FakeBridge()
+    worker = _worker(bridge, [], settle=100.0, heartbeat=100.0, mirror_panel=False)
+    # A name-entry plan's repeated steps must survive verbatim: the K2000's
+    # multi-tap counts distinct presses, and adjacent wheel steps in a plan are
+    # deliberate, not a spin to be summed.
+    worker.submit([("wheel", 1), ("wheel", 1), ("press", Button.Number2)])
+    worker.wheel(9)  # a keystroke racing the plan cannot land inside it
+    worker.start()
+    try:
+        deadline = time.time() + 2.0
+        while len([c for c in bridge.calls if c[0] in ("wheel", "press")]) < 4 \
+                and time.time() < deadline:
+            time.sleep(0.01)
+        assert [c for c in bridge.calls if c[0] in ("wheel", "press")] == [
+            ("wheel", 1), ("wheel", 1), ("press", Button.Number2), ("wheel", 9),
+        ]
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+# --- "the device is busy" is not "the device is gone" -----------------------
+
+def test_is_busy_screen_only_matches_seen_wording():
+    from k2kremote.refresh import is_busy_screen, is_destructive_screen
+
+    assert is_busy_screen(["Opening file", "", "", "", "", "", "", ""])
+    assert is_busy_screen(["", "", "Reading file  BOOT.MAC", "", "", "", "", ""])
+    assert not is_busy_screen(["ProgramMode", "", "", "", "", "", "", "A B C"])
+    # Busy and destructive are separate ideas: busy is not a hold.
+    assert not is_destructive_screen(["Opening file", "", "", "", "", "", "", ""])
+    assert not is_busy_screen(["Are You sure?", "", "", "", "", "", "", "Yes  No"])
+
+
+def test_busy_screen_skips_the_pixel_read():
+    """A 963 ms GETGRAPHICS is the last thing a device doing disk I/O needs."""
+    bridge = FakeBridge()
+    bridge.screen_text = "\n".join(["Opening file"] + [""] * 7)
+    frames = []
+    worker = _worker(bridge, frames, heartbeat=0.05, mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "text", count=3)
+        assert bridge.kinds().count("graphics") == 0
+        assert worker.danger is False          # busy is not a destructive hold
+        # ...and once the operation finishes, normal service resumes.
+        bridge.screen_text = "\n".join([""] * 7 + ["A B C D E F"])
+        assert _wait_for(bridge, "graphics")
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_busy_screen_does_not_report_a_disconnection():
+    """The reported symptom: a front-panel load made the mirror cry disconnect."""
+    class Busy(FakeBridge):
+        fail = False
+
+        def get_screen_text(self):
+            text = super().get_screen_text()
+            if self.fail:
+                raise TimeoutError("device is busy reading a file")
+            return text
+
+    bridge = Busy()
+    bridge.screen_text = "\n".join(["Reading file"] + [""] * 7)
+    states = []
+    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
+                           on_connection=states.append, heartbeat=0.05,
+                           mirror_panel=False)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "text", count=2)
+        assert states == [True]                 # connected on the first good read
+        bridge.fail = True                      # now it stops answering, mid-load
+        time.sleep(0.4)
+        assert states == [True], "a busy device must not read as disconnected"
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_a_genuinely_absent_device_still_reports_disconnection():
+    """The softening must not swallow a real disconnection on an ordinary screen."""
+    class Gone(FakeBridge):
+        def get_screen_text(self):
+            raise TimeoutError("nothing there")
+
+    states = []
+    worker = RefreshWorker(Gone(), on_frame=lambda f: None, on_error=lambda e: None,
+                           on_connection=states.append, heartbeat=0.05,
+                           mirror_panel=False, disconnect_grace=0.05)
+    worker.start()
+    try:
+        deadline = time.time() + 2.0
+        while False not in states and time.time() < deadline:
+            time.sleep(0.01)
+        assert states and states[0] is False
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+# --- progress screens name what they are working on -------------------------
+
+def test_progress_markers_match_the_variable_tail():
+    """The K2000 writes "Deleting <the thing>" / "Please wait ...", so these are
+    substring matches, never equality. Confirmed live 2026-08-16."""
+    from k2kremote.refresh import is_busy_screen, is_destructive_screen
+
+    def screen(line):
+        return ["", "", line, "", "", "", "", ""]
+
+    for line in ("Deleting Program 200", "Deleting SYNTHETICA 2", "Deleting ..."):
+        assert is_destructive_screen(screen(line)), line
+    for line in ("Please wait ...", "Please wait - Loading BOOT.MAC",
+                 "Opening file FAVS/AFRICA", "Reading file BASS.KRZ"):
+        assert is_busy_screen(screen(line)), line
+
+    # A rewrite in progress is the §9 lock-up state: a hold, not merely busy.
+    assert not is_busy_screen(screen("Deleting Program 200"))
+    assert not is_destructive_screen(screen("Please wait ..."))
+
+
+def test_a_brief_silence_is_not_a_disconnection():
+    """Any disk operation silences the K2000; it comes back on its own.
+
+    The first attempt keyed on reading the screen that says so — but a long load
+    stops the device answering *before* that screen is ever read, which is why it
+    still reported disconnections. Elapsed time needs no cooperation from a
+    device that has stopped talking.
+    """
+    class Intermittent(FakeBridge):
+        silent = False
+
+        def get_screen_text(self):
+            if self.silent:
+                raise TimeoutError("busy")
+            return super().get_screen_text()
+
+    bridge = Intermittent()
+    states = []
+    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
+                           on_connection=states.append, heartbeat=0.02,
+                           mirror_panel=False, disconnect_grace=1.0)
+    worker.start()
+    try:
+        assert _wait_for(bridge, "text")
+        deadline = time.time() + 1.0
+        while states != [True] and time.time() < deadline:
+            time.sleep(0.01)
+        assert states == [True]
+        bridge.silent = True          # a disk op starts; no screen ever read
+        time.sleep(0.4)               # well inside the grace window
+        assert states == [True], "a brief silence must not read as disconnected"
+        bridge.silent = False         # the operation finishes
+        time.sleep(0.2)
+        assert states == [True], "and no flap on the way back"
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_silence_past_the_grace_window_is_a_disconnection():
+    class Gone(FakeBridge):
+        def get_screen_text(self):
+            raise TimeoutError("nothing there")
+
+    states = []
+    worker = RefreshWorker(Gone(), on_frame=lambda f: None, on_error=lambda e: None,
+                           on_connection=states.append, heartbeat=0.02,
+                           mirror_panel=False, disconnect_grace=0.2)
+    worker.start()
+    try:
+        deadline = time.time() + 3.0
+        while False not in states and time.time() < deadline:
+            time.sleep(0.01)
+        assert states == [False]
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+# --- silent-but-present is not disconnected ---------------------------------
+# Verified live 2026-08-16: a K2000 disk load silences the unit for *minutes*.
+# It answers nothing, so no screen text reaches us and no elapsed-time rule can
+# tell "busy" from "unplugged". The ports stay enumerated throughout, and that
+# is the only signal that still works once the device has stopped talking.
+
+class _SilentBridge(FakeBridge):
+    """Answers nothing; reports whether its ports are still there."""
+
+    present = True
+
+    def get_screen_text(self):
+        raise TimeoutError("device is busy loading")
+
+    def ports_present(self):
+        return self.present
+
+
+def test_a_silent_but_plugged_in_device_reports_waiting_not_disconnected():
+    bridge = _SilentBridge()
+    conn, waiting = [], []
+    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
+                           on_connection=conn.append, on_waiting=waiting.append,
+                           heartbeat=0.02, mirror_panel=False, disconnect_grace=0.1)
+    worker.start()
+    try:
+        deadline = time.time() + 2.0
+        while not waiting and time.time() < deadline:
+            time.sleep(0.01)
+        assert waiting == [True]
+        assert worker.waiting is True
+        time.sleep(0.4)                      # well past the grace window
+        assert conn == [], "a busy device must never be called disconnected"
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_ports_gone_still_reports_a_disconnection():
+    bridge = _SilentBridge()
+    bridge.present = False
+    conn = []
+    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
+                           on_connection=conn.append, heartbeat=0.02,
+                           mirror_panel=False, disconnect_grace=0.1)
+    worker.start()
+    try:
+        deadline = time.time() + 2.0
+        while False not in conn and time.time() < deadline:
+            time.sleep(0.01)
+        assert conn == [False]
+    finally:
+        worker.stop()
+        worker.join(timeout=1.0)
+
+
+def test_waiting_clears_when_the_device_comes_back():
+    bridge = _SilentBridge()
+    waiting = []
+    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
+                           on_waiting=waiting.append, heartbeat=0.02,
+                           mirror_panel=False)
+    worker.start()
+    try:
+        deadline = time.time() + 2.0
+        while not waiting and time.time() < deadline:
+            time.sleep(0.01)
+        assert waiting == [True]
+        # The load finishes and the K2000 starts answering again.
+        bridge.get_screen_text = lambda: FakeBridge.get_screen_text(bridge)
+        deadline = time.time() + 2.0
+        while waiting == [True] and time.time() < deadline:
+            time.sleep(0.01)
+        assert waiting == [True, False]
+        assert worker.waiting is False
     finally:
         worker.stop()
         worker.join(timeout=1.0)

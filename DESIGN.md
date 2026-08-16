@@ -38,13 +38,43 @@ The screen is refreshed only when something could have changed:
 
 ```
 keypress ─► output queue (throttled ≥120ms) ─► PANEL(button)
-                                              ─► [wait ~0.5s settle] ─► GETGRAPHICS request
-inbound PANEL (physical panel touched, XMIT Buttons=On) ──────────────► GETGRAPHICS request
-idle heartbeat every ~2-3s (well under flood threshold) ─────────────► GETGRAPHICS request
+                                              ─► [150ms settle] ─► refresh
+inbound PANEL (physical panel touched, XMIT Buttons=On) ─────────────► refresh
+idle heartbeat every ~1.2s (well under flood threshold) ─────────────► refresh
 ```
 
 One throttled output stream, **button-presses prioritized** over refresh
 requests, so typing always feels responsive and the device never floods.
+
+### A refresh asks for the cheap plane first
+
+The two screen reads are not remotely equal: `ALLTEXT` is 321 bytes (**132 ms**
+measured) and `GETGRAPHICS` is 2561 bytes (**963 ms**) — 7.3x. The K2 SysEx set has **no
+delta or partial-screen request** — every screen opcode takes an empty body, and
+the device never pushes — so the text plane is the closest thing to one:
+
+```
+refresh ─► ALLTEXT ─► same as last read?
+                       ├─ yes ─► stop. no pixel read, no repaint
+                       └─ no  ─► deliver text now, then GETGRAPHICS ─► deliver frame
+```
+
+An idle heartbeat therefore costs 132 ms instead of ~1.1 s, which is what pays
+for the faster cadence: measured idle duty cycle fell from 44% to 16%, and a
+keypress reaches the screen in 282 ms instead of 632 ms. Two guards keep it honest: an explicit refresh (startup,
+resume, inbound PANEL, `Ctrl+r`) never takes the shortcut, and the pixel plane is
+re-read regardless after `GRAPHICS_MAX_AGE` (12 s) so a graphics-only change — an
+envelope curve, an algorithm-page box — cannot hide behind quiet text.
+
+The settle has the same shape: read early and cheaply, and only pay for a second
+look (`SETTLE_RETRY`) when the screen comes back unchanged, rather than making
+every keypress wait out the worst-case redraw.
+
+None of this touches the **pause guards**: manual pause, `--manual-refresh` and
+the destructive-screen auto-pause decide *whether* we may talk to the device at
+all, and `is_destructive_screen` still runs on every text read before any
+shortcut is considered. The strategy above only decides how much to ask for once
+that gate is already open. (Rationale and measurements: RESOLUTION_NOTES §13.)
 
 ---
 
