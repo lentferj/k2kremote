@@ -137,6 +137,41 @@ def test_type_name_lands_target_regardless_of_state(target, initial_case):
     assert fake.typed(len(target)) == target
 
 
+@pytest.mark.parametrize("target", ["0189", "90", "7 9", "K2000"])
+def test_type_name_lands_every_digit(target):
+    """The digit pad is a ring of ten and '9' sits at the far end of it.
+
+    The press budget used to be a flat 12 with nothing tying it to the ring, so
+    the high digits were the ones that would break first if it were ever tuned
+    down — and they are also the ones no existing case covered past a single
+    '9'. These targets walk both ends of the ring."""
+    fake = FakeK2000Field(initial="Keys-UC Timeless RAM")
+    te.type_name(fake, target, settle=0)
+    assert fake.typed(len(target)) == target
+
+
+def test_type_name_raises_when_a_cell_never_takes():
+    """A dead pad must fail loudly, not return a wrong name.
+
+    The caller's next move is Save, so a quiet return writes the garbled name to
+    the device under the user's nose."""
+    class DeadPad(FakeK2000Field):
+        def press_button(self, btn):
+            if btn in te.PAD_GROUPS:      # letters never register
+                return
+            super().press_button(btn)
+
+    with pytest.raises(te.NameEntryFailed):
+        te.type_name(DeadPad(initial="xxxxx"), "abc", settle=0)
+
+
+def test_type_name_budget_is_derived_from_the_pad_not_a_constant():
+    """`_passes` must scale with the ring it bounds: one reset plus a full lap."""
+    assert te._passes(len(te._DIGITS), None) == 11      # ring of 10
+    assert te._passes(3, None) == 4                     # a letter pad ("ABC")
+    assert te._passes(3, 99) == 99                      # explicit override wins
+
+
 def test_type_name_starts_at_cursor_offset():
     # User parked the cursor mid-name (on the 4th cell) and typed; the new text
     # must land at the cursor, leaving the cells before it untouched. Without the

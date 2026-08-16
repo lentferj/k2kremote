@@ -87,6 +87,15 @@ class UnsupportedCharacter(ValueError):
     """Raised when a target character is not in :data:`CHARSET`."""
 
 
+class NameEntryFailed(RuntimeError):
+    """Raised when a cell never showed the wanted character.
+
+    :func:`type_name` reads every position back, so it *knows* when a cell is
+    wrong — and until now it returned quietly anyway, leaving a garbled name on
+    the device and reporting success. A name that is silently wrong is worse
+    than one that failed loudly: the caller has already moved on to Save."""
+
+
 # --- pure helpers -----------------------------------------------------------
 def is_supported(text: str) -> bool:
     """True if every character of ``text`` can be entered on the K2000."""
@@ -114,6 +123,21 @@ def chunk_wheel(clicks: int) -> List[int]:
         chunks.append(step)
         clicks -= step
     return chunks
+
+
+def _passes(cycle: int, override: Optional[int]) -> int:
+    """How many presses may be needed to land a character on a multi-tap pad.
+
+    ``cycle`` is the length of that pad's ring, and the bound must be derived
+    from it rather than picked: the first press may be a *reset* to the ring's
+    first entry (the pad only advances when it was also the previous button), so
+    the worst case is one reset plus a full lap. Hence ``cycle + 1``.
+
+    The digit branch used a flat 12 against a ring of 10. That happened to be
+    enough, which is the problem — nothing tied the number to the ring, so
+    tuning it down to 8 for speed would have broken 8 and 9 only, silently, and
+    only on names containing them."""
+    return cycle + 1 if override is None else override
 
 
 def _nearest_anchor(target: str) -> str:
@@ -214,7 +238,7 @@ def home_cursor(bridge, width: int = 16, *, settle: float = 0.28) -> None:
 
 def type_name(bridge, target: str, *, settle: float = 0.55,
               name_row: Optional[int] = None, name_col: Optional[int] = None,
-              start_col: int = 0, max_passes: int = 12) -> None:
+              start_col: int = 0, max_passes: Optional[int] = None) -> None:
     """Type ``target`` into the K2000's *open* name dialog, with feedback.
 
     Reads each position back over MIDI and corrects the letter, its case, and
@@ -230,6 +254,15 @@ def type_name(bridge, target: str, *, settle: float = 0.55,
     position) — otherwise the feedback reads land on the wrong cells and the
     multi-tap correction garbles the name. Defaults to ``0`` (cursor at the
     field's first cell).
+
+    ``max_passes`` overrides the per-pad press budget, which by default is
+    derived from the pad's own ring (see :func:`_passes`); leave it alone unless
+    a device is observed needing more.
+
+    Raises :class:`NameEntryFailed` if a cell never shows what was asked for.
+    Since every position is read back, "wrong" is always *known* here — the only
+    question is whether the caller hears about it, and a half-typed name that
+    reports success gets saved to the device under that name.
     """
     if not is_supported(target):
         bad = next(ch for ch in target if ch not in CHARSET)
@@ -266,19 +299,30 @@ def _type_char(press: Callable, wheel: Callable, shown: Callable,
             wheel(c)
         return
     if ch in _DIGITS:
-        for _ in range(max_passes):
+        # Number0 cycles 0..9, so the bound is the ring, not a round number.
+        for _ in range(_passes(len(_DIGITS), max_passes)):
             press(Button.Number0)                   # reset to 0, then cycle
             if shown(col) == ch:
                 return
-        return
+        raise NameEntryFailed(
+            f"cell {col} still shows {shown(col)!r} after cycling the digit pad "
+            f"for {ch!r}")
     if ch.isalpha():
         button, _ = _LETTER_TAPS[ch.upper()]
-        for _ in range(len(PAD_GROUPS[button]) + 1):  # reset, then cycle to it
-            press(button)
+        for _ in range(_passes(len(PAD_GROUPS[button]), max_passes)):
+            press(button)                           # reset, then cycle to it
             if shown(col).upper() == ch.upper():
                 break
+        else:
+            raise NameEntryFailed(
+                f"cell {col} still shows {shown(col)!r} after cycling "
+                f"{button.name} for {ch!r}")
         if shown(col) != ch:                         # fix case (sticky toggle)
             press(Button.PlusMinus)
+        if shown(col) != ch:
+            raise NameEntryFailed(
+                f"cell {col} shows {shown(col)!r}, not {ch!r}: the case toggle "
+                f"did not take")
         return
     # punctuation: type the nearest pad char, then wheel to it
     anchor = _nearest_anchor(ch)
