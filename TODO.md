@@ -647,10 +647,13 @@ Two things a live pass should settle:
   drops a press, the old code silently typed the wrong character and the new code
   raises — better, but it turns a rare cosmetic fault into a visible failure, and
   it should be confirmed rare rather than routine.
-* Does the K2000 pad a stored name with trailing blanks? The comparison strips
-  them for that reason, on the assumption that it might. If it does not pad, the
-  strip is harmless; if it pads with something other than blanks, the tool will
-  report a mismatch on every rename. One rename of a short name answers it.
+* ~~Does the K2000 pad a stored name with trailing blanks?~~ **Answered
+  2026-08-17** (`probes/p28_name_padding.py`, read-only): **it does not pad.**
+  INFO returns the name exactly as stored, verified across lengths 3, 4 and a
+  full 16 (`'VZ1'`, `'FGTH'`, `'Cymb.SoftMallet1'`). The comparison's `rstrip` is
+  a no-op, so the check is exact and cannot false-alarm on short names.
+
+Only the first question is still open, and it needs a human at the panel.
 
 See RESOLUTION_NOTES §20.
 ## README screenshots: one of five still predates the August UI work

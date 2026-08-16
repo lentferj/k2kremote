@@ -1334,6 +1334,20 @@ all 255 programs now has two independent derivations — read off the device her
 counted from `0x50` segments in the files there — that agree per program. Values
 that outlive their evidence look exactly like values that are still true; the
 only cheap defence is a second derivation from a different source.
+
+### INFO does not pad a stored name — verified read-only
+
+`probes/p28_name_padding.py` (2026-08-17, DIR → INFO, no writes) read names of
+length 3, 4 and a full 16 off the device: `'VZ1'`, `'FGTH'`, `'Cymb.SoftMallet1'`.
+**None came back padded.** INFO returns the name exactly as stored, so the
+rename tool's trailing-blank strip is a no-op and the comparison against what
+the user asked for is exact.
+
+Worth having tested rather than assumed in either direction. Had the firmware
+padded with blanks, the strip would have been the only thing preventing a
+mismatch report on every rename of a short name; had it padded with anything
+else, the strip would not have helped and the tool would have false-alarmed
+every time. The check cost one read.
 ## 21. MAC editor — the `.MAC` format, RE'd offline
 
 Everything below was done **with no K2000 attached**, from the backup images in
