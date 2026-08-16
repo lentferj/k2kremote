@@ -41,22 +41,73 @@ type a full-width name (what the app does), or add a `Delete`-soft-button pass t
 the end of the field. The name field is found by its "Name:" label
 (`_find_name_field`); the Program rename dialog is row 3, col 16.
 
-## 3. Inbound-PANEL physical mirroring — needs a human press
+## 3. Inbound-PANEL physical mirroring — RESOLVED (verified on hardware)
 
-Confirmed our injected presses are **not** echoed back (probes/p16), so there is
-no refresh feedback loop. To finish: set MIDI-mode XMIT `Buttons` = On, then have
-someone press a front-panel button and confirm `poll_panel()` returns True and
-the mirror refreshes within ~`INBOUND_POLL`. If injected presses ever *do* echo
-on another unit, filter PANELs whose events we just sent. `mirror_panel=False`
-disables the feature.
+Verified live 2026-08-15 with a human at the panel. **The K2000R does emit PANEL
+(0x14) for physical front-panel presses**, and every one decoded correctly: all
+eight mode keys, ChanBank±, the four cursors, Clear, Enter, SoftA–D. The alpha
+wheel echoes too, as signed deltas (+1, +2, +4, +16, −9 …) in bursts as tight as
+0–30 ms apart — which is the device itself confirming that wheel motion is
+summable, the assumption the outgoing coalescing in §13 rests on.
 
-## 4. Audio routing for acoustic checks
+### The setting is `Bttns`, not `Buttons`, and it was Off all along
+
+On the MIDI **TRANSMIT** page it is abbreviated `Bttns` (row 4, middle column),
+which is why searching the screen dump for "Button" finds nothing. It was `Off`
+on this unit, which is the entire reason this item sat unconfirmed for so long —
+the device was never emitting anything to detect. It **survives a power cycle**
+(battery-backed), so it only needs setting once.
+
+### No feedback loop — now actually tested
+
+The previous "injected presses are not echoed" result was recorded while `Bttns`
+was `Off`, where *nothing* is echoed, so it demonstrated nothing. Re-run with
+`Bttns:On`: four injected cursor presses, 1.5 s listening window each, **zero
+inbound PANEL**. The K2000's OS really does distinguish internal (front-panel)
+from external MIDI, as the `Panel` docstring in `k2000/messages.py` claims. The
+claim now rests on a test that could have failed.
+
+### The third byte is filler and decodes as garbage
+
+Every button Down/Up arrived with `alpha_wheel_clicks == +63`: the device sends
+`0x7F` in the wheel slot, and `ButtonEvent.decode` computes `byte - 64`.
+Symmetrically, every AlphaWheel event decoded with `button == ChanBankDec`
+(value 21) — filler in the button slot. Our own encoder puts `0x40` / `Number0`
+in those slots, so this is the device's convention, not ours.
+
+Harmless today: `poll_panel()` inspects only the message *type*. But **any code
+that reads those fields off an inbound PANEL must ignore the irrelevant one** —
+the button field on an AlphaWheel event, the wheel field on a Down/Up. A future
+"mirror the physical press into the software name cursor" would otherwise apply
+a phantom +63-click turn on every button press.
+
+### How it was captured
+
+`probes/` has no committed script for this; it was a throwaway passive listener
+(connect, then read `client.midi_in` in a loop and decode 0x14, sending nothing
+at all so a human can navigate freely). Worth noting the hazard that surfaced:
+asking someone to "press a few different buttons" walked the unit onto the
+**Disk** page, where the soft keys are live disk operations, and SoftA started a
+floppy load that hung the machine (recovered by power cycle, no data lost). Any
+future ask-a-human-to-press protocol should name the safe buttons explicitly.
+
+## 4. Panic acoustic verification — CLOSED (2026-08-16)
 
 `probes/p13_panic_audio.py` records JACK `system:capture_17/18` (the ports
-mpc2emu used) but captured only noise — the K2000 output isn't routed there now.
-To verify panic/notes acoustically, connect the K2000's audio outs to those JACK
-capture ports (or update `CAPTURE` to the live ports), then re-run: a held note
-should show high RMS before `bridge.panic()` and near-silence after.
+mpc2emu used), holds a note, fires `bridge.panic()` mid-sustain and compares RMS
+either side. It captured only noise: the K2000's outputs are not routed there.
+
+**Closed rather than fixed.** The routing existed only to *automate* the
+listening. `panic()` sends CC 120 + CC 123 on all 16 channels and that is
+unit-tested; the open question was whether the K2000 honours them, and those are
+the standard All Sound Off / All Notes Off messages it documents responding to.
+Anyone sitting at the instrument can settle it in ten seconds — hold a note,
+press panic, listen — and the automated version could never run unattended
+anyway, because it needs a physical audio path that a CI machine does not have.
+
+The probe is kept as a record of the method. To use it, point `CAPTURE` at
+whatever JACK ports the K2000 is actually on and re-run: a held note should show
+high RMS before the panic and near-silence after.
 
 ## 5. Combo functions use dedicated codes, not chords — RESOLVED
 
@@ -441,3 +492,548 @@ receive sub-port) instead of ~49. Synthetic coverage:
 `test_autodetect_binds_only_the_answering_subport` (four sub-ports on one
 interface, exactly one opened). **Not yet verified live** that reception stays
 reliable bound to the single sub-port — expected to, since the cabling is fixed.
+
+---
+
+## 13. Making the mirror snappier — ALLTEXT as the change detector
+
+**Prompted by the sibling eosed project**, which had just built LCD mirroring
+for the E-mu EOS panel protocol and found a genuine delta request there: its
+`51h` returns a full 2212-byte screen (716 ms measured), while `52h` returns
+either a full frame when something changed or an **86-byte "nothing new"** in
+70 ms. Its refresh strategy follows directly — poll the cheap one, act only
+when the answer is big enough to decode (eosed `docs/RESOLUTION_NOTES.md`
+§33a–§33c).
+
+### The K2000 has no delta request — but it has a cheap plane
+
+Every screen opcode in the K2 SysEx set was checked against `k2000/messages.py`
+and the K2500 reference: `ALLTEXT` (0x15), `PARAMVALUE` (0x16), `PARAMNAME`
+(0x17) and `GETGRAPHICS` (0x18) all return a `SCREENREPLY` (0x19), and **none
+of them takes a body** — there is no offset, no region, no "since last time".
+The device cannot be asked what changed, and it never pushes. So eosed's
+mechanism does not port. What ports is its *shape*: ask something cheap, and
+escalate only when the cheap answer says you must.
+
+The cheap thing here is the text plane. Both reads are a fixed size:
+
+| read | payload | predicted | **measured** |
+|---|---|---|---|
+| `ALLTEXT` (0x15) | 321 bytes | ~103 ms | **131.6 ms** |
+| `GETGRAPHICS` (0x18) | 2561 bytes | ~819 ms | **962.7 ms** |
+
+**7.3x.** Measured on the K2000R 2026-08-15 with `probes/p24_timing.py` (medians
+of 7; the spread was under 2 ms either way — the device is strikingly
+deterministic). Both are ~20-28% slower than the raw payload arithmetic
+predicts, which is SysEx framing plus the 10 ms poll granularity in psobot's
+`_send_and_receive`.
+
+### What was actually costing the time
+
+Measuring the *protocol* would have missed the biggest cost, which was ours.
+The old defaults were `SEND_GAP` 500 ms, `SETTLE` 350 ms, `HEARTBEAT` 2.5 s,
+and a refresh that unconditionally read **both** planes. Walking one keypress
+through that:
+
+    press sent                          t=0
+    throttle gap before the settle read  +500 ms   <-- pure idling
+    settle                               +350 ms
+    ALLTEXT                              +103 ms
+    throttle gap                         +397 ms   <-- pure idling
+    GETGRAPHICS                          +819 ms
+                                        ------
+    full frame on screen                ~2.2 s
+
+Two thirds of that is the throttle and a conservative settle, not the wire. And
+an idle heartbeat spent ~0.92 s of every 2.5 s reading a screen that, most of
+the time, had not changed at all — a **37% duty cycle to learn nothing**, on
+the same link the user's keypresses have to get out on.
+
+### The four changes
+
+1. **`SEND_GAP` 500 ms → 150 ms** (`SYSEX_FLOOR` = 120 ms, clamped in
+   `ThrottledOut`, so no config or flag can go under it). The gap is measured
+   from the last *send*, so a request whose reply takes a while has already
+   paid it — it is charged precisely on the messages a user waits for. This is
+   the single largest win and the one that most needs hardware confirmation.
+2. **ALLTEXT is the change detector.** A refresh reads the text plane first and
+   compares it — *including the reverse-video mask*, so a cursor that inverts a
+   cell without moving a character still counts as a change. Identical means
+   stop: no 2561-byte read, and no frame handed to the UI at all.
+3. **`HEARTBEAT` 2.5 s → 1.2 s.** Affordable only because of (2): a quiet poll
+   now costs ~103 ms, so 1.2 s is a **9% duty cycle** — a quarter of the old
+   load while spotting front-panel changes twice as fast.
+4. **`SETTLE` 350 ms → 150 ms with one re-look** (`SETTLE_RETRY`, 250 ms).
+   Rather than making every keypress wait for the worst-case redraw, read early
+   and cheaply; if the screen comes back unchanged the redraw probably had not
+   landed, so look once more. The second look always buys the pixel plane,
+   because a press *can* change graphics only.
+
+Measured A/B on the same unit and the same screen, heartbeat disabled in both
+arms so only the press-driven refresh is timed (n=4 each):
+
+| keypress to... | old (500/350) | new (150/150) | |
+|---|---|---|---|
+| text on screen | 632 ms | **282 ms** | 2.2x |
+| fresh pixel plane | 1968 ms | **1267 ms** | 1.6x |
+
+The text figure is the one that matters for feel: nearly all navigation changes
+text, and 282 ms is the point where the user sees the new screen. Both numbers
+match the arithmetic exactly (old: 500 gap + 132 read = 632), which is a good
+sign the model of where the time goes is right.
+
+Idle cost, 36 s window with the shipping constants: 30 text reads, 2 pixel
+reads, **16% duty cycle** against 44% for the old always-both-planes heartbeat.
+(It was 23% before `GRAPHICS_MAX_AGE` went from 6 s to 12 s — see below.)
+
+### The backstop, and the one thing text cannot see
+
+A change with no text component is possible: an envelope curve redrawing, the
+algorithm page's block outlines. No text compare can ever see it. So
+`GRAPHICS_MAX_AGE` (6 s) bounds how long the pixel plane may go unread while
+the text keeps saying "quiet", and a `_FULL` refresh — startup, resume, inbound
+PANEL, Ctrl+r — never takes the shortcut at all. eosed reached the same
+conclusion from the other direction: when it cannot decode a partial frame it
+escalates to the full request, "correct behaviour under uncertainty".
+
+### Alpha-wheel coalescing
+
+A fast spin enqueued one command per click, each its own throttled SysEx, so a
+ten-click flick cost ten gaps and landed long after the user stopped turning.
+Adjacent queued wheel turns are now summed into one PANEL event. This is
+protocol-identical — the payload is a signed delta and `chunk_wheel` re-splits
+anything past the ±63 per-event range — so it is a pure latency win.
+
+Repeated **presses** are deliberately *not* merged. The K2500 manual endorses
+"several downs, one up" for increment buttons, but that is untested here and
+would corrupt the name dialog's multi-tap, which counts distinct presses. Left
+open below.
+
+Plans from `submit()` are now queued as a single opaque entry rather than
+spliced into the queue, which is what makes "merge adjacent wheels" safe: a
+name-entry plan is replayed exactly as written and a racing keystroke cannot
+land inside it.
+
+### The pause guards are untouched
+
+Nothing here changes when we may talk to the device — only how much we ask for
+once that decision is already made. `is_destructive_screen` still runs on every
+text read *before* the shortcut is considered, so the confirm-prompt auto-pause
+(§9) sees every screen it saw before; the settle re-look is not scheduled while
+paused or in `danger`; manual pause and `--manual-refresh` behave exactly as
+before.
+
+### Verified on hardware (2026-08-15, unattended, read-mostly)
+
+Run on the live K2000R sitting in Program Mode. Every phase captured a
+reference screen (text + reverse mask + pixels) and re-compared it afterwards,
+because **a garbled LCD does show up in what we read back** — the earlier claim
+that no script can detect it was too pessimistic. What a script cannot detect is
+a garble that a *later* repaint has already cleaned up, which is why the sweep
+below the floor still needs eyes.
+
+* **The change detector's core assumption holds.** 40 ALLTEXT reads over 22 s on
+  a quiet screen: **0 text differences, 0 mask differences**. 6 GETGRAPHICS
+  reads: 0 pixel differences. Nothing on that page blinks, flickers or counts,
+  so "identical means nothing changed" is sound. Had anything blinked, the whole
+  optimisation would have been inert.
+* **Reads space themselves.** Back-to-back ALLTEXT with the throttle switched
+  *off* still came 131.6 ms apart — the reply time alone clears the 120 ms
+  floor. The gap therefore does nothing for reads and everything for PANEL
+  presses, which get no reply. That confines the entire risk of lowering it to
+  the press path.
+* **150 ms is clean.** 40 reads, 8 full frames and 16 net-zero cursor presses,
+  each followed by a full reference comparison: panel byte-identical every time,
+  0 errors.
+* **The redraw is faster than the settle can observe.** At every delay tried the
+  screen had already redrawn by the earliest readable moment (~300 ms = gap +
+  ALLTEXT), 3/3. So `SETTLE` below `SEND_GAP` buys nothing — the read cannot be
+  issued sooner — and `SETTLE_RETRY` should essentially never fire in normal
+  navigation.
+* **The backstop was the surprise.** `GRAPHICS_MAX_AGE` at 6 s fired 3 times in
+  a 25 s idle window, and those three 0.96 s pixel reads were *half* of all idle
+  wire time. Raised to **12 s**, which took idle duty from 23% to **16%**. The
+  exposure is small: any keypress reads the pixel plane on its settle and an
+  inbound PANEL forces a full refresh, so what the backstop uniquely guards is
+  only "the device changed its own graphics, no text moved, nobody touched
+  anything".
+
+### The gap sweep: 120 ms holds, 100 ms stalls the device
+
+Two runs, 2026-08-15, both with a human watching the panel.
+
+**Run 1 — 16 presses per step, 120 → 40 ms: all steps passed the automated
+check, and the human saw the LCD flickering.** That is a direct hit on the
+limitation noted when `intact()` was written: it catches damage that *survives*
+to the next read and is blind to anything a repaint fixes first. The script and
+the observer disagreed and the observer was right.
+
+**Run 2 — bursts sized by duration (~4 s each), controls first:**
+
+    gap 500 ms  (old default)   16 presses,  469 ms apart   CLEAN
+    gap 150 ms  (what we ship)  26 presses,  144 ms apart   CLEAN
+    gap 120 ms  (the RE'd floor) 32 presses, 116 ms apart   CLEAN
+    gap 100 ms                  40 presses,   98 ms apart   *** DEVICE STOPPED
+                                                                ANSWERING ***
+
+The ALLTEXT after the 100 ms burst timed out. The unit recovered on its own
+within a few seconds, with no lasting damage.
+
+**The 120 ms floor is almost exactly right.** It was inherited from mpc2emu's RE
+notes without a first-hand test; the first step below it is where this unit
+stops servicing MIDI.
+
+### Duration matters more than rate, and the presses were not cheap
+
+Run 1 reached 40 ms with no stall; run 2 died at 100 ms. The difference is burst
+*length* — 0.6 s versus 3.9 s. The hazard behaves like a flood that has to be
+sustained before it bites, which is why a short sweep found nothing and reading
+it as "no cliff" would have been wrong.
+
+And the presses were doing far more than assumed. On Program Mode the cursor
+keys step the program list, so **every press selected and loaded an adjacent
+program** — seen live as the display alternating 996/995. So this was never the
+"cheap field-cursor move on an idle page" it was documented as. That makes it
+the *right* experiment for the wrong reason: sustained program loads are exactly
+what a user holding an arrow key produces, and "MIDI flood while the CPU is
+busy" is the regime the floor came from in the first place.
+
+It also means the honest scope of the result is **MIDI rate plus real work**,
+not MIDI rate alone. Pure request traffic may well tolerate more — but there is
+no reason to find out, because reads self-space at 131.6 ms regardless.
+
+### Why 150 ms stays
+
+It is 1.5x the observed failure point and 1.25x the RE'd floor, and it held
+clean under the harshest pattern available: back-to-back program loads for four
+seconds. The upside of going lower was only 282 → 172 ms on the press path,
+since the 131.6 ms ALLTEXT read now dominates. Not a trade worth making against
+a device that stops answering one step further down.
+
+This also argues against collapsing repeated presses to "several downs, one up"
+(still open below): key repeat at speed is precisely the traffic that broke the
+unit at 100 ms, and merging would make each message do *more* work, not less.
+
+### The probe failed open, and now fails closed
+
+Run 2 was launched through a wrapper where stdin is not a tty, so every
+interactive prompt was skipped, the warning scrolled past, and it ran the 100 ms
+step unattended — the exact outcome the prompts existed to prevent. A phase that
+deliberately provokes a hardware fault and whose only real instrument is a
+person looking at the panel must **refuse** to run without one, not warn and
+continue. It now does (`--force-unattended` overrides, pointlessly). A stalled
+device is also caught and reported as the result it is, rather than a traceback.
+
+### Still open
+
+* **Where the flicker starts** is still unpinned — run 2 never got a verdict out
+  of a human because of the tty bug, and it stalled before reaching the steps
+  where run 1's flicker was probably visible. Now answerable in one pass from a
+  real terminal, since each step waits for a verdict. Low value: the hard
+  failure at 100 ms already settles the shipping decision.
+* Whether **pure read traffic** (no presses, no program loads) tolerates a
+  smaller gap. Untested and uninteresting: reads self-space at 131.6 ms anyway.
+* Whether repeated presses may be collapsed to down×n + one up (manual says yes
+  for `+`/`-`; unverified on the K2000R, and it must stay off inside name-entry
+  plans regardless).
+* `PARAMVALUE` (0x16) / `PARAMNAME` (0x17) return a short null-terminated
+  string — a handful of bytes, far cheaper even than ALLTEXT. If they track the
+  cursored parameter, they would make an *even* cheaper detector while
+  wheel-scrubbing a single value. Neither has been tried on the hardware.
+
+---
+
+## 14. SAVE → NAME "takes no keyboard input" — both suspects cleared
+
+Captured live 2026-08-15 with `probes/p25_savename.py`, which walks
+Program 205 → Edit → net-zero wheel edit → Exit → Yes → Rename and dumps the
+full 8x40 text layer plus both predicates' verdicts at every step. Nothing is
+committed; it backs out and the object name is re-read to prove it.
+
+### The two documented candidates are both wrong
+
+The Save → Name page is:
+
+    3| Program Name:   Drum Default Prg
+    7| Delete Insert  <<<    >>>    OK   Cancel
+
+* **`is_name_dialog()` returns True.** The soft row carries both `Delete` and
+  `Insert`, so the app *does* recognise the page, open the software name cursor
+  and show the F9 hint. Candidate 1 is out.
+* **`_find_name_field()` returns (3, 16) from the literal label**, not the
+  fallback — `"Program Name:"` contains `"Name:"`, and the value starts at
+  column 16. Correct, and identical to the editor rename dialog. Candidate 2 is
+  out.
+
+### Input reaches the device on that page, and the cursor starts at 0
+
+On a freshly opened Save → Name page, one `Number2` press changed field offset
+**0** (`Drum Default Prg` → `drum Default Prg`). So multi-tap works there, and
+the device parks its cursor at offset 0 — exactly what `NameCursor` assumes.
+
+One misleading intermediate result is worth recording. An earlier pass pressed
+`CursorRight` first and *then* typed, and `type_name(… start_col=0)` wrote at
+offsets 1-2 instead of 0-1 (`Ddum` → `DAam`). That looked like an off-by-one
+bug; it was the probe's own cursor move, with `start_col` then lying about where
+the device cursor was. The same class of failure as the mid-name garbling fixed
+in §6, and a reminder that any test of this page must not move the cursor first.
+
+### What is actually left: the heavy-op auto-pause
+
+The remaining explanation is not on the device at all. `_HEAVY_OPS` in `app.py`
+includes `"save"`, and `_heavy_op_for` matches it against the *live label* of
+whichever soft key was pressed. Pressing a soft key labelled **Save** therefore
+auto-pauses the mirror before sending the press (§9's SCSI guard).
+
+A paused worker still **delivers** presses — the pause check in `run()` only
+applies when no command is queued — but it schedules **no settle refresh**. So
+every keystroke reaches the K2000 while the mirror stays frozen on the last
+frame. From the outside that is indistinguishable from "keyboard input does not
+reach the K2000", which is exactly how it was reported.
+
+`tests/test_app.py::test_save_soft_key_pauses_the_mirror_but_still_sends_presses`
+pins the mechanism synthetically: press a `Save` soft key, confirm the pause and
+that the press still went out, then confirm three further keystrokes are all
+delivered while the worker stays paused forever.
+
+Crucially this depends on **how the name page was reached**:
+
+* **Editor route** (Exit → Yes → Rename), the one captured above: none of the
+  three soft rows contains a heavy-op word, so the mirror stays live and the
+  flow works. `test_save_page_soft_rows_do_not_themselves_trigger_the_guard`
+  pins the captured rows so a future `_HEAVY_OPS` edit cannot silently break it.
+* **Disk route** (Disk mode → `Save` soft key → filename page): trips the guard,
+  freezes the mirror, and matches the report.
+
+### Open
+
+Which route was taken has not been confirmed with the reporter — it decides
+whether the above is the cause or merely a real but unrelated bug. If it is the
+Disk route, the fix is not to weaken the guard (it exists because polling during
+a SCSI write can lock the unit up) but to notice that a *name dialog* means the
+device is waiting for input rather than working, and to say so, or resume.
+
+Worth fixing regardless: pressing keys while paused gives no feedback at all.
+A status line along the lines of "sent — mirror paused, press p to see it"
+would have made this self-diagnosing.
+
+---
+
+## 15. The snappy defaults locked the K2000 up in real use — reverted (2026-08-16)
+
+Reported within minutes of running §13's build for actual work: "the device
+constantly hangs, reacts slow", ending in a power cycle. The defaults are
+reverted; the traffic *reductions* are kept.
+
+### Why the measurements did not catch it
+
+Everything in §13 was measured on traffic that does not resemble using the
+thing. The round-trips were isolated. The 16% duty figure came from a **25-36 s
+idle window**. The keypress A/B fired **single presses** with 1-2.5 s of quiet
+between trials. Nothing put sustained, overlapping traffic on the wire.
+
+The sweep had already said this and it was read too generously. It stalled the
+unit at 100 ms **with presses alone**. Shipping 150 ms was described as "1.5x
+the failure point" — but real navigation layers a 1.2 s heartbeat, a settle
+read, a settle re-look and a periodic 963 ms GETGRAPHICS *on top of* the
+presses. 1.5x over a pure-press failure point is not 1.5x over that.
+
+There is also a change §13 never accounted for, made the same day in §3:
+**XMIT `Bttns` went from Off to On.** Before that, `poll_panel` never saw
+anything and the inbound-PANEL path was dead code in practice. With it On, every
+physical touch of the panel called `request_refresh()` — a `_FULL` refresh,
+both planes, ~1.1 s of wire — while the K2000 was still busy doing whatever the
+press had asked for. Working at the hardware and the mirror at the same time is
+exactly the reported scenario.
+
+### What changed back, and what did not
+
+| | §13 | now |
+|---|---|---|
+| `SEND_GAP` | 150 ms | **500 ms** |
+| `HEARTBEAT` | 1.2 s | **2.5 s** |
+| `SETTLE` | 150 ms | **350 ms** |
+| `SETTLE_RETRY` | 250 ms | **disabled** |
+| ALLTEXT change detector | on | **on** — strictly less traffic |
+| wheel coalescing | on | **on** — strictly fewer messages |
+| `GRAPHICS_MAX_AGE` | 12 s | **12 s** — still fewer pixel reads than always fetching |
+
+The split is the point: three of §13's changes raise traffic *density*, and
+three lower total traffic. Only the density ones are implicated, so only they go
+back. The result should be lighter at idle than the build that predates §13
+entirely — a quiet heartbeat costs one 132 ms ALLTEXT rather than 1.1 s of both
+planes, so idle duty is ~5% against the old 44%, at the old cadence.
+
+**Inbound PANEL no longer forces a full refresh.** `note_panel_event()` puts a
+physical press through the settle, exactly like one of our own: the change
+detector can then skip the pixel plane when nothing moved, and a flurry of
+presses collapses into one read. `--no-panel-mirror` switches the path off
+without having to go and set `Bttns` back to Off on the device.
+
+### The lesson worth keeping
+
+A latency benchmark on isolated operations says nothing about a device whose
+failure mode is *sustained* load. The number that mattered — how dense the
+traffic gets while somebody is actually navigating — was never measured, and the
+one experiment that probed sustained load was read as reassurance rather than as
+the warning it was.
+
+`probes/p26_sustained.py` is the instrument that was missing. It drives the real
+`RefreshWorker` (the actual mix of presses, settle reads, heartbeats and
+periodic GETGRAPHICS) with a synthetic user navigating for minutes, and watches
+two script-visible signals:
+
+* **stalls** — a request the device never answers, which is what a lock-up looks
+  like from here;
+* **latency drift** — healthy ALLTEXT is 131.6 ms with under 2 ms of spread, so
+  a median that climbs between the start and end of a run is the device falling
+  behind. That turns "reacts slow" into a number *before* it becomes a hang, and
+  it is only possible because the K2000 is so consistent when it is happy.
+
+Flicker still needs eyes. Everything else here does not.
+
+**No timing profile goes back to a faster default without a clean run of this**,
+at both profiles, for minutes rather than seconds. The bar is: never stalled,
+and the median barely moved.
+
+### What p26 found — after its own stall detector was fixed (2026-08-16)
+
+The first two runs are **void**. Both were measured through a 1.0 s operational
+timeout against a 962.7 ms GETGRAPHICS — 26 ms of headroom — so "stalled"
+frequently meant "was 30 ms slower than usual". That ceiling came from
+`autodetect` handing its *scan* timeout to the bridge, which is a real app bug
+in its own right (§16) and is very likely most of what "constantly hangs, reacts
+slow" actually was. It surfaced only because p26 accused the *conservative*
+profile of stalling in 8 seconds, which contradicts weeks of real use: a
+detector that fails the shipping build is more likely broken than right.
+
+Re-run with a 5 s operational timeout, so a stall means the device really did
+not answer:
+
+    conservative  5 min clean   131.6 ms, +0.0 drift, worst 132.2 ms   0 panel events
+    fast          *** STALLED after 98 s ***  worst 161.7 ms          39 panel events
+
+**The fast profile genuinely stalls.** Ninety-eight seconds, on GETGRAPHICS,
+with a human working the front panel throughout and five seconds of grace before
+the call was called dead. Its worst-case ALLTEXT also drifted up to 161.7 ms
+against the conservative profile's 132.2 — the device visibly working harder
+even when it was answering. So the revert in §15 was right, and is now backed by
+a measurement rather than by a field report.
+
+**What this run still does not show** is that the conservative profile is safe
+*under the same load*: it recorded **0 panel events** during that phase, so
+nobody was touching the panel while it ran. The probe says so in its own output
+rather than letting a quiet run read as a pass — which is the one piece of
+instrumentation today that behaved exactly as intended. Conservative-with-presses
+remains untested; real use is the only evidence for it.
+
+Both surviving comparisons still share a confound worth naming: presses were
+happening during `fast` and not during `conservative`, so "fast timings" and
+"someone at the panel" are not fully separated. What *is* separated is the
+earlier pair — fast without the panel path survived five minutes clean, fast
+with it stalled twice — which points at the interaction rather than at the
+timings alone.
+
+---
+
+## 16. `--rig auto` ran with a 1.0 s operational timeout (2026-08-16)
+
+`MidiBridge.autodetect` took a single ``timeout`` and used it for two unrelated
+jobs: how long to wait for a probe reply from each candidate port during the
+scan, and what the returned bridge uses for every real call afterwards. A scan
+wants a small number, so it was 1.0 s. **A GETGRAPHICS takes 962.7 ms.**
+
+Twenty-six milliseconds of headroom on every full refresh. Any jitter raised
+`TimeoutError`, and `RefreshWorker._on_refresh_error` reads that as the device
+having gone away: it flips the mirror to disconnected and backs off, doubling to
+a 20 s cap. The result is a mirror frozen for up to twenty seconds, announcing
+that the K2000 is missing, while the K2000 answers normally throughout.
+
+This is almost certainly a large part of what §15 recorded as "constantly hangs,
+reacts slow", and it is independent of the timing constants — which means the
+revert there may have been fixing the wrong thing. It applies to anyone starting
+with `--rig auto`, i.e. the normal way.
+
+`scan_timeout` (1.0 s) is now separate from `timeout` (`DEFAULT_TIMEOUT`, 2.5 s).
+`probes/hw.connect()` asks for 5 s so a probe can distinguish slow from dead. A
+regression test asserts the bridge never inherits the scan value and that
+whatever it does get clears a GETGRAPHICS with real margin.
+
+**How it was found is the point.** Not by reading the code, and not from the
+field report — by a probe producing a result that could not be true (the
+shipping profile stalling in 8 seconds) and taking that seriously instead of
+recording it. Two earlier conclusions had already been drawn through the same
+ceiling.
+
+---
+
+## 17. "Disconnected" during a disk load — the device goes completely silent
+
+Reported live 2026-08-16: starting a disk load makes the mirror announce a
+disconnection. Harmless, since it reconnects, but wrong, and inconsistent with
+every other disk operation.
+
+It took four attempts, and the first three all failed the same way: each tried
+to *recognise* the situation from something the device tells us, and during a
+load the K2000 tells us nothing at all.
+
+### The measurement that ended it
+
+With a load in progress, an autodetect scan across **all 40 output ports found
+no K2000**. Not a slow reply — no reply, from anywhere, for the whole multi-
+minute operation.
+
+That single fact kills three approaches at once:
+
+1. **Matching progress screens** (`Opening file`, `Reading file`). Those appear
+   on the LCD, not over MIDI. We never read them, so the marker list could never
+   fire. Adding `Please wait` — the wording actually in use — changed nothing,
+   because the problem was never the wording.
+2. **A grace window before declaring a disconnection.** 12 s of tolerance does
+   not cover a silence of minutes. No fixed number does.
+3. **Reading the screen to learn the device is busy.** The detection depended on
+   the very read that was failing. This is the one worth remembering: a signal
+   that requires the cooperation of a device that has stopped cooperating is not
+   a signal.
+
+### What actually works
+
+Once the device is silent, one thing still knows the difference between "busy"
+and "gone", and it is not on the wire: **whether the ports we opened are still
+enumerated**. Checked while a load was running — all present.
+
+`MidiBridge.ports_present()` asks the system, sends nothing, and needs no help
+from the K2000. The worker reports a distinct `waiting` state, and the title bar
+says **`busy — not answering`** in yellow instead of `disconnected` in red,
+clearing itself when the device replies. Confirmed on hardware.
+
+**Verified:** the busy path, on hardware — a real load shows yellow
+`busy — not answering` and clears itself when it finishes. **Not verified:** the
+ports-gone path, which is synthetic-only. Exercising it means unplugging the
+interface's USB, and replugging renumbers the ALSA clients (`56:x` -> `64:x`
+happened twice on its own today), so it costs a rewire of the routing for one
+boolean. Judged not worth it 2026-08-16; if the red `disconnected` state ever
+looks wrong, this is the untested branch.
+
+Deliberate limit: our ports belong to the MIDI *interface*, so a K2000 switched
+off behind a live interface reads as busy rather than gone. That is the right
+way round — calling a busy device "gone" cries wolf during every disk operation,
+while calling a powered-off one "not answering" is merely coy. The elapsed-time
+rule still applies when the ports genuinely vanish, or when a bridge cannot
+answer the question.
+
+### Still inconsistent, deliberately
+
+Starting a load **from the app** trips the heavy-op guard (a soft key labelled
+`Load`/`Save`/`Macro`/`Delete`) and pauses the mirror outright, needing a manual
+`p` to resume. Starting the same load **at the front panel** now gets the busy
+handling, which recovers by itself. Two paths to the same situation with
+different behaviour. Left alone for now because the pause is the more
+conservative of the two and nobody has complained, but it is a wart.
+
+### The marker work is now mostly decorative
+
+`is_busy_screen` only fires when we happen to read the screen, which during a
+real load we do not. It is kept because it costs nothing and may catch shorter
+operations, but it is not what fixed this, and it should not be mistaken for the
+mechanism.

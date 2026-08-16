@@ -21,26 +21,43 @@ verification was done on Jan's K2000R on **2026-06-19** (probe scripts in
 
 ---
 
-## Physical-panel mirroring needs a human press to fully confirm
+## Physical-panel mirroring — RESOLVED
 
-**Status:** partially verified. **Blocked on:** a person physically pressing a
-front-panel button while `k2kremote` is connected.
+**Status:** **verified on hardware 2026-08-15** with a human at the panel.
 
-`refresh.py` refreshes when an inbound PANEL (0x14) arrives. Confirmed: our own
-injected presses are **not** echoed (so no feedback loop), and `poll_panel`
-drains cleanly. Not yet confirmed: that the K2000 emits PANEL for a *physical*
-press (needs MIDI-mode XMIT `Buttons` = On and a human at the panel). The code
-is sound and won't misfire; `mirror_panel=False` disables it. See
-RESOLUTION_NOTES §3.
+The K2000R emits PANEL (0x14) for physical presses; all buttons and the alpha
+wheel decoded correctly, and our own injected presses are **not** echoed back
+(re-tested with the setting actually On — the earlier result was taken while it
+was Off and proved nothing). The mirror refreshes on a physical touch.
 
-## Audio verification of the rig is unrouted
+The gate was a misread parameter name: it is **`Bttns`** on the MIDI TRANSMIT
+page, not `Buttons`, and it was `Off` on this unit. It survives a power cycle.
 
-**Status:** inconclusive. **Blocked on:** JACK audio routing.
+One thing to respect in future code: on an inbound PANEL the *irrelevant* field
+is filler, not data — button events carry `wheel=+63` (`0x7F`) and wheel events
+carry `button=ChanBankDec`. See RESOLUTION_NOTES §3.
 
-`probes/p13_panic_audio.py` captured only noise on `system:capture_17/18`, so the
-K2000 output isn't on those ports right now. The panic itself (MIDI CC 120/123 on
-all channels) is verified to send correctly (unit test); only the *acoustic*
-confirmation is pending a working capture route. See RESOLUTION_NOTES §4.
+## Panic acoustic verification — CLOSED, not planned
+
+**Status:** closed 2026-08-16. Not a gap worth a probe.
+
+`bridge.panic()` sends CC 120 (All Sound Off) and CC 123 (All Notes Off) on all
+16 channels, unthrottled, and that is unit-tested. What was never confirmed is
+whether the K2000 *honours* them — but those are the standard MIDI messages for
+exactly this, the K2000 documents responding to them, and the failure mode is
+"the panic key doesn't help with a stuck note", which is obvious the first time
+you need it.
+
+The old blocker was **JACK routing**, and it only ever existed so
+`probes/p13_panic_audio.py` could *automate* the listening: record
+`system:capture_17/18`, hold a note, fire panic mid-sustain, compare RMS. The
+K2000's outputs are not routed to those ports, and wiring them up buys nothing a
+person at the desk cannot get in ten seconds by holding a note and pressing
+panic. It could never run unattended in CI either, since it needs a physical
+audio path.
+
+The probe stays in `probes/` as a record of the method; it needs `CAPTURE`
+pointed at live ports before it would do anything. See RESOLUTION_NOTES §4.
 
 ## Name-edit cursor: software tracking needs live hardware verification
 
@@ -92,37 +109,32 @@ since `Clear` advances rather than blanks on this unit, a new name shorter than
 the old one leaves the tail intact. The app types a full-width name to avoid it;
 a `Delete`-to-end pass would be tidier. See RESOLUTION_NOTES §2.
 
-## SAVE → NAME takes no keyboard input
+## SAVE → NAME takes no keyboard input — both suspects cleared, one left
 
-**Status:** open, reported 2026-08-02 from live use. **Blocked on:** a hardware
-session to capture the screen — nothing below has been reproduced or diagnosed,
-it is the report plus the code paths worth suspecting.
+**Status:** captured on hardware 2026-08-15 (`probes/p25_savename.py`). The two
+suspected causes are **refuted**. **Blocked on:** confirming which route was
+used to reach the name page.
 
-**Symptom:** on the name page reached through a **Save** (Save → Name), keyboard
-input does not reach the K2000. The rename dialog reached from the *editor* is
-the one every naming test used, and it works.
+The Save → Name page is `Program Name:   Drum Default Prg` over a
+`Delete Insert <<< >>> OK Cancel` soft row, so `is_name_dialog()` returns True
+and `_find_name_field()` returns (3, 16) from the literal label — both correct.
+Input reaches the device there (one `Number2` press changed field offset 0), and
+the cursor parks at offset 0, which is exactly what `NameCursor` assumes.
 
-Candidates, in the order they are worth checking:
+**Leading candidate now:** `_HEAVY_OPS` contains `"save"`, so pressing a soft key
+labelled **Save** auto-pauses the mirror. A paused worker still sends presses but
+schedules no refresh — input keeps working while the screen freezes, which is
+indistinguishable from "input does not reach the device". Pinned synthetically by
+`test_save_soft_key_pauses_the_mirror_but_still_sends_presses`.
 
-1. **The page isn't recognised as a name dialog.** `is_name_dialog()`
-   (`app.py`) keys off the soft-key row containing both `Delete` **and**
-   `Insert`. If the Save flow's name page labels its soft keys differently, the
-   app never opens the software name cursor, never shows the F9 hint, and F9
-   typing is aimed at a field it does not believe is there.
-2. **The field is located wrongly.** `text_entry._find_name_field()` finds the
-   editable cell by the literal label `"Name:"` and otherwise falls back to the
-   observed Program-rename position **row 3, col 16**. A Save page that labels
-   the field differently (or puts it elsewhere) silently gets that fallback, so
-   the feedback loop reads back the wrong cell — the same class of bug as the
-   mid-cursor garbling fixed on 2026-06-21 (RESOLUTION_NOTES §6).
-3. **Plain keypresses vs. F9.** Worth separating in the report: does *nothing*
-   reach the device on that page (a keymap/focus problem), or do button presses
-   work while only F9 name entry fails (a field-detection problem)?
+This only bites on the **Disk route** (Disk mode → `Save`). The **editor route**
+(Exit → Yes → Rename) never trips the guard — verified live, and pinned by
+`test_save_page_soft_rows_do_not_themselves_trigger_the_guard`.
 
-**Next step:** capture the Save → Name page — `probes/p05b_savedialog.py` and
-`p17_save_explore.py` already drive a Save flow; extend one to dump the eight
-ALLTEXT rows and the six soft labels of the *name* step. That single dump
-settles 1 and 2 outright.
+**Next:** confirm the route. If Disk, the fix is not to weaken the guard but to
+treat "the resulting screen is a name dialog" as evidence the device is waiting
+for input rather than working. Worth doing either way: pressing keys while
+paused currently gives no feedback at all. See RESOLUTION_NOTES §14.
 
 ## Heartbeat lockup during deletes — gating fix needs live HW verification
 
@@ -195,3 +207,58 @@ Reference material: `HD0_K2X_HD2G-20260202.img.lzo` in
 `~/Dokumente/SYNTHS/K2000R/Backups/` is a full disk image of the current
 machine state, so it contains a real `BOOT.MAC` plus the banks it references —
 the format can be RE'd from it offline, with no K2000 attached.
+
+## Faster mirror — timing REVERTED; the cheap-read work stays
+
+**Status:** the ALLTEXT change detector and wheel coalescing are in and good.
+The faster *timings* were reverted 2026-08-16 after they locked the K2000 up in
+ordinary use (power cycle required).
+
+Kept, because they lower total traffic: ALLTEXT as the change detector (a quiet
+heartbeat costs one 132 ms read instead of 1.1 s of both planes — idle duty ~5%
+against the old 44%), alpha-wheel coalescing, and `GRAPHICS_MAX_AGE`.
+
+Reverted, because they raise traffic *density*: `SEND_GAP` back to 500 ms,
+`HEARTBEAT` to 2.5 s, `SETTLE` to 350 ms, and the settle re-look disabled.
+
+Also fixed: an inbound PANEL used to force a full both-planes refresh. That path
+was dead until `Bttns` was switched On the same day, after which every physical
+touch of the panel cost ~1.1 s of wire while the device was busy. It now goes
+through the settle like any other press, and `--no-panel-mirror` disables it.
+
+**Settled 2026-08-16 by experiment:** the fast profile stalls after **98 s** of
+sustained use with someone at the front panel (`p26`, 39 panel events,
+GETGRAPHICS unanswered for a full 5 s), and its worst-case ALLTEXT drifts to
+161.7 ms against the conservative profile's 132.2. The conservative profile ran
+five minutes clean in the same session. The fast timings are not coming back.
+
+Two earlier p26 results (34 s and 8 s stalls) are **void** — measured through a
+1.0 s operational timeout against a 963 ms read. That bug is fixed; see
+RESOLUTION_NOTES §16, and note it was probably a big part of the original hang
+report on its own.
+
+Still untested: the conservative profile *with* someone pressing (that phase
+recorded 0 panel events). Real use is the only evidence for it so far.
+
+**If anyone lowers these again:** run `probes/p26_sustained.py` first — it
+drives the real worker with a synthetic user for minutes and reports stalls plus
+latency drift (healthy ALLTEXT is 131.6 ms with <2 ms spread, so a climbing
+median is the device falling behind). The bar is a clean run at the candidate
+profile: never stalled, median barely moved. The measurements that justified the
+fast defaults were isolated round-trips, an idle duty-cycle window and single
+keypresses — none of which resemble navigating. See RESOLUTION_NOTES §15.
+
+## Disk-op status: app-initiated and panel-initiated loads behave differently
+
+**Status:** open, cosmetic. The underlying "disconnected during a load" bug is
+**fixed and confirmed on hardware** (RESOLUTION_NOTES §17).
+
+Starting a disk load from the app trips the heavy-op guard — a soft key labelled
+`Load`/`Save`/`Macro`/`Delete` — and pauses the mirror outright, needing `p` to
+resume. Starting the same load at the front panel gets the newer `waiting`
+handling, which recovers on its own. Same situation, two behaviours.
+
+Unifying them means deciding which is right. The pause is more conservative and
+predates the evidence; the busy state is nicer to use and is now known to be
+safe, since a loading K2000 answers nothing at all and cannot be disturbed by a
+poll it never receives. Worth doing when someone is annoyed enough by it.
