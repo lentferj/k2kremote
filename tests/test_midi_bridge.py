@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from k2kremote import midi_bridge
-from k2kremote.midi_bridge import ThrottledOut, MultiIn, BridgeConfig, MidiBridge
+from k2kremote.midi_bridge import (ThrottledOut, MultiIn, BridgeConfig, MidiBridge,
+                                   SEND_GAP, SYSEX_FLOOR)
 
 
 class FakeOut:
@@ -81,6 +82,19 @@ def test_throttle_enforces_gap_for_sysex():
     out.send_message([0xF0, 0x07, 0x00, 0x78, 0x18, 0xF7])
     out.send_message([0xF0, 0x07, 0x00, 0x78, 0x18, 0xF7])
     assert time.time() - start >= 0.05  # second SysEx waited for the gap
+
+
+def test_gap_is_clamped_to_the_hardware_floor():
+    """The 120 ms floor is a property of the K2000's CPU, not a preference.
+
+    A too-small gap garbles the LCD, and that failure shows up on the panel
+    rather than in any reply — so no caller (config file, --sysex-interval, API
+    user) is trusted to go under it.
+    """
+    assert ThrottledOut(FakeOut(), gap=0.0)._gap == SYSEX_FLOOR
+    assert ThrottledOut(FakeOut(), gap=-1)._gap == SYSEX_FLOOR
+    assert ThrottledOut(FakeOut(), gap=0.5)._gap == 0.5  # slower is always allowed
+    assert SEND_GAP >= SYSEX_FLOOR                       # ...including the default
 
 
 def test_non_sysex_is_not_throttled():
@@ -517,7 +531,7 @@ def test_autodetect_general_scan_finds_device(monkeypatch):
     ScanRtmidi.pending = {}
     ScanRtmidi.respond = True
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
-    bridge = MidiBridge.autodetect(timeout=0.3)
+    bridge = MidiBridge.autodetect(scan_timeout=0.3)
     # Sends on each out, listens on all ins; binds recv to the reply's interface.
     assert "K2000 Out" in bridge.description
     assert "K2000 In" in bridge.description
@@ -529,7 +543,7 @@ def test_autodetect_raises_when_nothing_answers(monkeypatch):
     ScanRtmidi.respond = False  # no port replies
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
     with pytest.raises(RuntimeError, match="no K2000 answered"):
-        MidiBridge.autodetect(timeout=0.1)
+        MidiBridge.autodetect(scan_timeout=0.1)
 
 
 def test_autodetect_success_frees_all_scan_clients(monkeypatch):
@@ -542,7 +556,7 @@ def test_autodetect_success_frees_all_scan_clients(monkeypatch):
     ScanRtmidi.live_in = set()
     ScanRtmidi.live_out = set()
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
-    bridge = MidiBridge.autodetect(timeout=0.3)
+    bridge = MidiBridge.autodetect(scan_timeout=0.3)
     assert len(bridge.client.midi_in.ports) == 1
     assert len(ScanRtmidi.live_in) == 1   # only the merged recv sub-port
     assert len(ScanRtmidi.live_out) == 1  # only the chosen send port
@@ -555,7 +569,7 @@ def test_autodetect_failure_frees_all_scan_clients(monkeypatch):
     ScanRtmidi.live_out = set()
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
     with pytest.raises(RuntimeError, match="no K2000 answered"):
-        MidiBridge.autodetect(timeout=0.1)
+        MidiBridge.autodetect(scan_timeout=0.1)
     assert ScanRtmidi.live_in == set()   # every scan listener freed
     assert ScanRtmidi.live_out == set()  # every probe out freed
 
@@ -566,7 +580,7 @@ def test_bridge_close_frees_backend_clients(monkeypatch):
     ScanRtmidi.live_in = set()
     ScanRtmidi.live_out = set()
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
-    bridge = MidiBridge.autodetect(timeout=0.3)
+    bridge = MidiBridge.autodetect(scan_timeout=0.3)
     bridge.close()
     assert ScanRtmidi.live_in == set()   # merged recv sub-ports deleted
     assert ScanRtmidi.live_out == set()  # send port deleted
@@ -588,8 +602,46 @@ def test_autodetect_binds_only_the_answering_subport(monkeypatch):
     ScanRtmidi.live_out = set()
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
 
-    bridge = MidiBridge.autodetect(timeout=0.3)
+    bridge = MidiBridge.autodetect(scan_timeout=0.3)
 
     assert len(bridge.client.midi_in.ports) == 1     # only the answering sub-port
     assert "MIDI 3" in bridge.description            # bound to sub-port 3, not "MIDI 1"
     assert len(ScanRtmidi.live_in) == 1              # the other three scanners freed
+
+
+def test_autodetect_does_not_hand_the_scan_timeout_to_the_bridge(monkeypatch):
+    """A scan timeout is not an operational timeout, and mixing them froze the app.
+
+    GETGRAPHICS takes 962.7 ms on real hardware. With the scan's 1.0 s reused as
+    the bridge timeout, every full refresh had 26 ms of headroom, and any jitter
+    raised TimeoutError — which the refresh worker treats as the device being
+    gone: mirror marked disconnected, exponential backoff to 20 s. A hang we
+    manufactured ourselves.
+    """
+    from k2kremote.midi_bridge import DEFAULT_TIMEOUT, MidiBridge
+
+    built = {}
+
+    def fake_connect_split(cls, send, recv, *, gap, device_id, timeout):
+        built["timeout"] = timeout
+        return "bridge"
+
+    monkeypatch.setattr(MidiBridge, "_connect_split", classmethod(fake_connect_split))
+    monkeypatch.setattr("k2kremote.midi_bridge._enum_out", lambda: ["k2000 out"])
+    monkeypatch.setattr("k2kremote.midi_bridge._enum_in", lambda: [])
+    monkeypatch.setattr("k2kremote.midi_bridge._await_screen_reply",
+                        lambda listeners, timeout, is_reply: "k2000 in")
+
+    class _Out:
+        def open_port(self, i): pass
+        def send_message(self, m): pass
+        def close_port(self): pass
+        def delete(self): pass
+
+    monkeypatch.setattr("rtmidi.MidiOut", _Out)
+
+    MidiBridge.autodetect(scan_timeout=0.05)
+    assert built["timeout"] == DEFAULT_TIMEOUT, (
+        "the bridge inherited the scan timeout again")
+    # And whatever it is, it must clear a GETGRAPHICS with real margin.
+    assert built["timeout"] > 2 * 0.9627

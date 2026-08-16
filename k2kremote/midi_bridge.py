@@ -66,9 +66,38 @@ from k2000.definitions import Button, ButtonEventType, ObjectType  # noqa: E402
 from k2000.messages import ButtonEvent, Change, Del, DelBank, Panel  # noqa: E402
 
 # --- defaults (RE'd values; see module docstring) ---------------------------
-# The RE'd hard floor is ~120 ms, but for unattended / overnight hardware runs
-# we use a conservative 500 ms gap so the K2000's CPU is never stressed.
-SEND_GAP = 0.5             # min seconds between outgoing SysEx (conservative)
+# The RE'd hard floor is ~120 ms. We sit just above it.
+#
+# This gap is the dominant cost of feeling remote rather than immediate, because
+# it is charged on exactly the messages a user is waiting on: the gap is measured
+# from the last *send*, so a request whose reply took a while (GETGRAPHICS, ~0.8 s
+# of wire) has already paid it, while a PANEL button press — which the device
+# answers with nothing at all — pays it in full. At the old 500 ms, a keypress
+# followed by the settle read spent ~1 s idling on the throttle alone, and it was
+# charged again between ALLTEXT and GETGRAPHICS.
+#
+# 150 ms keeps a 30 ms margin over the RE'd floor and cuts that idling by 70%.
+# Anything below SYSEX_FLOOR risks the LCD garbling the K2000's CPU is known to
+# suffer under a flood, so `--sysex-interval` is clamped there. Unattended
+# overnight hardware runs that want the old belt-and-braces spacing can still
+# pass `-i 500`.
+#
+# Measured on the K2000R (2026-08-15): **reads space themselves**. Back-to-back
+# ALLTEXT with the throttle switched off still came 131.6 ms apart, because that
+# is how long the reply takes — already past the 120 ms floor. So the gap does
+# nothing for screen reads and everything for PANEL button presses, which the
+# device answers with nothing at all. Verified clean at 150 ms: 40 reads, 8 full
+# frames and 16 presses each left the panel byte-identical to a reference
+# capture. The gap has NOT been swept below the floor; that needs a human
+# watching the LCD, since a garbled panel appears in no reply.
+SYSEX_FLOOR = 0.12         # RE'd hard floor; never send faster than this
+# 500 ms, restored 2026-08-16 after 150 ms locked the unit up in ordinary use.
+# The margin the sweep suggested was an illusion: it stalled the K2000 at 100 ms
+# with *presses alone*, and real navigation layers a heartbeat, a settle read and
+# a 963 ms GETGRAPHICS on top of those presses. 1.5x over a pure-press failure
+# point is not 1.5x over the real traffic. Lower it with `-i` if you want to
+# experiment, but do it with the panel in view.
+SEND_GAP = 0.5             # min seconds between outgoing SysEx (default)
 DEFAULT_TIMEOUT = 2.5      # a slow interface round-trip; allow margin
 # SysX Device ID for OUTGOING requests. Hardware finding (2026-06-18 on a real
 # K2000R): the unit answers device id 0 (its factory default) but does NOT
@@ -167,9 +196,16 @@ class ThrottledOut:
     def __init__(self, port: rtmidi.MidiOut, gap: float = SEND_GAP,
                  device_id: Optional[int] = None):
         self._port = port
-        self._gap = gap
+        # Clamped, not trusted: the floor is a hardware property, so no caller —
+        # config file, CLI flag or API user — gets to send below it.
+        self._gap = max(gap, SYSEX_FLOOR)
         self._device_id = device_id
         self._last = 0.0
+        # Cumulative seconds spent asleep on the gap. Makes the throttle
+        # observable so instrumentation can tell "the device was slow" from
+        # "we were waiting on ourselves" — without it, a timed call at a 500 ms
+        # gap reads ~631 ms and the device's own 131 ms is invisible inside it.
+        self.throttled_seconds = 0.0
 
     def send_message(self, message) -> None:
         # Only SysEx (F0 …) stresses the K2000's LCD CPU and needs the gap;
@@ -188,6 +224,7 @@ class ThrottledOut:
         wait = self._gap - (time.time() - self._last)
         if wait > 0:
             time.sleep(wait)
+            self.throttled_seconds += wait
         self._port.send_message(message)
         self._last = time.time()
 
@@ -387,7 +424,7 @@ class MidiBridge:
 
     @classmethod
     def autodetect(cls, *, gap: float = SEND_GAP, device_id: int = DEFAULT_DEVICE_ID,
-                   timeout: float = 1.0,
+                   scan_timeout: float = 1.0, timeout: float = DEFAULT_TIMEOUT,
                    on_try: Optional[Callable[[str], None]] = None) -> "MidiBridge":
         """Find a K2000 on any accessible MIDI ports — fully general.
 
@@ -399,6 +436,17 @@ class MidiBridge:
         multi-port interfaces with no hardcoded names. The receive side is bound
         to the *interface* the reply arrived on (so interfaces with dynamically-
         reassigning sub-ports still work). ``on_try`` reports each port.
+
+        ``scan_timeout`` is how long to wait for a *probe* reply per port: short,
+        because it is paid once per silent candidate. ``timeout`` is what the
+        returned bridge uses for real calls. Confusing the two is not cosmetic —
+        the scan value used to be handed straight to the bridge, so ``--rig auto``
+        ran with a **1.0 s** operational timeout against a GETGRAPHICS that takes
+        962.7 ms. Twenty-six milliseconds of headroom. Any jitter turned a healthy
+        read into a TimeoutError, which the refresh worker reads as the device
+        having gone away: it marks the mirror disconnected and backs off, doubling
+        up to 20 s. A frozen, "constantly hanging" mirror, manufactured entirely
+        by us, with the K2000 answering normally throughout.
         """
         from k2000.messages import AllText, ScreenReply, K2_HEADER
 
@@ -452,7 +500,8 @@ class MidiBridge:
                         while port.get_message() is not None:
                             pass
                     out.send_message(request)
-                    reply_port = _await_screen_reply(listeners, timeout, is_screen_reply)
+                    reply_port = _await_screen_reply(listeners, scan_timeout,
+                                                     is_screen_reply)
                 finally:
                     out.close_port()
                     _delete_quiet(out)  # don't orphan a probe client per output port
@@ -513,11 +562,25 @@ class MidiBridge:
         """Drain unsolicited inbound MIDI; return True if a PANEL message was seen.
 
         The K2000 emits PANEL (0x14) for its own front-panel presses when the
-        XMIT ``Buttons`` parameter is On, so an inbound PANEL means the hardware
-        was physically touched and the mirror should refresh. This is a local
-        read of the RX buffer — it sends nothing — and should only be called
-        when no solicited reply is in flight (the refresh worker guarantees this
-        by serializing all MIDI on one thread).
+        XMIT buttons parameter is On — spelled **``Bttns``** on the MIDI TRANSMIT
+        page, which is easy to miss, and Off by factory default. So an inbound
+        PANEL means the hardware was physically touched and the mirror should
+        refresh. This is a local read of the RX buffer — it sends nothing — and
+        should only be called when no solicited reply is in flight (the refresh
+        worker guarantees this by serializing all MIDI on one thread).
+
+        Verified on hardware 2026-08-15: physical presses do arrive and decode,
+        and our own injected presses are **not** echoed back even with ``Bttns``
+        On, so there is no refresh feedback loop.
+
+        We deliberately look at the message *type* only. On an inbound PANEL the
+        field that doesn't apply is **filler, not data**: button Down/Up events
+        carry ``alpha_wheel_clicks == +63`` (the device sends ``0x7F``, and the
+        decoder subtracts 64), and AlphaWheel events carry a meaningless
+        ``button`` (``ChanBankDec``). Anything that starts reading those fields —
+        e.g. mirroring a physical press into the software name cursor — must
+        ignore the irrelevant one, or it will apply a phantom 63-click turn on
+        every button press. See RESOLUTION_NOTES §3.
         """
         from k2000.messages import K2_HEADER, Panel, SysexMessage
 
@@ -533,6 +596,37 @@ class MidiBridge:
                     and data[type_index] == Panel._msg_type_int):
                 seen = True
         return seen
+
+    def ports_present(self) -> bool:
+        """Are the MIDI ports we opened still enumerated by the system?
+
+        The one signal that separates "the device is busy" from "the device is
+        gone", and the only one that works when the device has stopped talking
+        to us — which is exactly when we need to tell those apart.
+
+        Verified live 2026-08-16: a K2000 disk load silences the unit completely
+        for **minutes**. It answers nothing, so no screen text reaches us and no
+        elapsed-time rule can distinguish it from an unplug. The ports, though,
+        stay enumerated throughout.
+
+        Note what this can and cannot see. Our ports belong to the MIDI
+        *interface*, so this catches the interface being unplugged; a K2000
+        switched off behind a still-present interface looks the same as one that
+        is merely busy. That is the right way round: the cost of calling a busy
+        device "gone" is a mirror that cries wolf during every disk operation,
+        while the cost of calling a powered-off device "not answering" is a
+        slightly coy status line. This is a local enumeration — it sends nothing.
+        """
+        try:
+            names = getattr(self.client.midi_in, "get_ports", _enum_in)()
+            outs = _enum_out()
+        except Exception:
+            return True   # can't tell: assume present rather than declare a loss
+        wanted = [p for p in (self.client.port_name or "").split(" -> ") if p]
+        if not wanted:
+            return True
+        haystack = set(names) | set(outs)
+        return all(any(w == n or w in n for n in haystack) for w in wanted)
 
     def is_connected(self, timeout: float = DEFAULT_TIMEOUT) -> bool:
         """True if the K2000 answers a screen request within ``timeout``."""
