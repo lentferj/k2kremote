@@ -645,3 +645,59 @@ def test_autodetect_does_not_hand_the_scan_timeout_to_the_bridge(monkeypatch):
         "the bridge inherited the scan timeout again")
     # And whatever it is, it must clear a GETGRAPHICS with real margin.
     assert built["timeout"] > 2 * 0.9627
+
+
+# --- a host with no MIDI backend is a legitimate state, not a crash ---------
+
+def _no_backend(monkeypatch):
+    """Make rtmidi behave as it does with no ALSA sequencer / CoreMIDI / WinMM."""
+    class NoBackend:
+        def __init__(self, *a, **k):
+            raise SystemError(
+                "MidiInAlsa::initialize: error creating ALSA sequencer client object")
+
+    monkeypatch.setattr("rtmidi.MidiIn", NoBackend)
+    monkeypatch.setattr("rtmidi.MidiOut", NoBackend)
+
+
+def test_enumeration_degrades_instead_of_raising(monkeypatch):
+    """rtmidi raises from the *constructor* on a headless host, and every entry
+    point starts by enumerating — so an unguarded probe made `ports` and the
+    port-picking path traceback on any container, CI runner or box without a
+    sequencer."""
+    from k2kremote import midi_bridge
+
+    _no_backend(monkeypatch)
+    assert midi_bridge.list_ports() == ([], [])
+    assert midi_bridge.bidirectional_ports() == []
+    assert "ALSA sequencer" in (midi_bridge.midi_backend_error() or "")
+
+
+def test_ports_command_explains_itself_rather_than_raising(monkeypatch, capsys):
+    from k2kremote import midi_bridge
+
+    _no_backend(monkeypatch)
+    with pytest.raises(SystemExit) as excinfo:
+        midi_bridge._main(["ports"])
+    message = str(excinfo.value.code)
+    assert "no MIDI backend" in message
+    assert "snd-seq" in message          # and says what to do about it
+
+
+def test_backend_error_clears_once_enumeration_works(monkeypatch):
+    """A stale reason must not outlive the failure that set it."""
+    from k2kremote import midi_bridge
+
+    _no_backend(monkeypatch)
+    midi_bridge.list_ports()
+    assert midi_bridge.midi_backend_error() is not None
+
+    class Fine:
+        def __init__(self, *a, **k): pass
+        def get_ports(self): return ["Some Port 1"]
+        def delete(self): pass
+
+    monkeypatch.setattr("rtmidi.MidiIn", Fine)
+    monkeypatch.setattr("rtmidi.MidiOut", Fine)
+    assert midi_bridge.list_ports() == (["Some Port 1"], ["Some Port 1"])
+    assert midi_bridge.midi_backend_error() is None

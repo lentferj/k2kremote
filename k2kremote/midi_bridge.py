@@ -167,22 +167,46 @@ def _delete_quiet(port) -> None:
         pass
 
 
+# Why the last enumeration found nothing, when the reason was "no MIDI backend"
+# rather than "no ports". rtmidi raises from the *constructor* on a host with no
+# ALSA sequencer — a container, a headless box, a CI runner — and every entry
+# point here begins by enumerating, so an unguarded probe turns `k2kremote
+# --port ...` and `python -m k2kremote.midi_bridge ports` into a traceback on
+# any such machine. Enumeration therefore degrades to an empty list, and this
+# records why so the CLI can say something more useful than "no ports".
+_BACKEND_ERROR: Optional[str] = None
+
+
+def midi_backend_error() -> Optional[str]:
+    """Why enumeration failed last time, or None if the backend is fine."""
+    return _BACKEND_ERROR
+
+
+def _enumerate(factory) -> List[str]:
+    """Port names from a throwaway probe, or [] if there is no MIDI backend."""
+    global _BACKEND_ERROR
+    probe = None
+    try:
+        probe = factory()
+        names = probe.get_ports()
+    except Exception as exc:          # no ALSA sequencer, no CoreMIDI, no WinMM
+        _BACKEND_ERROR = f"{type(exc).__name__}: {exc}"
+        return []
+    finally:
+        if probe is not None:
+            _delete_quiet(probe)
+    _BACKEND_ERROR = None
+    return names
+
+
 def _enum_in() -> List[str]:
     """List input port names without orphaning an ALSA sequencer client."""
-    probe = rtmidi.MidiIn()
-    try:
-        return probe.get_ports()
-    finally:
-        _delete_quiet(probe)
+    return _enumerate(rtmidi.MidiIn)
 
 
 def _enum_out() -> List[str]:
     """List output port names without orphaning an ALSA sequencer client."""
-    probe = rtmidi.MidiOut()
-    try:
-        return probe.get_ports()
-    finally:
-        _delete_quiet(probe)
+    return _enumerate(rtmidi.MidiOut)
 
 
 class ThrottledOut:
@@ -831,6 +855,13 @@ def _main(argv: List[str]) -> None:
     """Standalone smoke test: list ports, or read the live screen as braille."""
     if not argv or argv[0] == "ports":
         ins, outs = list_ports()
+        if not ins and not outs and midi_backend_error():
+            # Exit non-zero so a script can tell, but say why rather than
+            # raising: "no MIDI backend" is a legitimate state for a container
+            # or a headless host, not a bug in the caller.
+            sys.exit(f"no MIDI backend on this host ({midi_backend_error()}) — "
+                     "nothing to list. On Linux this usually means no ALSA "
+                     "sequencer (try `modprobe snd-seq`).")
         print("MIDI inputs:")
         for name in ins:
             print(f"  {name}")

@@ -5,6 +5,8 @@ SPDX-FileCopyrightText: Copyright (C) 2026  k2kremote contributors
 
 # k2kremote
 
+[![tests](https://github.com/lentferj/k2kremote/actions/workflows/tests.yml/badge.svg)](https://github.com/lentferj/k2kremote/actions/workflows/tests.yml)
+
 A terminal remote for the Kurzweil **K2000 / K2000R**: it mirrors the hardware
 LCD pixel-for-pixel, drives every front-panel button from the computer keyboard,
 and can rename objects in one shot — all over ordinary MIDI SysEx.
