@@ -1121,3 +1121,120 @@ the front panel is the route that works and the SysEx helper is not.
 Worth remembering as a general shape rather than a K2000 quirk: a protocol-level
 "delete all" and the panel's own are not guaranteed to free the same resources,
 and the difference only shows up when you are short of the one that leaks.
+
+---
+
+## 19. Driving the program editor: layers, parameter entry, and two traps
+
+§18 covered a first pass at reading DSP parameters off the display. A much longer
+session against the same machine turned up the things §18 got wrong or missed.
+Generic K2000 behaviour throughout; nothing here depends on the material.
+
+### The algorithm and the DSP functions are PER LAYER
+
+A program has up to seven layers, and **each layer has its own algorithm and its
+own DSP chain**. One program observed with layers 1-2 on algorithm 21 and layer 3
+on algorithm 13. Another with four layers running three different functions in
+the F1 slot.
+
+So "the algorithm of program X" is not well defined, and neither is "the filter
+of program X". Anything reading program parameters has to iterate layers, and
+anything correlating against stored bytes has to pair each byte with its own
+layer's algorithm rather than the program's first.
+
+This invalidated a whole afternoon of readings that were all silently layer 1 of
+N — they were not wrong, but they described a slice, and the slice turned out to
+differ from the rest.
+
+### Layer selection: the Chan/Bank buttons
+
+`<>Layer:1/7` in a page header marks it as steppable by **ChanBankInc /
+ChanBankDec** — the same `<>` convention as `<>Channel:9` in Program Mode.
+Stepping stays on the current page, so a reader can hold F1 open and walk every
+layer without re-navigating.
+
+### F1..F4 are control INPUTS, not chain positions
+
+The soft row reads `F1 FRQ  F2 RES  F3 POS  F4 AMP`, and it is tempting to map
+F*n* to the *n*th block. It does not. The PITCH block has its own dedicated soft
+button, F1..F4 are the remaining **control inputs in order**, and a DSP function
+with several inputs consumes several slots:
+
+    alg  2   PITCH  2POLE LOWPASS  PANNER  AMP     F1 FRQ  F2 RES  F3 POS  F4 AMP
+    alg 19   PITCH  LOPAS2  SHAPE MOD OSC  AMP     F1 FRQ  F2 PCH  F3 DEP  F4 AMP
+    alg 28          SYNC M  SYNC S  LP2RES  AMP    F1 PCH  F2 PCH  F3 FRQ  F4 AMP
+
+The two-input lowpass spans F1+F2; algorithms 26-31 have no PITCH block so F1
+starts at the first block; a `NONE` block still occupies a slot and reads `OFF`.
+
+### Type a value, do not step to it
+
+Stepping a parameter with the alpha wheel **carries state**. Sweeping the
+algorithm 1..31 with the wheel produced chains that disagreed with the same
+algorithms reached directly, on more than half of them — changing the algorithm
+preserves each block's function where the new chain permits it, so what you see
+depends on where you came from.
+
+Typing the number on the alphanumeric pad jumps straight there. For any
+"enumerate a parameter's values" sweep: **type, re-entering the editor fresh each
+time**, or the readings describe your path rather than the parameter.
+
+Two related traps, both silent:
+
+* **Parameter lists wrap.** Wheeling up from algorithm 31 lands on 1 with no
+  indication, which silently ended a sweep early.
+* **Program 199 is the factory default program** and makes a clean baseline for
+  "what does this parameter look like untouched".
+
+### Reading a parameter's full range, non-destructively
+
+Put the cursor on it, step the wheel one click at a time reading the display, and
+leave with **Exit → No**. The edit buffer is discarded; the stored object is
+untouched. One program yields the whole curve, which beats hunting for programs
+that happen to hold different values.
+
+This is how the depth scale was found to be piecewise rather than linear. Two
+sample points had implied a straight line.
+
+### The parameter cursor is invisible to us
+
+As with the name-edit cursor (§6), `get_screen_text_attrs` returns an all-zero
+reverse mask on a DSP page — the cursor is drawn in the graphics plane only. So
+a driver cannot see where the cursor is and must **locate it by acting**: nudge a
+control, diff the screen, see what moved. On opening a page the cursor sits on
+the first parameter, and CursorRight moves to the right-hand column.
+
+### The display truncates at 40 columns
+
+A long function name loses its tail: `F1 FRQ(PARA TREBLE` with the closing
+bracket cut. The ALG page's chain line carries the untruncated name, so read
+types from there.
+
+### The left column is not a fixed parameter set
+
+    FRQ  Coarse / Fine / -      / KeyTrk / VelTrk / Pad
+    PCH  Coarse / Fine / FineHz / KeyTrk / VelTrk / Pad
+    AMP  Adjust / -    / -      / KeyTrk / VelTrk / Pad
+    AMT  Adjust / -    / KStart / KeyTrk / VelTrk / Pad
+
+The first field is `Coarse` on frequency and pitch functions and `Adjust` on the
+others; non-linear functions carry `KStart` where PITCH carries `FineHz`. Parse
+by position within the 20-column half and read the label, rather than assuming a
+key set.
+
+### Units are per function, not per unit name
+
+Worth stating because it caught us: a `dB` on one page is not the same encoding
+as a `dB` on another. Amplitude and shaper depths read 1:1 with the stored byte;
+filter resonance reads at half a dB per unit. Frequency depths are neither — they
+follow a piecewise cents curve. **The unit has to be keyed off the function, and
+the scale off the function too.**
+
+### Overnight jobs do not belong in the session scratchpad
+
+The scratchpad lives under `/tmp`, which on this host is a separate 4.7 GB volume
+and does not survive a reboot. A long capture writing there lost everything to a
+host power-cycle, despite flushing every row — guarding against the job stalling
+does nothing about the file being deleted underneath it. Long-running artefacts
+go under `~/temp`, detached with `nohup`, resumable, and `fsync` per record
+rather than `flush`: after a power loss those are genuinely different states.
