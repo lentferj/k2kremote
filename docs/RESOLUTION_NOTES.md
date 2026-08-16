@@ -1262,6 +1262,78 @@ host power-cycle, despite flushing every row — guarding against the job stalli
 does nothing about the file being deleted underneath it. Long-running artefacts
 go under `~/temp`, detached with `nohup`, resumable, and `fsync` per record
 rather than `flush`: after a power loss those are genuinely different states.
+
+## 20. Bounds fitted to the tested case, and telling "not yet" from "lost" (2026-08-17)
+
+An overnight capture run for the sibling project produced three findings that
+are about *method* rather than the K2000, and all three cost real hours.
+
+### A loop bound must come from the structure, not from the case that worked
+
+The capture navigates the program editor by cycling the soft-key row until it
+finds the page it wants. It allowed **four** presses. The editor has **six**
+soft pages. Layers 1 and 2 happened to start from a page where four sufficed,
+so the run looked healthy; **every layer-3 read failed**, 22 of them, and since
+a failure broke out of the layer loop those programs silently lost layers 4+ as
+well. The row count rose the whole time. It was the log, not the count, that
+showed it.
+
+Auditing the repo for the same shape found it in `text_entry._type_char`: a
+flat budget of 12 presses against a digit ring of 10, with the letter branch
+directly below deriving its bound correctly from `len(PAD_GROUPS[button]) + 1`.
+Twelve is enough, so nothing was broken — which is what makes it worth fixing.
+Nothing tied the number to the ring, so tuning it down for speed would have
+broken 8 and 9 only, in names containing them only, on hardware only. Both
+branches now go through `_passes()`: one reset plus a full lap, derived.
+
+Same shape as the depth curve fitted across sampled points and read outside the
+sampled range, and the same shape as the timing constants of §15, measured on
+isolated operations and shipped for sustained ones. Three times in one night,
+and in each case the narrowness was invisible from inside the fix.
+
+### Reading a position back and then not acting on it
+
+`type_name` reads every cell back — that is its entire advantage over
+`plan_name`. Both multi-tap branches nevertheless *returned quietly* when the
+cell never showed the wanted character, leaving a garbled name on the device
+and reporting success. The caller's next move is Save. Where a function already
+knows the answer is wrong, the only question left is whether the caller hears
+about it; both paths now raise `NameEntryFailed`.
+
+### A progress signal must distinguish "not yet" from "lost"
+
+The consumer of the capture compared a denominator that was complete from the
+first row against a numerator that filled in over hours, so every unfinished
+layer read as MISSING. Two obvious fixes both have the same hole:
+
+* **a `DONE` line in the log** — never written by a run that is killed, wedges,
+  or dies to a power-cycle (which this one did, at 23:15). The consumer then
+  waits forever and silently never flags anything.
+* **a row-count threshold** — cannot tell a finished run from one that stopped
+  one row short.
+
+`status_watch.py` (with the capture under `~/temp/k2k_correlation`, not in this
+repo — it is cross-project scratch) emits `state: running | complete | stalled` plus
+`gaps_are_meaningful`, rewritten atomically (temp + rename, so a reader never
+sees half a file). `stalled` fires after 300 s without the file growing, and it
+is the state neither option above can express: **dead, not slow.** Waiting
+silently on a marker that will never arrive is a worse failure than a false
+alarm, because nothing surfaces it.
+
+### Two wrong denominators is a cheaper diagnosis than one
+
+Our expected row totals disagreed (184 vs 116 at layer 2) while agreeing exactly
+at layers 3, 4 and 5 — which killed the obvious "you are missing a bank"
+explanation and said the gap was scattered individual programs. Emitting a
+per-program table turned a total-vs-total argument into a join, and the join
+found the other side's number was stale, cached across the very fix that
+invalidated it. Both now read 581.
+
+What is left is better than the disagreement never happening: the layer count of
+all 255 programs now has two independent derivations — read off the device here,
+counted from `0x50` segments in the files there — that agree per program. Values
+that outlive their evidence look exactly like values that are still true; the
+only cheap defence is a second derivation from a different source.
 ## 21. MAC editor — the `.MAC` format, RE'd offline
 
 Everything below was done **with no K2000 attached**, from the backup images in
