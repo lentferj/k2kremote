@@ -1037,3 +1037,87 @@ conservative of the two and nobody has complained, but it is a wart.
 real load we do not. It is kept because it costs nothing and may catch shorter
 operations, but it is not what fixed this, and it should not be mistaken for the
 mechanism.
+
+---
+
+## 18. Driving the editor from the mirror — things learned doing it (2026-08-16)
+
+A sibling project needed DSP parameters read off the K2000's own display. Doing
+that end to end — disk browse, bank load, editor navigation, parameter sweep —
+turned up several things worth keeping. No library, vendor or preset names here
+by request; none of what follows depends on them.
+
+### The editor's DSP pages are F1..F4, and their layout is fixed
+
+The program editor's second soft-key page reads e.g.
+
+    <more   F1 FRQ   F2 RES   F3 POS   F4 AMP   more>
+
+F1..F4 are the four DSP function slots of the current algorithm, and the soft
+label names what each slot *does* in this program (FRQ, RES, DRV, AMP, PCH,
+WID, POS…). Each opens a page with the same eleven control parameters the manual
+describes, laid out in two 20-column halves:
+
+    Coarse / Adjust      Src1
+    Fine                 Depth
+    (FineHz, PITCH only) Src2
+    KeyTrk               DptCtl
+    VelTrk               MinDpt
+    Pad                  MaxDpt
+
+`soft_labels` finds them, and splitting each row at column 20 parses both halves
+cleanly — the two columns are independent `label:value` fields.
+
+### The parameter cursor is not in ALLTEXT either
+
+§6 established that the *name-edit* cursor appears in neither device reply. The
+same is true of the editor's parameter cursor: `get_screen_text_attrs` returns an
+all-zero reverse mask on a DSP page. It is drawn in the graphics plane only.
+
+Consequence for anything driving the editor: you cannot see where the cursor is,
+so **locate it by acting** — nudge the wheel one click and see which field
+changed. Cursor position after opening a page was consistently the top-left
+parameter, with CursorRight moving to the right column.
+
+### Reading a parameter's whole range without writing anything
+
+The useful technique from this job. To learn a parameter's value scale, put the
+cursor on it, turn the alpha wheel one click at a time reading the display after
+each, then leave with **Exit → No**. The edit buffer is discarded and the stored
+object is untouched — verified by re-reading afterwards.
+
+This gets the entire curve from a single program, which is far better than
+hunting for programs that happen to hold different values, and it costs nothing
+because nothing is saved. It revealed that one K2000 depth parameter is
+*piecewise*: coarse steps at the top of its range, a long linear middle, heavy
+compression near zero, and a mirrored negative branch. Two sample points had
+suggested a straight line and would have been badly wrong at the ends.
+
+Generalisable: any "what does this byte mean" question about a program parameter
+can be answered this way, as long as you exit without saving.
+
+### Disk operations, measured
+
+Confirms §17 with numbers:
+
+* pressing **Load** — 27 s of total silence while the SCSI volume is scanned;
+* a **15.8 MB bank load** — about 3 minutes of silence;
+* a **56 KB programs-only load** — under 10 s;
+* ordinary browsing (directory open, cursor moves, Cancel) — about 1 s.
+
+Throughout, the ALSA ports stay enumerated, which is what `ports_present()`
+relies on. A programs-only bank whose samples are all ROM references loads
+without complaint and does not touch sample RAM.
+
+### Master → Delete → Everything really does reclaim sample RAM
+
+The counterpart to the DELBANK finding in §10, now confirmed from the other
+side: the **front-panel** wipe took free sample memory from 1135K to 65536K,
+i.e. it released everything. Our own F11 helper goes through DELBANK, which
+frees program RAM but leaves sample RAM allocated. When sample memory is the
+resource that is short — which is exactly when a large load has just refused —
+the front panel is the route that works and the SysEx helper is not.
+
+Worth remembering as a general shape rather than a K2000 quirk: a protocol-level
+"delete all" and the panel's own are not guaranteed to free the same resources,
+and the difference only shows up when you are short of the one that leaks.
