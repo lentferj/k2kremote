@@ -274,7 +274,7 @@ prose manual (setup, terminals, controls, safety).
 | `--port NAME` | — | Exact MIDI port name to use (implies `--rig standard`). List names with `python -m k2kremote.midi_bridge ports`. |
 | `--config FILE` | `config.toml` | TOML file remembering the port/rig selection (ignored if absent). |
 | `--save-config` | off | Write the effective port/rig selection to `--config`, so later runs need no flags. |
-| `-i, --sysex-interval MS` | `500` | Minimum delay between outgoing SysEx messages (like `amidi -i`). Lower = snappier UI, but more risk of garbling the K2000's LCD. |
+| `-i, --sysex-interval MS` | `150` | Minimum delay between outgoing SysEx messages (like `amidi -i`), clamped to the RE'd 120 ms floor. Lower = snappier UI, but more risk of garbling the K2000's LCD; raise it to `500` for unattended runs. |
 
 **Display**
 
@@ -289,11 +289,13 @@ prose manual (setup, terminals, controls, safety).
 
 | Option | Default | Description |
 |---|---|---|
-| `--settle MS` | `350` | Delay after a keypress before reading the redrawn LCD. Lower = snappier; too low may read the screen mid-redraw. |
+| `--settle MS` | `150` | Delay after a keypress before reading the redrawn LCD. Lower = snappier; setting it too low only costs one cheap re-read, since the mirror takes a second look when the screen comes back unchanged. |
+| `--heartbeat MS` | `1200` | Idle refresh cadence. A quiet poll reads only the 321-byte text plane and stops there when nothing changed, so it is ~8x cheaper than a full frame; lower = front-panel changes appear sooner. |
 | `--alt-keys` | off | Show terminal-safe key alternates (`a`–`h` soft keys, `Ctrl+e/x/n/v/g`) in the legend and soft-key bar — for terminals that intercept the F-keys (Alt-chords stay). |
 | `--super-alt-keys` | off | Everything `--alt-keys` does, plus move the mode buttons to the `m` leader (press `m`, then `p/s/q/m/i/d/g/e`) — for terminals that also grab the `Alt+letter` mode chords. |
 | `--manual-refresh` | off | Disable the periodic heartbeat entirely; refresh only on front-panel events and `Ctrl+r`. The strongest guard against polling the K2000 during a delete/save (a poll landing mid-rewrite can lock up the unit). |
 | `--demo` | off | Run against a static synthetic frame with no MIDI — try the UI and render modes without any hardware. |
+| `--print-size` | — | Print `COLSxROWS` to open the window at — the size the app was last closed at, or the smallest that shows the mirror uncompromised — and exit. |
 | `--long-help` | — | Print the full prose user manual and exit. |
 | `-h, --help` | — | Print the option summary and exit. |
 

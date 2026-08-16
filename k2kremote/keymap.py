@@ -198,23 +198,28 @@ MODE_BAR_ALT: List[Tuple[str, str]] = [
 # Key legend for the status row, as discrete blocks. The TUI folds these to the
 # window width (k2kremote.app.wrap_blocks), breaking only between blocks — never
 # inside one — so a label like "Alt+X panic" is never split across a line.
-LEGEND_BLOCKS: Tuple[str, ...] = (
-    "↑↓←→ cursor", "+/- or PgUp/Dn value", "_ sign/case", "Enter", "Esc=Exit",
-    "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "F1-F6 soft",
-    "F7 Edit", "F8 Exit", "F9 name", "F10 view", "F11 master", "F12 png",
-    "Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
+# Grouped so a fold never orphans one member of a run. The function keys in
+# particular read as a block: when a greedy wrap put "F7 Edit" at the end of the
+# navigation line and started the next with "F8 Exit", F7 was reported missing.
+LEGEND_GROUPS: Tuple[Tuple[str, ...], ...] = (
+    ("↑↓←→ cursor", "+/- or PgUp/Dn value", "_ sign/case", "Enter", "Esc=Exit",
+     "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both"),
+    ("F1-F6 soft", "F7 Edit", "F8 Exit", "F9 name", "F10 view", "F11 master",
+     "F12 png"),
+    ("Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename"),
 )
+LEGEND_BLOCKS: Tuple[str, ...] = tuple(b for g in LEGEND_GROUPS for b in g)
 LEGEND = " · ".join(LEGEND_BLOCKS)
 
 # Same legend with the **terminal-safe alternates** for terminals that swallow
 # the F-keys (shown by the app's --alt-keys option). Only the F-key blocks change.
-LEGEND_BLOCKS_ALT: Tuple[str, ...] = (
-    "↑↓←→ cursor", "+/- or PgUp/Dn value", "_ sign/case", "Enter", "Esc=Exit",
-    "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both", "a-h soft",
-    "Ctrl+e Edit", "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view",
-    "Ctrl+u master", "Ctrl+g png", "Alt+x panic", "p pause", "Ctrl+r refresh",
-    "Ctrl+o rename",
+LEGEND_GROUPS_ALT: Tuple[Tuple[str, ...], ...] = (
+    LEGEND_GROUPS[0],
+    ("a-h soft", "Ctrl+e Edit", "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view",
+     "Ctrl+u master", "Ctrl+g png"),
+    LEGEND_GROUPS[2],
 )
+LEGEND_BLOCKS_ALT: Tuple[str, ...] = tuple(b for g in LEGEND_GROUPS_ALT for b in g)
 
 # Soft-key prefixes for the live F1-F6 label bar: the F-keys by default, or the
 # home-row alternates (a s d f g h) under --alt-keys.

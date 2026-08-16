@@ -40,7 +40,7 @@ import argparse
 import os
 import re
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 from rich.text import Text
@@ -111,6 +111,79 @@ def wrap_blocks(blocks: List[str], width: int, sep: str = _BAR_SEP) -> str:
     return "\n".join(lines)
 
 
+def align_blocks(blocks: List[str], span: int, width: int, offset: int = 0,
+                 centres: Optional[List[Optional[float]]] = None) -> Optional[str]:
+    """Lay ``blocks`` out so each sits under its zone of an ``span``-wide mirror.
+
+    The K2000 divides its 40-column bottom row into six equal soft-key zones, and
+    :func:`soft_labels` reads them back by which zone a word's centre falls in.
+    This is the inverse: block *i* is centred in zone *i* of the LCD **as
+    currently drawn**, so the ``[F#:label]`` strip lines up under the labels on
+    screen instead of being packed against the left margin. ``span`` is the width
+    of the rendered mirror in cells (40 in text mode, 120 for braille, up to 240
+    for half-blocks, whatever the pixel image occupies), and ``offset`` shifts
+    everything right — the image is centred in its box.
+
+    Returns ``None`` when the blocks cannot be placed under their zones without
+    overlapping, or would run past ``width``; the caller then falls back to plain
+    packing. That is the normal outcome in 40-column text mode, where six
+    ``[F#:label]`` blocks simply do not fit under 40 columns of LCD.
+    """
+    if span <= 0 or len(blocks) != _SOFT_KEYS:
+        return None
+    if sum(len(b) for b in blocks) + len(blocks) - 1 > span:
+        return None
+    line = ""
+    for i, block in enumerate(blocks):
+        # Prefer the label's real position on the K2000's row; fall back to the
+        # centre of the nominal zone when that key carries no label.
+        frac = None if centres is None or i >= len(centres) else centres[i]
+        if frac is None:
+            frac = (i + 0.5) / _SOFT_KEYS
+        pos = offset + int(round(frac * span)) - len(block) // 2
+        pos = max(pos, offset)                 # never hang off the mirror's left
+        if line:
+            pos = max(pos, len(line) + 1)      # never butt two blocks together
+        if width and pos + len(block) > width:
+            return None
+        line = line.ljust(pos) + block
+    return line
+
+
+def wrap_groups(groups, width: int, sep: str = _BAR_SEP) -> str:
+    """Fold ``groups`` of blocks, preferring to break *between* groups.
+
+    :func:`wrap_blocks` packs greedily, which is fine until it splits a run that
+    reads as a unit: at 150 columns it fitted "F7 Edit" onto the end of the
+    navigation line and began the next with "F8 Exit", and F7 was duly reported
+    missing. A group that will not fit on the current line starts a new one
+    instead of being broken across the fold.
+
+    A group too wide for a whole line still wraps inside itself — better a split
+    run than a clipped one — and groups keep sharing a line whenever they fit,
+    so nothing gets taller than it needs to be.
+    """
+    lines: List[str] = []
+    current = ""
+    for group in groups:
+        block = sep.join(group)
+        candidate = block if not current else current + sep + block
+        if width and len(candidate) > width and current:
+            lines.append(current)
+            current = ""
+            candidate = block
+        if width and len(candidate) > width:
+            # This group alone overflows: fall back to packing it block by block.
+            packed = wrap_blocks(list(group), width, sep).split("\n")
+            lines.extend(packed[:-1])
+            current = packed[-1]
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
 # The bottom text row carries the K2000's own soft-key labels.
 _SOFT_KEYS = 6
 _TEXT_COLS = 40  # 240 px / 6 px per char
@@ -140,6 +213,92 @@ def soft_labels(text_rows: List[str]) -> List[str]:
         key = min(_SOFT_KEYS - 1, int(centre * _SOFT_KEYS / _TEXT_COLS))
         labels[key] = (labels[key] + " " + match.group()).strip()
     return labels
+
+
+# --- window sizing ----------------------------------------------------------
+# Chrome around the mirror, in rows: title bar, soft-key strip, mode bar, the
+# two-line key legend, and the status line.
+_CHROME_ROWS = 1 + 1 + 1 + 2 + 1
+
+
+def optimal_size() -> Tuple[int, int]:
+    """The smallest terminal that shows the mirror without compromise, in cells.
+
+    Width is set by the mirror itself: below :data:`braille.BRAILLE_COLS` the app
+    puts up a "widen the window" hint, because the LCD can no longer be shown
+    1:1. Height is that chrome plus the tallest of the everyday renderers —
+    braille at 16 rows; the pixel image works out shorter, and the 32-row
+    half-block mode is a deliberate wide-screen choice, not the default.
+
+    A couple of columns of slack keeps the centred pixel image off the edges.
+    """
+    return braille.BRAILLE_COLS + 4, _CHROME_ROWS + braille.BRAILLE_ROWS + 1
+
+
+def _size_state_path() -> "pathlib.Path":
+    """Where the last-used window size is cached (XDG, falling back to ~/.cache)."""
+    import os
+    import pathlib
+
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return pathlib.Path(base) / "k2kremote" / "window-size"
+
+
+def remembered_size() -> Optional[Tuple[int, int]]:
+    """The size the app was last closed at, or None if unknown/implausible.
+
+    Anything narrower than the mirror is rejected rather than remembered — a
+    window that was accidentally dragged tiny should not become the new normal.
+    """
+    try:
+        raw = _size_state_path().read_text().split()
+        cols, rows = int(raw[0]), int(raw[1])
+    except Exception:
+        return None
+    least_cols, least_rows = optimal_size()
+    if cols < braille.BRAILLE_COLS or rows < _CHROME_ROWS + 4:
+        return None
+    return cols, max(rows, min(least_rows, rows))
+
+
+def remember_size(cols: int, rows: int) -> None:
+    """Cache the window size for the next launch; never raise."""
+    try:
+        path = _size_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"{cols} {rows}\n")
+    except Exception:
+        pass
+
+
+def startup_size() -> Tuple[int, int]:
+    """What to open the window at: last used if sane, else the optimum."""
+    return remembered_size() or optimal_size()
+
+
+def soft_label_centres(text_rows: List[str]) -> List[Optional[float]]:
+    """Where each soft-key label actually sits, as a fraction of the row width.
+
+    :func:`soft_labels` only says *which* key a word belongs to. For lining the
+    ``[F#:label]`` strip up under the mirror that is not enough: the K2000 does
+    not centre its labels in their sixths — ``Octav- Octav+ Panic  View   Chan-
+    Chan+`` puts each word wherever it likes — so centring our blocks in the
+    nominal zones leaves them visibly off. This returns the centre column of the
+    label the same word-assignment produced, normalised to 0..1, or ``None`` for
+    a key with no label (which falls back to its zone centre).
+    """
+    bottom = (text_rows[-1] if text_rows else "").ljust(_TEXT_COLS)[:_TEXT_COLS]
+    bounds: List[Optional[List[int]]] = [None] * _SOFT_KEYS
+    for match in re.finditer(r"\S+", bottom):
+        centre = (match.start() + match.end() - 1) / 2
+        key = min(_SOFT_KEYS - 1, int(centre * _SOFT_KEYS / _TEXT_COLS))
+        span = bounds[key]
+        if span is None:
+            bounds[key] = [match.start(), match.end()]
+        else:  # a multi-word label ("Delete Insert" style) spans both
+            span[0], span[1] = min(span[0], match.start()), max(span[1], match.end())
+    return [None if b is None else ((b[0] + b[1] - 1) / 2) / _TEXT_COLS
+            for b in bounds]
 
 
 def is_name_dialog(text_rows: List[str]) -> bool:
@@ -332,6 +491,14 @@ class SoftBar(Static):
 
     labels: reactive[List[str]] = reactive(list)
     alt_keys: reactive[bool] = reactive(False)
+    # Geometry of the mirror drawn above us, so each block can sit under the
+    # soft key it names. span = width of the rendered LCD in cells, offset = how
+    # far right it starts. Zero span means "unknown" and we fall back to packing.
+    span: reactive[int] = reactive(0)
+    offset: reactive[int] = reactive(0)
+    # Where each label really sits on the K2000's row (0..1), so blocks land
+    # under the words rather than under the middle of a nominal sixth.
+    centres: reactive[List[Optional[float]]] = reactive(list)
 
     def render(self):
         cells = self.labels or [""] * _SOFT_KEYS
@@ -340,14 +507,29 @@ class SoftBar(Static):
             f"[{keys[i]}:{label}]" if label else f"[{keys[i]}]"
             for i, label in enumerate(cells)
         ]
-        # Fold to the bar width so a whole [F#:label] block is never split, then
-        # disable Rich wrapping so it honours our line breaks verbatim.
         width = self.size.width or 9999
+        # Preferred: line each block up under its zone of the mirror above.
+        aligned = align_blocks(blocks, self.span, width, self.offset,
+                               self.centres or None)
+        if aligned is not None:
+            return Text(aligned, no_wrap=True)
+        # Otherwise fold to the bar width so a whole [F#:label] block is never
+        # split, and disable Rich wrapping so it honours our line breaks verbatim.
         return Text(wrap_blocks(blocks, width, sep="  "), no_wrap=True)
 
 
 # Characters of a name past this many won't fit the K2000's display field; the
 # rename tool colours the overflow so it's clear they're stored but not shown.
+# A frozen mirror shows stale data that still looks live, which is the one UI
+# state that can actively mislead — so it gets the loudest treatment the terminal
+# offers. Blink is honoured by kitty and degrades to plain bold orange elsewhere,
+# which is still unmistakable against the muted bar.
+_PAUSED_STYLE = "blink bold orange1"
+# Silent-but-present: informational, not alarming. Deliberately not red — the
+# device is fine, it is just busy, and red for a routine disk load is what made
+# the old "disconnected" claim so misleading.
+_WAITING_STYLE = "bold yellow"
+
 _NAME_DISPLAY_WIDTH = name_cursor.NAME_MAX_LEN  # 16
 _OVERFLOW_STYLE = "bold orange1"  # high-contrast orange for the clipped tail
 
@@ -736,19 +918,22 @@ class K2KRemoteApp(App):
 
     def __init__(self, bridge=None, *, demo: bool = False, model: str = "K2000R",
                  text_mode: bool = False, settle: Optional[float] = None,
+                 heartbeat: Optional[float] = None,
                  image_protocol: str = "auto", image_cols: int = 120,
                  alt_keys: bool = False, super_alt_keys: bool = False,
-                 manual_refresh: bool = False):
+                 manual_refresh: bool = False, mirror_panel: bool = True):
         super().__init__()
         self._bridge = bridge
         self._demo = demo
         self._model = model
         self._settle = settle
+        self._heartbeat = heartbeat
         # Manual-refresh-only: no periodic heartbeat at all (the worker gets
         # heartbeat=None). The mirror then updates only on front-panel events and
         # explicit refreshes — the strongest guard against the heartbeat polling
         # the K2000 during a destructive op. See refresh.RefreshWorker.
         self._manual_refresh = manual_refresh
+        self._mirror_panel = mirror_panel
         # --alt-keys: show the F-key alternates (a-h soft keys, Ctrl-chords) in the
         # soft bar + legend, for terminals that swallow the F-keys. The Alt+letter
         # mode chords are left as-is.
@@ -772,6 +957,8 @@ class K2KRemoteApp(App):
         # force one. F10 cycles them.
         self._mode = "text" if text_mode else "auto"
         self._connected: Optional[bool] = None
+        # Silent but still plugged in (a disk op). Distinct from disconnected.
+        self._waiting = False
         self._last_frame: Optional[Frame] = None
         self._danger_shown = False  # last destructive-screen state reflected in the UI
         # Why the (manual) pause is engaged, for the unified "⏸ PAUSED · <reason>"
@@ -818,8 +1005,11 @@ class K2KRemoteApp(App):
             on_frame=lambda frame: self.call_from_thread(self.show_frame, frame),
             on_error=lambda exc: self.call_from_thread(self._set_status, f"MIDI: {exc}"),
             on_connection=lambda ok: self.call_from_thread(self._set_connection, ok),
+            on_waiting=lambda w: self.call_from_thread(self._set_waiting, w),
             settle=self._settle if self._settle is not None else SETTLE,
-            heartbeat=None if self._manual_refresh else HEARTBEAT,
+            heartbeat=None if self._manual_refresh
+            else (self._heartbeat if self._heartbeat is not None else HEARTBEAT),
+            mirror_panel=self._mirror_panel,
         )
         self._worker.start()
         self._worker.request_refresh()
@@ -844,9 +1034,39 @@ class K2KRemoteApp(App):
             w = 0
         return w or (self.size.width or 0)
 
+    def _soft_bar_geometry(self, mode: str) -> Tuple[int, int]:
+        """``(span, offset)`` in cells describing where the mirror is drawn.
+
+        Feeds :func:`align_blocks` so the ``[F#:label]`` strip sits under the
+        soft keys it names. In the character modes the render is left-aligned in
+        ``#display`` and its own line length is the span (40 text / 120 braille /
+        240 half-block). The pixel image is *centred* in ``#imagebox`` and capped
+        at ``--image-cols``, so it needs the widget's real width and x. Returns
+        ``(0, 0)`` if the layout can't be measured yet — the bar then packs.
+        """
+        try:
+            bar_x = self.query_one("#softbar", SoftBar).region.x
+        except Exception:
+            return 0, 0
+        if mode == "image" and _HAS_IMAGE:
+            try:
+                region = self.query_one("#imagedisplay").region
+            except Exception:
+                return 0, 0
+            return region.width, max(0, region.x - bar_x)
+        span = max((len(line) for line in self.last_render.split("\n")), default=0)
+        try:
+            display_x = self.query_one("#display", Display).region.x
+        except Exception:
+            display_x = bar_x
+        return span, max(0, display_x - bar_x)
+
     def on_unmount(self) -> None:
         if self._worker is not None:
             self._worker.stop()
+        # Remember the size so the next launch reopens like this one.
+        if self.size.width and self.size.height:
+            remember_size(self.size.width, self.size.height)
 
     # -- input ---------------------------------------------------------------
     def on_key(self, event) -> None:
@@ -902,7 +1122,8 @@ class K2KRemoteApp(App):
             self._worker.set_paused(True)
             self._worker.press(action.button)
             self._set_status(f" {op!r} sent — mirror PAUSED while the K2000 works; "
-                             "press p to resume when it's done")
+                             "press p to resume when it's done",
+                             style=_PAUSED_STYLE)
             self.query_one("#titlebar", Static).update(self._titlebar_text())
             return
 
@@ -911,7 +1132,7 @@ class K2KRemoteApp(App):
         else:
             # Mirror the cursor move this button causes in the open name dialog,
             # then re-render the last frame at once so the underline tracks
-            # without waiting ~0.5 s for the device's settle refresh.
+            # without waiting for the device's settle refresh to come back.
             if (self._name_cursor.move(action.button, self._name_len())
                     and self._last_frame is not None):
                 self.show_frame(self._last_frame)
@@ -1064,7 +1285,8 @@ class K2KRemoteApp(App):
             self._pause_reason = "manual"
         self._worker.set_paused(paused)
         self._set_status(" PAUSED — mirror frozen; press p before SCSI load/save"
-                         if paused else " resumed")
+                         if paused else " resumed",
+                         style=_PAUSED_STYLE if paused else None)
         self.query_one("#titlebar", Static).update(self._titlebar_text())
 
     def action_panic(self) -> None:
@@ -1172,7 +1394,12 @@ class K2KRemoteApp(App):
             self.last_render = braille.render(pixels, frame.text_rows)
             self.query_one("#display", Display).update(self.last_render)
         if frame.text_rows:
-            self.query_one("#softbar", SoftBar).labels = soft_labels(frame.text_rows)
+            bar = self.query_one("#softbar", SoftBar)
+            # Geometry first, so the labels render already aligned rather than
+            # jumping into place on a second pass.
+            bar.span, bar.offset = self._soft_bar_geometry(mode)
+            bar.centres = soft_label_centres(frame.text_rows)
+            bar.labels = soft_labels(frame.text_rows)
         self._reflect_danger()
 
     def _reflect_danger(self) -> None:
@@ -1185,7 +1412,8 @@ class K2KRemoteApp(App):
         self.query_one("#titlebar", Static).update(self._titlebar_text())
         if danger:
             self._set_status(" ⏸ PAUSED · confirm — mirror frozen (no MIDI); press "
-                             "p (or Ctrl+r) when the K2000 has finished")
+                             "p (or Ctrl+r) when the K2000 has finished",
+                             style=_PAUSED_STYLE)
         elif self.last_status.startswith(" ⏸ PAUSED · confirm"):
             self._show_legend()
 
@@ -1232,8 +1460,8 @@ class K2KRemoteApp(App):
         return self.size.width or 0
 
     def _legend_text(self) -> str:
-        blocks = keymap.LEGEND_BLOCKS_ALT if self._alt_keys else keymap.LEGEND_BLOCKS
-        return " " + wrap_blocks(list(blocks), max(self._bar_width() - 1, 0))
+        groups = keymap.LEGEND_GROUPS_ALT if self._alt_keys else keymap.LEGEND_GROUPS
+        return " " + wrap_groups(groups, max(self._bar_width() - 1, 0))
 
     def _render_keyhints(self) -> None:
         """(Re)draw the persistent key-hint legend on its own line."""
@@ -1254,6 +1482,23 @@ class K2KRemoteApp(App):
             rendered.stylize(style)
         self.query_one("#status", Static).update(rendered)
 
+    def _set_waiting(self, waiting: bool) -> None:
+        """The device went quiet but is still plugged in — say so honestly.
+
+        A K2000 disk load silences the unit for minutes; it answers nothing, so
+        there is no screen to read and no timeout long enough to wait it out.
+        Calling that "disconnected" was wrong every time a file was opened. The
+        ports are still there, so this is the accurate word for it.
+        """
+        self._waiting = waiting
+        self.query_one("#titlebar", Static).update(self._titlebar_text())
+        if waiting:
+            self._set_status(" ⏳ device is not answering — busy (disk op?). The "
+                             "mirror will pick up on its own when it replies.",
+                             style=_WAITING_STYLE)
+        elif self.last_status.startswith(" ⏳ device is not answering"):
+            self._show_legend()
+
     def _set_connection(self, connected: bool) -> None:
         self._connected = connected
         self.query_one("#titlebar", Static).update(self._titlebar_text())
@@ -1267,6 +1512,8 @@ class K2KRemoteApp(App):
             conn, conn_style = "no MIDI", "bold red"
         elif self._connected is None:
             conn, conn_style = "connecting…", "bold yellow"
+        elif self._waiting:
+            conn, conn_style = "busy — not answering", _WAITING_STYLE
         elif self._connected:
             conn, conn_style = "connected", "bold green"
         else:
@@ -1295,7 +1542,9 @@ class K2KRemoteApp(App):
         text = Text(no_wrap=True)
         text.append(f" k2kremote · {self._model} · ")
         text.append(conn, style=conn_style)
-        text.append(f" · {mirror} · {width}w{paused}")
+        text.append(f" · {mirror} · {width}w")
+        if paused:
+            text.append(paused, style=_PAUSED_STYLE)
         return text
 
     def _placeholder(self) -> str:
@@ -1577,8 +1826,10 @@ def main(argv: Optional[List[str]] = None) -> None:
                            "later runs need no flags")
     conn.add_argument("-i", "--sysex-interval", type=float, metavar="MS",
                       help="minimum delay between outgoing SysEx messages in "
-                           "milliseconds (default 500, like 'amidi -i'). Lower = "
-                           "snappier UI but more risk of garbling the K2000's LCD")
+                           "milliseconds (default 150, like 'amidi -i'; clamped to "
+                           "the RE'd 120 ms floor). Lower = snappier UI but more "
+                           "risk of garbling the K2000's LCD; raise it to 500 for "
+                           "unattended runs")
 
     disp = parser.add_argument_group("display")
     disp.add_argument("--text", action="store_true",
@@ -1598,8 +1849,14 @@ def main(argv: Optional[List[str]] = None) -> None:
     misc = parser.add_argument_group("behaviour")
     misc.add_argument("--settle", type=float, metavar="MS",
                       help="delay after a keypress before reading the redrawn LCD in "
-                           "milliseconds (default 350; lower = snappier, too low may "
-                           "read the screen mid-redraw)")
+                           "milliseconds (default 150; lower = snappier. Too low just "
+                           "costs one cheap re-read — the mirror takes a second look "
+                           "when the screen comes back unchanged)")
+    misc.add_argument("--heartbeat", type=float, metavar="MS",
+                      help="idle refresh cadence in milliseconds (default 1200). The "
+                           "idle poll reads only the 321-byte text plane and stops "
+                           "there when nothing changed, so it is ~8x cheaper than a "
+                           "full frame; lower = front-panel changes appear sooner")
     misc.add_argument("--alt-keys", action="store_true",
                       help="show the terminal-safe key alternates (a-h soft keys, "
                            "Ctrl+e/x/n/v/g) in the legend and soft-key bar — for "
@@ -1608,6 +1865,11 @@ def main(argv: Optional[List[str]] = None) -> None:
                       help="everything --alt-keys does, plus move the mode buttons "
                            "to the 'm' leader (press m, then p/s/q/m/i/d/g/e) — for "
                            "terminals that also grab the Alt+letter mode chords")
+    misc.add_argument("--no-panel-mirror", action="store_true",
+                      help="ignore the K2000's own front-panel presses. The unit "
+                           "only sends them when MIDI XMIT 'Bttns' is On; each one "
+                           "costs a screen read, so turn this off if the mirror "
+                           "feels heavy while you work at the hardware")
     misc.add_argument("--manual-refresh", action="store_true",
                       help="disable the periodic heartbeat entirely; refresh the "
                            "mirror only on front-panel events and explicit Ctrl+r. "
@@ -1616,21 +1878,33 @@ def main(argv: Optional[List[str]] = None) -> None:
     misc.add_argument("--demo", action="store_true",
                       help="run against a static synthetic frame with no MIDI — try "
                            "the UI and render modes without any hardware")
+    misc.add_argument("--print-size", action="store_true",
+                      help="print the terminal size to open at as COLSxROWS and "
+                           "exit — the size the app was last closed at, or the "
+                           "smallest that shows the mirror uncompromised. Use it "
+                           "to launch a right-sized window: "
+                           "kitty -o initial_window_width=$(...)c …")
     misc.add_argument("--long-help", action="store_true",
                       help="print a full prose user manual and exit")
 
     args = parser.parse_args(argv)
+    if args.print_size:
+        cols, rows = startup_size()
+        print(f"{cols}x{rows}")
+        return
     if args.long_help:
         print(LONG_HELP.strip())
         return
 
     bridge = None if args.demo else _build_bridge(args)
     settle = args.settle / 1000.0 if args.settle is not None else None
+    heartbeat = args.heartbeat / 1000.0 if args.heartbeat is not None else None
     app = K2KRemoteApp(bridge=bridge, demo=args.demo, model=args.model,
-                       text_mode=args.text, settle=settle,
+                       text_mode=args.text, settle=settle, heartbeat=heartbeat,
                        image_protocol=args.image_protocol, image_cols=args.image_cols,
                        alt_keys=args.alt_keys, super_alt_keys=args.super_alt_keys,
-                       manual_refresh=args.manual_refresh)
+                       manual_refresh=args.manual_refresh,
+                       mirror_panel=not args.no_panel_mirror)
     try:
         app.run()
     finally:

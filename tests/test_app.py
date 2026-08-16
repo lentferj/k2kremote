@@ -1107,3 +1107,374 @@ async def test_master_tool_bank_delete_variants():
             (None, 3),                  # all types in bank 3 -> DELBANK type 0
             (None, 127),                # everything -> type 0, bank 127
         ]
+
+
+# --- the Save -> Name freeze ------------------------------------------------
+# Reported live: "the name page reached through a Save takes no keyboard input".
+# Hardware (probes/p25_savename.py) cleared the two suspected causes — the page
+# IS recognised as a name dialog and the field IS located from its literal
+# "Name:" label — and confirmed presses do reach the device there. What is left
+# is this: the heavy-op guard pauses the mirror when a soft key labelled Save is
+# pressed, and a paused worker still delivers presses but schedules no refresh.
+# The screen therefore freezes while input keeps working, which is exactly what
+# "takes no keyboard input" looks like from the outside.
+
+class _PauseProbeWorker:
+    """Stands in for RefreshWorker: records presses and the pause state."""
+
+    def __init__(self):
+        self.presses = []
+        self.paused = False
+        self.danger = False   # the titlebar reads this
+        self.refreshes = 0
+
+    def press(self, button):
+        self.presses.append(button)
+
+    def wheel(self, clicks):
+        pass
+
+    def set_paused(self, paused):
+        self.paused = paused
+
+    def request_refresh(self):
+        self.refreshes += 1
+
+    def set_prioritize_graphics(self, on):
+        pass
+
+    def stop(self):
+        pass
+
+
+def _soft_row_frame(bottom):
+    from k2kremote.refresh import Frame
+
+    return Frame(pixels=None, text_rows=[""] * 7 + [bottom.ljust(40)])
+
+
+@pytest.mark.asyncio
+async def test_save_soft_key_pauses_the_mirror_but_still_sends_presses():
+    from k2kremote.app import K2KRemoteApp
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        worker = _PauseProbeWorker()
+        app._worker = worker
+        # A Disk-style page whose F2 is labelled "Save" — a heavy op.
+        app._last_frame = _soft_row_frame("Load   Save   Rename Delete Copy   Util")
+
+        await pilot.press("f2")
+        await pilot.pause()
+        assert worker.paused, "pressing a 'Save' soft key auto-pauses the mirror"
+        assert len(worker.presses) == 1, "...and the press is still delivered"
+        assert "PAUSED" in app.last_status
+
+        # Now the K2000 shows its name page. Every further keystroke reaches the
+        # device — and the mirror stays frozen, because the worker is paused.
+        app._last_frame = _soft_row_frame("Delete Insert  <<<    >>>    OK   Cancel")
+        for key in ("f1", "f3", "f4"):
+            await pilot.press(key)
+        await pilot.pause()
+        assert len(worker.presses) == 4, "input keeps reaching the device while paused"
+        assert worker.paused, "but nothing ever un-pauses it, so the screen never moves"
+
+
+def test_save_page_soft_rows_do_not_themselves_trigger_the_guard():
+    """The editor route to Save->Name never trips the heavy-op guard.
+
+    Captured live 2026-08-15 (probes/p25_savename.py). None of these rows
+    contains a heavy-op word, so reaching the name page by Exit -> Yes -> Rename
+    leaves the mirror live — which is why that route works and the Disk one does
+    not. Pinning the captured rows here so a future _HEAVY_OPS edit that would
+    start freezing this flow fails loudly.
+    """
+    from k2kremote.app import _HEAVY_OPS, soft_labels
+
+    captured = [
+        "              Rename Cancel Yes    No",      # save dialog
+        "Object             Rename Replace Cancel",   # save-as page
+        "Delete Insert  <<<    >>>    OK   Cancel",   # the name page itself
+    ]
+    for bottom in captured:
+        for label in soft_labels([""] * 7 + [bottom.ljust(40)]):
+            assert not any(op in label.lower() for op in _HEAVY_OPS), (
+                f"{label!r} would now auto-pause the editor's Save flow")
+
+
+# --- soft-key labels line up under the mirror -------------------------------
+
+def test_align_blocks_centres_each_block_in_its_zone():
+    """Each block's centre must land in the same zone soft_labels reads back."""
+    from k2kremote.app import align_blocks, _SOFT_KEYS
+
+    blocks = ["[F1:Select]", "[F2:Root]", "[F3:Parent]", "[F4:Open]",
+              "[F5:OK]", "[F6:Cancel]"]
+    span = 120  # braille / the usual capped pixel image
+    line = align_blocks(blocks, span, width=200)
+    assert line is not None
+    for i, block in enumerate(blocks):
+        at = line.index(block)
+        centre = at + (len(block) - 1) / 2
+        assert int(centre * _SOFT_KEYS / span) == i, f"{block} drifted out of zone {i}"
+
+
+def test_align_blocks_is_the_inverse_of_soft_labels():
+    """Round-trip: split a real bottom row, align it, and land in the same zones.
+
+    soft_labels assigns a word to the key its centre column falls under;
+    align_blocks places block i back under zone i. The two must agree, or the
+    strip would sit beneath the wrong keys.
+    """
+    from k2kremote.app import align_blocks, soft_labels, _SOFT_KEYS, _TEXT_COLS
+
+    bottom = "Delete Insert  <<<    >>>    OK   Cancel"   # captured from hardware
+    labels = soft_labels([""] * 7 + [bottom])
+    blocks = [f"[F{i+1}:{l}]" for i, l in enumerate(labels)]
+    span = 120
+    line = align_blocks(blocks, span, width=200)
+    assert line is not None
+    for i, (label, block) in enumerate(zip(labels, blocks)):
+        # where the label sits on the K2000's own 40-col row...
+        src = bottom.index(label)
+        src_zone = int((src + (len(label) - 1) / 2) * _SOFT_KEYS / _TEXT_COLS)
+        # ...and where we put its block on the mirror-wide strip
+        at = line.index(block)
+        dst_zone = int((at + (len(block) - 1) / 2) * _SOFT_KEYS / span)
+        assert src_zone == dst_zone == i
+
+
+def test_align_blocks_shifts_by_offset():
+    from k2kremote.app import align_blocks
+
+    blocks = [f"[F{i+1}:X]" for i in range(6)]
+    plain = align_blocks(blocks, 120, width=200)
+    shifted = align_blocks(blocks, 120, width=200, offset=7)
+    assert shifted == " " * 7 + plain
+
+
+def test_align_blocks_declines_when_it_cannot_fit():
+    """40-col text mode: six [F#:label] blocks do not fit under 40 columns."""
+    from k2kremote.app import align_blocks
+
+    blocks = ["[F1:Select]", "[F2:Root]", "[F3:Parent]", "[F4:Open]",
+              "[F5:OK]", "[F6:Cancel]"]
+    assert align_blocks(blocks, 40, width=200) is None      # span too narrow
+    assert align_blocks(blocks, 120, width=30) is None      # bar too narrow
+    assert align_blocks(blocks, 0, width=200) is None       # geometry unknown
+    assert align_blocks(blocks[:3], 120, width=200) is None  # not six keys
+
+
+@pytest.mark.asyncio
+async def test_soft_bar_aligns_to_the_span_it_is_given():
+    from k2kremote.app import K2KRemoteApp, SoftBar, align_blocks
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test(size=(150, 44)) as pilot:
+        await pilot.pause()
+        bar = app.query_one("#softbar", SoftBar)
+        bar.labels = ["Select", "Root", "Parent", "Open", "OK", "Cancel"]
+        bar.span, bar.offset = 120, 3
+        await pilot.pause()
+        blocks = [f"[F{i+1}:{l}]" for i, l in enumerate(bar.labels)]
+        assert str(bar.render()) == align_blocks(blocks, 120, bar.size.width or 9999,
+                                                 3, bar.centres or None)
+
+        # Span 0 (geometry unknown) falls back to left-packed blocks.
+        bar.span, bar.offset = 0, 0
+        await pilot.pause()
+        assert str(bar.render()).startswith("[F1:Select]")
+
+
+# --- a frozen mirror has to look frozen -------------------------------------
+
+@pytest.mark.asyncio
+async def test_paused_badge_is_styled_not_plain_text():
+    """A stale mirror still looks live, so the badge must not blend into the bar."""
+    from rich.text import Text
+
+    from k2kremote.app import K2KRemoteApp, _PAUSED_STYLE
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        worker = _PauseProbeWorker()
+        app._worker = worker
+
+        plain = app._titlebar_text()
+        assert "PAUSED" not in plain.plain
+
+        worker.paused = True
+        app._pause_reason = "manual"
+        badge = app._titlebar_text()
+        assert "⏸ PAUSED · manual" in badge.plain
+        styled = [span for span in badge.spans if span.style == _PAUSED_STYLE]
+        assert styled, "the pause badge carries no style"
+        assert "PAUSED" in badge.plain[styled[0].start:styled[0].end]
+
+        # The auto-pause on a confirm screen gets the same treatment.
+        worker.paused, worker.danger = False, True
+        assert "⏸ PAUSED · confirm" in app._titlebar_text().plain
+
+
+def test_paused_style_is_loud_and_distinct():
+    from k2kremote.app import _PAUSED_STYLE, _OVERFLOW_STYLE
+
+    assert "blink" in _PAUSED_STYLE          # kitty honours it; others degrade to bold
+    assert "orange" in _PAUSED_STYLE
+    assert _PAUSED_STYLE != _OVERFLOW_STYLE  # not confusable with the rename overflow
+
+
+def test_align_blocks_follows_the_real_label_positions():
+    """The K2000 does not centre its labels in their sixths, so neither do we.
+
+    On the Program page the words sit at their own columns; centring each block
+    in its nominal zone leaves it visibly off the word it names. Given the real
+    centres, each block should straddle the label's own position instead.
+    """
+    from k2kremote.app import align_blocks, soft_label_centres, soft_labels, _TEXT_COLS
+
+    bottom = "Octav- Octav+ Panic  View   Chan-  Chan+"   # captured from hardware
+    rows = [""] * 7 + [bottom]
+    labels = soft_labels(rows)
+    centres = soft_label_centres(rows)
+    blocks = [f"[F{i+1}:{l}]" for i, l in enumerate(labels)]
+    span, offset = 120, 6
+
+    line = align_blocks(blocks, span, width=140, offset=offset, centres=centres)
+    assert line is not None
+    for i, (label, block) in enumerate(zip(labels, blocks)):
+        # Where the label's centre lands once the 40-col row is stretched to the
+        # mirror, and where our block's centre ended up.
+        want = offset + (bottom.index(label) + (len(label) - 1) / 2) * span / _TEXT_COLS
+        at = line.index(block)
+        got = at + (len(block) - 1) / 2
+        assert abs(got - want) <= 1.5, f"{block} is {got - want:+.1f} cells off {label}"
+
+
+def test_soft_label_centres_handles_gaps_and_multiword_labels():
+    from k2kremote.app import soft_label_centres
+
+    # A key with no label reports None, so it falls back to its zone centre.
+    centres = soft_label_centres([""] * 7 + ["Object             Rename Replace Cancel"])
+    assert centres[1] is None and centres[2] is None
+    assert centres[0] is not None and centres[3] is not None
+    assert all(0.0 <= c <= 1.0 for c in centres if c is not None)
+    # Ascending: labels never cross each other.
+    seen = [c for c in centres if c is not None]
+    assert seen == sorted(seen)
+
+    assert soft_label_centres([]) == [None] * 6
+
+
+# --- window sizing ----------------------------------------------------------
+
+def test_optimal_size_fits_the_mirror_and_all_the_chrome():
+    from k2kremote import braille
+    from k2kremote.app import optimal_size, _CHROME_ROWS
+
+    cols, rows = optimal_size()
+    # Narrower than this and the app itself puts up a "widen the window" hint.
+    assert cols >= braille.BRAILLE_COLS
+    # Tall enough for the widest everyday renderer plus every bar.
+    assert rows >= _CHROME_ROWS + braille.BRAILLE_ROWS
+    # ...but not extravagant: the 44 rows this replaced left half the window empty.
+    assert rows <= _CHROME_ROWS + braille.BRAILLE_ROWS + 4
+
+
+def test_size_is_remembered_across_launches(tmp_path, monkeypatch):
+    from k2kremote.app import remember_size, remembered_size, startup_size, optimal_size
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert remembered_size() is None
+    assert startup_size() == optimal_size()      # nothing cached yet
+
+    remember_size(160, 40)
+    assert remembered_size() == (160, 40)
+    assert startup_size() == (160, 40)
+
+
+def test_absurd_remembered_sizes_are_ignored(tmp_path, monkeypatch):
+    """A window dragged tiny by accident must not become the new normal."""
+    from k2kremote.app import remember_size, remembered_size, startup_size, optimal_size
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    remember_size(20, 5)
+    assert remembered_size() is None
+    assert startup_size() == optimal_size()
+
+    (tmp_path / "k2kremote" / "window-size").write_text("not a size")
+    assert remembered_size() is None
+
+
+@pytest.mark.asyncio
+async def test_closing_the_app_records_its_size(tmp_path, monkeypatch):
+    from k2kremote.app import K2KRemoteApp, remembered_size
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test(size=(132, 30)) as pilot:
+        await pilot.pause()
+    assert remembered_size() == (132, 30)
+
+
+# --- the legend folds between groups, not through them ----------------------
+
+def test_wrap_groups_keeps_the_function_key_run_together():
+    """The bug this fixes: F7 got orphaned onto the navigation line and was
+    reported missing. Whatever the width, the F-keys must stay contiguous."""
+    from k2kremote import keymap
+    from k2kremote.app import wrap_groups
+
+    fkeys = keymap.LEGEND_GROUPS[1]
+    for width in (150, 140, 124, 110, 100, 90, 80):
+        lines = wrap_groups(keymap.LEGEND_GROUPS, width).split("\n")
+        holding = [i for i, line in enumerate(lines) if fkeys[0] in line]
+        assert len(holding) == 1, f"width {width}: 'F1-F6 soft' appears oddly"
+        line = lines[holding[0]]
+        assert all(block in line for block in fkeys), (
+            f"width {width}: the F-key run was split across the fold:\n"
+            + "\n".join(lines))
+
+
+def test_wrap_groups_still_respects_the_width():
+    from k2kremote import keymap
+    from k2kremote.app import wrap_groups
+
+    for width in (150, 124, 100, 80, 60):
+        for line in wrap_groups(keymap.LEGEND_GROUPS, width).split("\n"):
+            assert len(line) <= width, f"width {width}: overflowed with {line!r}"
+
+
+def test_wrap_groups_loses_nothing():
+    from k2kremote import keymap
+    from k2kremote.app import wrap_groups
+
+    for groups in (keymap.LEGEND_GROUPS, keymap.LEGEND_GROUPS_ALT):
+        flat = [b for g in groups for b in g]
+        for width in (150, 124, 100, 70):
+            rendered = wrap_groups(groups, width)
+            for block in flat:
+                assert block in rendered, f"{block!r} vanished at width {width}"
+
+
+def test_wrap_groups_prefers_a_group_break_over_a_greedy_fit():
+    from k2kremote.app import wrap_groups
+
+    groups = (("aaa", "bbb"), ("ccc", "ddd"))
+    # 13 cols fits "aaa · bbb" (9) and could greedily squeeze "ccc" too (15 > 13,
+    # so no) — the point is the second group starts its own line intact.
+    assert wrap_groups(groups, 13) == "aaa · bbb\nccc · ddd"
+    # Wide enough for everything: one line.
+    assert wrap_groups(groups, 40) == "aaa · bbb · ccc · ddd"
+
+
+def test_legend_groups_and_flat_blocks_stay_in_sync():
+    from k2kremote import keymap
+
+    assert keymap.LEGEND_BLOCKS == tuple(b for g in keymap.LEGEND_GROUPS for b in g)
+    assert keymap.LEGEND_BLOCKS_ALT == tuple(
+        b for g in keymap.LEGEND_GROUPS_ALT for b in g)
+    assert "F7 Edit" in keymap.LEGEND_BLOCKS
+    assert "Ctrl+e Edit" in keymap.LEGEND_BLOCKS_ALT
