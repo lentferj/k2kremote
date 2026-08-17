@@ -1449,3 +1449,48 @@ unexercised and argued it was safe because "the code underneath is the same" —
 which is an argument, not a test. The test had in fact happened; nobody had told
 the notes. A doc that reasons about coverage instead of checking it is wrong in
 whichever direction the facts happen to fall.
+
+### The selected parameter IS readable over MIDI — 0x16 / 0x17
+
+**SysEx 0x17 requests the currently-selected parameter's NAME and 0x16 its VALUE.**
+The vendored client has exposed both since it was imported, as
+`get_current_parameter_name()` and `get_current_parameter_value()`. On a filter
+page the K2000 answers:
+
+    start         name 'Coarse:'   value 'E 4 330Hz'
+    cursor down   name 'Fine  :'   value '0ct'
+    cursor down   name 'KeyTrk:'   value '0ct/key'
+    cursor right  name 'DptCtl:'   value 'MWheel'
+
+So the parameter cursor is **directly readable** and never has to be inferred.
+`probes/p36_filter_fields.py` now has `goto_field(bridge, "VelTrk")`, which walks
+the page asking the instrument what is selected after every move and **refuses**
+rather than guessing if the field is not there.
+
+### How this was missed for a whole evening, which is the more useful part
+
+§6 of this file says the name-edit cursor is exposed in *neither* device reply.
+That is correct, and it is a statement about the **character position inside a
+name field** — the underline in `Program Name: ____`. It was generalised to "the
+parameter cursor is not readable over MIDI", and that generalisation was never
+tested against the message table.
+
+The cost, all in one session:
+
+* a render-to-PNG-and-look loop, used as the only way to locate the cursor;
+* 48 wheel clicks into `Src2`, which silently changed `AttVel` to `B Clk2` — the
+  routing being measured — while the script reported the field it *thought* it
+  was on;
+* two velocity sweeps whose flat results were nearly filed as measurements, one
+  of them with the cutoff still parked at the top of the filter's range from an
+  earlier experiment;
+* a "cursor is NOT on Coarse — stopping rather than guessing" guard, written to
+  work around a problem that did not exist.
+
+The guard was still worth having, and it is what eventually stopped the third
+wrong write. But the lesson is narrower than "verify more": **a true finding about
+a specific thing had been widened into a false claim about a general one, and the
+widened version was never checked.** Two lines of the message table refuted it.
+
+Anything driving the editor should use `goto_field` and assert the name the device
+reports, not count keypresses.
