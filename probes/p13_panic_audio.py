@@ -5,8 +5,10 @@ CLOSED as an open question 2026-08-16 — kept as a record of the method, not as
 something anyone needs to run. panic() sends CC 120 + CC 123 on all 16 channels
 and that is unit-tested; whether the K2000 honours them is a ten-second by-ear
 check (hold a note, press panic, listen), and automating it needs a physical
-audio path no CI machine has. CAPTURE below points at ports the K2000 is not
-routed to; repoint it at live ones before expecting anything. See
+audio path no CI machine has. CAPTURE below is CORRECT as of 2026-08-17: the
+K2000 measures -28.7 / -31.3 dBFS on system:capture_17/18 with notes playing,
+about 45 dB above any other pair. The earlier note here said these were the wrong
+ports; that was a negative result promoted to a fact about the rig. See
 RESOLUTION_NOTES §4.
 """
 import sys, time, threading; sys.path.insert(0, ".")

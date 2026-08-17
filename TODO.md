@@ -50,10 +50,14 @@ you need it.
 
 The old blocker was **JACK routing**, and it only ever existed so
 `probes/p13_panic_audio.py` could *automate* the listening: record
-`system:capture_17/18`, hold a note, fire panic mid-sustain, compare RMS. The
-K2000's outputs are not routed to those ports, and wiring them up buys nothing a
-person at the desk cannot get in ten seconds by holding a note and pressing
-panic. It could never run unattended in CI either, since it needs a physical
+`system:capture_17/18`, hold a note, fire panic mid-sustain, compare RMS.
+
+**Correction (2026-08-17):** the claim that the K2000 is not routed to those ports
+was wrong — measured, it is there at -28.7 / -31.3 dBFS with notes playing, some
+45 dB above any other pair. `p13`'s `CAPTURE` constant needs no change. The probe
+stays closed on its own merits (a person at the desk gets the same answer in ten
+seconds by holding a note and pressing panic), but it is no longer blocked, and
+the audio path it needed is available for measurement work. It could never run unattended in CI either, since it needs a physical
 audio path.
 
 The probe stays in `probes/` as a record of the method; it needs `CAPTURE`

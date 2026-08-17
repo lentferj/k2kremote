@@ -95,7 +95,22 @@ future ask-a-human-to-press protocol should name the safe buttons explicitly.
 
 `probes/p13_panic_audio.py` records JACK `system:capture_17/18` (the ports
 mpc2emu used), holds a note, fires `bridge.panic()` mid-sustain and compares RMS
-either side. It captured only noise: the K2000's outputs are not routed there.
+either side. It captured only noise, and that was written up as "the K2000's
+outputs are not routed there".
+
+**That conclusion was wrong, and was corrected 2026-08-17 by measuring.** With
+notes playing at velocity 115, four seconds of capture reads:
+
+    system:capture_17   rms 0.0369  (-28.7 dBFS)   peak 0.152
+    system:capture_18   rms 0.0271  (-31.3 dBFS)   peak 0.134
+    system:capture_1/2         (-74.5 / -71.7 dBFS)  noise floor
+    system:capture_19/20       (-90.8 / -89.5 dBFS)  silence
+
+Some 45 dB above the next-best pair, so the instrument is on 17/18 and `p13`'s
+hardcoded ports were right all along. Whatever the original run captured, the
+fault was not the port numbers — and "captured only noise" became a claim about
+the routing rather than about that attempt, which then justified closing the
+probe. A negative result got promoted to a property of the rig.
 
 **Closed rather than fixed.** The routing existed only to *automate* the
 listening. `panic()` sends CC 120 + CC 123 on all 16 channels and that is
