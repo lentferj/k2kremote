@@ -185,28 +185,161 @@ then each Keymap's Sample IDs — dependents usually live in other banks). That 
 lot of fragile reverse-engineering for a case the front-panel menu already covers,
 so it is deliberately **not** built. Revisit only if a real need appears.
 
-## MAC editor — planned
+## k2kmaced (macro editor) — VERIFIED ON HARDWARE; only the MIDI half is left
 
-**Status:** open, not started. Requested 2026-08-02.
+**Status:** **verified on real hardware 2026-08-17** with Jan at the machine, on
+his own 2 GB image and K2000R. Requested 2026-08-02; shipped as its own program
+(`k2kmaced` / `k2kmacli`), rebased onto `main` 2026-08-17.
 
-A `.MAC` is the K2000's boot/setup macro — `BOOT.MAC` is what the machine
-loads at startup to pull in a set of banks, so it is the file that decides
-what is resident. Editing it today means the front panel or a hex editor.
+**What was exercised on hardware**, so the claim is auditable rather than a
+blanket tick:
 
-k2kremote is the natural home: it already speaks the device and mirrors the
-LCD, so an editor could show the macro's steps (which banks load, from where,
-into which id ranges) and let them be reordered, added or removed, then written
-back.
+* **read** — the real `\BOOT.MAC` off the card: 19 entries, 868 bytes, OS v3.87,
+  and all 19 referenced files confirmed present on that disk;
+* **browse (`f`)** — against the real disk: 390 loadable files across 36
+  directories, walked by directory, and an entry repointed by picking a file
+  from `\-AFRICA\`;
+* **edit + save** — a 20th entry added and written to a new `.MAC` (908 bytes);
+* **write back into the image** — twice. First a round-trip of the unmodified
+  macro, which left the image **byte-identical** across all four regions the code
+  can reach (boot sector, FAT, directory record, target cluster). Then a
+  one-field change (`--rebank 2=900`), after which only the target cluster moved;
+* **the instrument** — the K2000 recognised the disk, found `BOOT.MAC`, and
+  loaded it to completion. DIRBANK then reported bank 300 empty and its 75
+  programs in 900, which is exactly the edit, since entry 2 was 300's only
+  source. Restored to bank 300 afterwards, verified byte-identical (md5
+  `9202448d…`).
 
-Worth knowing before starting: a MAC drives **bank loading**, so a bad edit is
-a boot that loads the wrong thing or nothing. Treat writes the way the delete
-work is treated — verify against scratch copies with a full backup present, and
-never write a `BOOT.MAC` without the previous one saved alongside.
+Two risks, cleared separately — Jan's distinction and the sharper one: a bad
+macro is a bad boot, but a **corrupted volume means the disk is not recognised at
+all**, and nothing host-side can tell them apart. The K2000's own FAT
+implementation shares no code with our writer, which is what makes "the disk was
+still recognisable" the first non-circular check of this write path (the
+in-process verification reads back through `k2image`, the same code that decided
+where to write).
 
-Reference material: `HD0_K2X_HD2G-20260202.img.lzo` in
-`~/Dokumente/SYNTHS/K2000R/Backups/` is a full disk image of the current
-machine state, so it contains a real `BOOT.MAC` plus the banks it references —
-the format can be RE'd from it offline, with no K2000 attached.
+* **install from the TUI** (`w` -> `i` -> arm -> fire) — done by Jan on the same
+  card: it wrote his 20-entry edit (908 bytes) into the image, and the image
+  booted. Both write routes, CLI and TUI, are therefore hardware-verified.
+
+Nothing about the disk route is left open.
+
+A `.MAC` is the K2000's macro — a list of "load this file, into that bank, in
+this mode". `BOOT.MAC` on the startup drive is what the machine replays at
+power-on, so it is the file that decides what is resident. Editing it today
+means the front panel or a hex editor.
+
+**Done (offline, no K2000 touched):** the format is reverse-engineered and
+documented in [`docs/MAC_FORMAT.md`](docs/MAC_FORMAT.md); `k2kmaced/macfile.py`
+reads/edits/writes macros (the real `BOOT.MAC` round-trips byte-exactly),
+`k2kmaced/k2image.py` reads K2000 FAT16 disk images (raw and `.lzo`)
+read-only, `k2kmaced/k2write.py` is the one write direction (in-place, existing
+file, never the FAT), `k2kmacli` lists / checks / edits / builds / installs
+macros from either source, and **`k2kmaced`** is the standalone TUI editor —
+its own program and its own console script, shipped with k2kremote but never
+opening a MIDI port. `k2kmaced/mpc2emu_link.py` picks up the sibling mpc2emu
+checkout when present.
+
+**Why two programs rather than one (2026-08-17):** the K2000's disk *is* its
+SD/CF card on a modern setup, so editing `BOOT.MAC` means the instrument is off
+with its disk in the computer, while the mirror needs it on and answering. A
+macro pane inside the mirror would be unreachable exactly when it is wanted. Same
+repo, though: a future *online* macro editor (read/write the live Macro Table over
+MIDI) needs both halves at once.
+
+**Still blocked — the MIDI half only.** The disk route above is done; what
+remains needs the instrument *on*, which is the opposite configuration:
+
+1. **Live macro table.** `MidiBridge.read_macro_table()` dumps object type
+   100 / id 35, but `DUMP` returns the K2000's *RAM* layout, which for programs
+   and keymaps differs from the disk layout — unknown whether the Macro Table's
+   two layouts coincide. **No longer blocked on permission** (ports were used
+   freely on 2026-08-17); blocked on a session with the instrument on *and* a
+   populated Macro Table — Macro Record has to have been on for the table to hold
+   anything, so it needs setting up at the panel first. `probes/p30_macro_dump.py`
+   is written and ready.
+2. **Drive and mode codes.** Decoded as 0-based indices into the manual's value
+   lists; three offline checks agree, but only one real `.MAC` exists to check
+   against. Blocked on: saving a `.MAC` per drive/mode from the front panel.
+3. **Object lists.** An entry that loads *selected* objects from a file is
+   longer than the modelled layout; the surplus is preserved verbatim but not
+   decoded. Blocked on: recording one such entry.
+
+**Still to build:** editing an entry's *path/filename* (the editor cycles
+drive/bank/mode and reorders, but a new file has to come from `k2kmacli new`),
+and writing a macro back to the device.
+
+A bad edit is a bad boot, so writes stay conservative. Nothing is ever sent to
+the K2000. **One** command writes into a disk image — `k2kmacli install`
+(2026-08-17) — and it is deliberately the narrowest operation that completes the
+workflow (**verified on real hardware 2026-08-17** — see RESOLUTION_NOTES: the disk stayed recognisable to the K2000 and an edited macro loaded to the bank it named): it overwrites a file that already exists, only within the clusters that
+file already owns, so **the FAT is never written to** and no directory record is
+ever added. It refuses to grow a file, refuses a non-macro, refuses a `.lzo`
+(k2image reads those via a temp copy, so the write would be silently discarded),
+demands a typed `overwrite`, and reads the file back to confirm. It makes no
+backup — that is on the user, and the README says so loudly.
+
+Still open: writing a macro back to the **device** over MIDI. Worth more than it
+first appeared, and for a reason only visible from using the disk route
+(2026-08-17): on a modern setup the K2000's disk *is* an SD/CF card, so editing
+`BOOT.MAC` means **powering the instrument down and taking its disk out**. The
+whole edit happens with no K2000 to check against, and the card shuffle is the
+slow, error-prone part — not the editing.
+
+The MIDI route would avoid all of it: send the Macro Table object into RAM with
+the machine running and the card in place, then let the K2000 save its own
+`BOOT.MAC` through Disk → `Macro`. No filesystem writing, no power cycle, and the
+instrument itself does the formatting. It depends on the type-100/id-35 layout
+question below, which is unverified.
+
+Note the same observation makes *reading* the live Macro Table a **different use
+case** rather than part of this workflow: when you want to edit `BOOT.MAC` the
+machine is off, so a live read cannot help you there. It is for inspecting what a
+running machine has loaded.
+
+Procedures and evidence: RESOLUTION_NOTES §21.
+
+### Next session — pick up here
+
+Branch `mac-editor`, 9 commits, rebased onto `main` 2026-08-17, **not
+pushed**, not merged. `.venv/bin/python -m pytest` = 321 passing (one skip,
+`test_k2image.py`, when the sibling `../mpc2emu` checkout is absent).
+
+The three probes were **renumbered** in the rebase: `p24`/`p25`/`p26` on this
+branch collided with unrelated probes of the same numbers added to `main`
+since the fork, and are now `p30_macro_dump.py`, `p31_macro_codes.py` and
+`p32_macro_objlist.py`. The MAC notes moved from RESOLUTION_NOTES §13 (taken
+by the snappier-mirror section) to §21.
+
+Offline, can be done any time:
+
+- [x] **Write the three probe scripts** — done 2026-08-02:
+      `probes/p30_macro_dump.py` (the only one that opens a MIDI port, and only
+      to read), `p31_macro_codes.py` and `p32_macro_objlist.py` (pure file
+      analysis; the K2000 work for those two is front-panel only). Each script's
+      docstring is the step-by-step for the device.
+- [x] **Edit an entry's path/filename in the editor** — done 2026-08-02:
+      `e` opens a path overlay (host-style `/` and a missing leading `\` are
+      accepted; anything the K2000 could not load is refused and the overlay
+      stays open), `f` picks from the image's loadable files when `--image` was
+      given, `a` adds an entry inheriting its neighbour's bank/mode/drive.
+- [ ] **Decide whether to push/merge** `mac-editor`, or keep it out of `main`
+      until the hardware checks land.
+
+Needs the K2000 (ask first — the 2026-08-02 session was explicitly told not to
+touch it):
+
+- [ ] **Run p24** — does `DUMP` of type 100 / id 35 return the same layout as
+      the disk file? Settles whether the app can read the live macro list. Pause
+      the mirror first (§9).
+- [ ] **Run p25** — confirm or replace the drive/mode code table in
+      MAC_FORMAT.md §5. Until this passes, every `.MAC` this project writes is
+      unverified.
+- [ ] **Run p26** — decode a macro entry carrying a selected-object list, the
+      one part of the format still opaque.
+- [ ] **Then**: fold the results into `docs/MAC_FORMAT.md` (drop the §5 hedge),
+      and only afterwards consider a write-to-device path, gated like the F11
+      tool.
 
 ## Faster mirror — timing REVERTED; the cheap-read work stays
 
@@ -262,3 +395,42 @@ Unifying them means deciding which is right. The pause is more conservative and
 predates the evidence; the busy state is nicer to use and is now known to be
 safe, since a loading K2000 answers nothing at all and cannot be disturbed by a
 poll it never receives. Worth doing when someone is annoyed enough by it.
+
+## README screenshots: one of five still predates the August UI work
+
+**Status:** open, cosmetic. `braille`, `blocks/quad`, `blocks/half` and `text`
+were regenerated 2026-08-17 from real captured frames and show the current chrome
+(aligned soft keys, grouped legend). Two fixtures are checked in:
+`docs/fixtures/frame.json` (Program Mode, for the pixel modes) and
+`frame-text.json` (Master object database — eight dense rows, which is what text
+mode is for). Regenerate with:
+
+    .venv/bin/python docs/make_mirror_screenshots.py
+
+One is still from the initial release, 2026-06-21:
+
+* **`mirror-image.png`** — cannot be automated at all: image mode hands pixels to
+  the terminal's graphics protocol, so nothing lands in the character grid to
+  export as SVG. It has to be a photograph of a real kitty window; the recipe is
+  in `docs/make_mirror_screenshots.py --image-help`.
+
+And one file is not regenerable:
+
+* **`rename-tool.svg`** — the last SVG in the README, from the initial release,
+  with no generator and needing a live rename dialog. Lower risk than the mirror
+  shots (box-drawing and ASCII rather than braille), but it is the one remaining
+  image whose glyphs depend on the viewer's fonts. Worth folding into a generator
+  next time the rename tool is touched.
+
+**On the content of `frame-text.json`:** it shows object names from a commercial
+bank the author owns and has licensed, published in this repository with his
+explicit authorisation. Note the deliberate asymmetry with the k2kmaced
+screenshots, which are built from a *synthetic* image with invented names — those
+would have shown a whole disk's directory structure, which is a different
+exposure from one screen of one owned bank. If that distinction ever stops feeling
+right, the fix is to recapture from a factory-object range, which needs no code
+change.
+
+The lesson worth keeping: these went two months stale because they were shot by
+hand and nothing tied them to the code. Three of the five are now regenerable by
+one command from a checked-in frame, which is why they were the ones fixed first.

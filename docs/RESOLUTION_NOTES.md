@@ -1238,3 +1238,190 @@ host power-cycle, despite flushing every row — guarding against the job stalli
 does nothing about the file being deleted underneath it. Long-running artefacts
 go under `~/temp`, detached with `nohup`, resumable, and `fsync` per record
 rather than `flush`: after a power loss those are genuinely different states.
+## 21. MAC editor — the `.MAC` format, RE'd offline
+
+Everything below was done **with no K2000 attached**, from the backup images in
+`~/Dokumente/SYNTHS/K2000R/Backups/`. The byte-level layout has its own
+document — [`MAC_FORMAT.md`](MAC_FORMAT.md); this section is the procedure and
+what is still open.
+
+### How the sample was obtained
+
+`HD0_K2X_HD2G-*.img.lzo` is a **bare FAT16 volume, OEM `KMSI`** — no MBR,
+512 B/sector, 32 KB clusters, 2 FATs. `mtools` refuses it (the BPB leaves
+heads/sectors zero), so read the BPB and FAT directly; that reader is now
+`k2kmaced/k2image.py`. Streaming `lzop -dc … | dd conv=sparse` keeps the
+decompressed 2 GB image off the disk where it is all zeros.
+
+The 2026-02 and 2025-05 images hold the **same** `BOOT.MAC` (300 bytes, 6
+entries, OS v3.54); the 2025-01 image has none. That is the only real `.MAC`
+available anywhere on the machine — no soundset on disk ships one — which is
+why §5 of the format doc is hedged. It is checked in as
+`tests/fixtures/BOOT.MAC` so the round-trip stays a regression test.
+
+### What the first read got wrong
+
+The 2026-08-02 note in TODO.md read the per-entry `u16` at offset 6 as a "load
+id" and called `0x2A 00 01` an entry prefix. It is neither: `0x002A` is the
+entry **length**, `0x0001` the **drive**, and the id-looking field is the
+target **bank** (`0xFFFF` = Everything). The entry stride is therefore
+`32 + even(len(path) + 1)`, fully determined, not a guess.
+
+mpc2emu's `parsers/krz_parser._read_objects` was expected to read the container
+as-is, and it does — it walks `BOOT.MAC` and reports `type 100, id 35, name
+"Macro"` correctly, its conditional hash decode handling the >42 type. But it
+is a private helper that returns *offsets* into the buffer, there is no write
+direction, and a `.MAC` needs both. So `macfile.PramFile` implements the
+framing directly (~60 lines), and mpc2emu is used for what it is uniquely good
+at: parsing the `.KRZ` banks a macro *references*
+(`k2kremote/mpc2emu_link.py`).
+
+### Probes to run when hardware is authorised
+
+Written 2026-08-02 as `probes/p24`–`p26`, following the house pattern; none has
+been run. Only run them with a full backup present.
+
+* **`p30_macro_dump.py` — RAM vs disk layout.** With Macro Record on and a
+  known macro in memory, `DUMP` type 100 / id 35 (`MidiBridge.read_macro_table`)
+  and feed the bytes to `MacroTable.parse`. If it parses and the entries match
+  the front-panel display, RAM and disk layouts coincide and the app can read
+  the live table directly; if it raises, diff the dump against the `.MAC` the
+  same table saves to disk. This is a **read-only** SysEx op, but it still needs
+  the mirror paused (§9: the heartbeat must not interleave).
+* **`p31_macro_codes.py` — drive/mode codes.** From the front panel, set one
+  macro entry to each of the 11 drives and 5 modes in turn, saving a `.MAC`
+  each time; then read the `drive`/`mode` words back with `macfile`. Confirms
+  or replaces the table in MAC_FORMAT.md §5. Front-panel work only — no SysEx.
+* **`p32_macro_objlist.py` — object lists.** Record one entry with a
+  selected-object list (`Open` a `.KRZ`, select objects, press `Macro`), save,
+  and diff against the same entry recorded without one. `MacroEntry.extra`
+  already isolates the surplus bytes.
+
+### Writing back — deliberately not built
+
+The tooling only ever writes a **new** `.MAC` on the host. It does not write
+into a disk image, and it does not send a macro to the K2000. A wrong
+`BOOT.MAC` is a boot that loads the wrong banks or none, and §9's lesson (the
+K2000 locking up during object-destructive work) applies with more force to the
+object the machine reads before anything else is loaded. Any future write path
+should go through the same confirm-and-pause gate as the F11 tool.
+
+### Writing back into the image: the narrowest operation that works
+
+`mtools` cannot touch these volumes — confirmed on the real backup, not inferred:
+
+    mdir -i hd0.img ::/
+      → The devil is in the details: zero number of heads or sectors
+
+The K2000's BPB leaves `sectors/track` and heads at zero (OEM `KMSI`), which
+mtools treats as fatal. That left the macro workflow with no way back onto the
+disk, so `k2kmaced/k2write.py` adds one — and its safety comes from the *shape*
+of the operation rather than from care in the code:
+
+* the target file **must already exist**, so no directory record is created and
+  no free cluster is claimed;
+* the new contents must fit the clusters that file **already owns**, so **the FAT
+  is never written at all** — there is no code path that touches it, which a test
+  asserts by comparing the FAT region byte-for-byte across a write;
+* only two regions change: bytes inside those clusters, and the 4-byte size field
+  of that file's own directory record.
+
+A macro is ~300 bytes and a K2000 cluster is 32 KB, so `BOOT.MAC` always fits the
+single cluster it already has. Shrinking leaves the surplus clusters allocated to
+the file as slack — reachable only through it, with the size field marking the
+end. Releasing them would mean editing the FAT, which is the one thing this is
+built to avoid.
+
+Kept in a **separate module** from `k2image` on purpose: that reader is what every
+other tool depends on, and its "never writes" property is worth keeping literally
+true rather than "true except for one method".
+
+Two refusals worth keeping:
+
+* **`.lzo` images.** `k2image` reads them by decompressing to a temp file, so a
+  write would edit the copy and lose it at cleanup — a silent no-op, which is
+  worse than an error.
+* **Anything that is not a valid macro.** Parsed before the image is opened for
+  writing, because an invalid `BOOT.MAC` fails at *boot*, far from the mistake.
+
+The write verifies by reading the file back out and comparing. A write that
+reports success without landing is the failure that costs a boot, so it is
+checked rather than assumed.
+
+### The in-place image write, verified on hardware (2026-08-17)
+
+Run on Jan's real 2 GB image (`HD0.img`, raw, OEM `KMSI`), with his backup in
+hand and at his explicit instruction. Its `\BOOT.MAC` is 868 bytes, **19
+entries**, written by K2000 OS v3.87, one 32 KB cluster with 31,900 bytes slack.
+
+**Two independent risks, and they are not the same risk.** Jan's framing, and it
+is sharper than the one this was documented with: a bad macro means a bad boot,
+but a *corrupted volume* means the K2000 does not recognise the disk at all.
+Nothing on the host side can distinguish them.
+
+**Test 1 — round-trip the unmodified macro.** Extract, install straight back,
+compare the four regions any code path here can reach:
+
+    bootsector      unchanged
+    FAT             unchanged
+    dir_record      unchanged
+    target_cluster  unchanged
+
+Byte-identical, including the cluster tail — the slack past byte 868 was already
+zero, so the zero-padding was a no-op.
+
+**Test 2 — one field changed.** `--rebank 2=900` moved entry 2 from bank 300 to
+900; 18 of 19 entries untouched, still 868 bytes. Footprint after the write:
+`target_cluster` CHANGED, everything else unchanged (the directory record does
+not move because size is the only field written there, and the size was equal).
+
+**Test 3 — the instrument.** Disk recognised, directory walked, `BOOT.MAC` found
+and loaded to completion. Then `probes/p33_bankdir.py` over DIRBANK:
+
+    bank 200  84 programs      bank 500  100
+    bank 300   0  (empty)      bank 600  100
+    bank 400  42               bank 900   75
+
+Bank 300 empty and its 75 programs in 900 is exactly the edit, since entry 2 was
+300's only source.
+
+### Why the hardware was the only reader that could settle it
+
+The post-write verification in `k2write` reads the file back through `k2image` —
+**the same code that computed where to write it.** A misunderstanding of the
+geometry would have written to the wrong offset and then read the wrong offset
+back, reporting a clean success. `mtools` cannot arbitrate either: it refuses
+these volumes outright.
+
+The K2000's own FAT implementation shares no code with the writer, so "the disk
+was recognised and the macro loaded" is the first check of this write that is not
+circular. Same shape as the layer-count cross-check: what makes a second opinion
+worth having is that it comes from somewhere else.
+
+### k2kmaced itself, exercised on the real card (2026-08-17)
+
+Beyond the write path above, the editor was driven against Jan's actual disk with
+him at the machine — worth recording separately, because "the write primitive is
+correct" and "the program is usable on real data" are different claims:
+
+* the real `\BOOT.MAC` opened out of the image: **19 entries, 868 bytes, OS
+  v3.87**, all 19 referenced files present;
+* the `f` browser walked a genuinely large disk — **390 loadable files across 36
+  directories** — which is the case the original flat OptionList could not serve
+  and the reason it was replaced;
+* an entry was repointed by picking a file from `\-AFRICA\`, a 20th entry added,
+  and the result saved to a new `.MAC` (908 bytes);
+* the instrument then booted from the edited image and loaded to completion.
+
+**The TUI install route is verified too**, and by accident of sequence rather than
+design: after the CLI restore the card was found holding a 908-byte, 20-entry
+macro — Jan's own edit, installed through `w` -> `i` -> arm -> fire, md5 matching
+the `.MAC` he had saved. So the gate, the dialog and the write all did run against
+a real card, and the resulting image booted.
+
+Worth keeping the sequence visible, because it corrected a claim written minutes
+earlier in this file. The first version of this note said the keystroke route was
+unexercised and argued it was safe because "the code underneath is the same" —
+which is an argument, not a test. The test had in fact happened; nobody had told
+the notes. A doc that reasons about coverage instead of checking it is wrong in
+whichever direction the facts happen to fall.

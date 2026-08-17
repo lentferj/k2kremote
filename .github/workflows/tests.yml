@@ -87,11 +87,26 @@ jobs:
       # --print-size is not filler: it reads and writes the window-size cache
       # under XDG_CACHE_HOME, falling back to ~/.cache, which is a Linux-shaped
       # assumption being made on three platforms.
-      - name: Smoke-test the entry point
+      # Documentation rot is mechanically checkable and was not being checked:
+      # paths that moved when the macro editor became its own package, an anchor
+      # that changed when a heading was reworded, images renamed. --offline so a
+      # rate-limited URL cannot make this job flaky — a check people learn to
+      # ignore is worse than no check.
+      - name: Check documentation links
+        run: python docs/check_links.py --offline
+
+      - name: Smoke-test the entry points
         run: |
           k2kremote --help
           k2kremote --long-help
           k2kremote --print-size
+          # k2kmaced ships as its own program: the macro editor runs with the
+          # instrument switched off, so it is the half a user can exercise
+          # without hardware — and the half most likely to break unnoticed on a
+          # platform the author does not use.
+          k2kmaced --help
+          k2kmacli --help
+          k2kmacli list tests/fixtures/BOOT.MAC
 
       # `ports` is the first command a new user runs, and until 2026-08-16 it
       # raised on any host with no MIDI backend — a container, a headless box, a

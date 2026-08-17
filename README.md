@@ -11,6 +11,12 @@ A terminal remote for the Kurzweil **K2000 / K2000R**: it mirrors the hardware
 LCD pixel-for-pixel, drives every front-panel button from the computer keyboard,
 and can rename objects in one shot — all over ordinary MIDI SysEx.
 
+It ships **two programs**: `k2kremote`, the live LCD mirror, and
+[**`k2kmaced`**](#k2kmaced--the-macro-editor) — a standalone, **offline** editor
+for the `BOOT.MAC` startup macro that decides what your K2000 loads at power-on.
+The macro editor needs no MIDI and no running instrument, because editing
+`BOOT.MAC` means the K2000 is switched **off** with its disk in your computer.
+
 > **Author:** Jan Lentfer &lt;jan.lentfer@web.de&gt;, with AI support
 > (Anthropic Claude) — see [AI assistance](#ai-assistance--human-authorship).  
 > **Legal:** [DISCLAIMER.md](DISCLAIMER.md) · [LICENSE](LICENSE)
@@ -60,6 +66,10 @@ real K2000R. Full account in [DISCLAIMER.md](DISCLAIMER.md).
 - **Event-driven refresh** (never polls), throttled output, and automatic
   pausing around heavy disk operations to protect the K2000's CPU.
 - **PNG screenshots** of the LCD (`F12`) and a **MIDI panic** (`Alt+x`).
+- **Edits your startup macro offline** — [`k2kmaced`](#k2kmaced--the-macro-editor)
+  reads `BOOT.MAC` straight out of a K2000 disk image, lets you reorder the load
+  steps and repoint them by browsing the disk, and can write the result back into
+  the image behind a write gate. A separate program; it never opens a MIDI port.
 
 All testing was on a real K2000R; the protocol reverse-engineering lives in the
 author's sibling **mpc2emu** project (`docs/k2000r_midi_comms.md`).
@@ -128,6 +138,175 @@ Characters beyond the K2000's 16-character display field are shown in **orange**
 > name.
 
 ---
+
+## k2kmaced — the macro editor
+
+A `.MAC` macro is the K2000's load list — "load this file, into that bank, in this
+mode". `BOOT.MAC` in the root of the startup disk is the one the instrument
+replays at power-on, so it decides what is resident after boot. Without a tool,
+editing it means the front panel or a hex editor.
+
+**`k2kmaced` is a separate program**, shipped with k2kremote but standalone: same
+repo, its own command, and it never opens a MIDI port. That is arithmetic rather
+than caution — on a modern setup the K2000's disk *is* its SD/CF card, so reaching
+`BOOT.MAC` means the instrument is switched **off** with its disk in your
+computer. The mirror needs the opposite. The two can essentially never be useful
+at the same moment.
+
+### Start it
+
+```bash
+k2kmaced                      # then ctrl+o to open a .MAC or a disk image
+```
+
+No arguments needed, because the file you want is usually on a card you have just
+plugged in, under a mount point you do not remember, called `BOOT.MAC` inside a
+2 GB image. If you would rather name it up front:
+
+```bash
+k2kmaced hd0.img:'\BOOT.MAC'  # a macro inside an image
+k2kmaced BOOT.MAC -o NEW.MAC  # a plain file, saving elsewhere
+```
+
+Each row is one load step, in the order the K2000 replays them. **`MISSING`**
+flags an entry whose file is not on the image — the failure a stale macro actually
+has, which on the instrument is a "Not Found" part-way through booting.
+
+<p align="center">
+  <img src="docs/img/k2kmaced_entries.png" alt="The macro editor's entry table: drive, file, bank and load mode per row" width="88%">
+</p>
+
+### Keys
+
+| key | does |
+|---|---|
+| `ctrl+o` | open a `.MAC` or a disk image |
+| `↑` `↓` | select an entry |
+| `b` / `B` | cycle that entry's target bank up / down |
+| `m` | cycle the load mode (Overwrite / Fill / …) |
+| `d` | cycle the source drive |
+| `f` | **browse the disk** and repoint the entry at a file |
+| `e` | type a path by hand instead |
+| `o` | **move the entry to a position** |
+| `ctrl+↑` / `ctrl+↓` | nudge it one step |
+| `a` / `delete` | add an entry / remove one |
+| `ctrl+s` | write a separate `.MAC` on the host (never the image) |
+| `w` then `i` | arm the write gate, then install into the image |
+| `ctrl+c` | quit |
+
+### Browsing the disk (`f`)
+
+`enter` descends into a folder, `..` or `backspace` comes back out, `enter` on a
+file repoints the current entry at it. It opens in the folder that entry already
+points at, because the usual edit is "same folder, different file".
+
+<p align="center">
+  <img src="docs/img/k2kmaced_browse_root.png" alt="Browsing the root of a K2000 disk image: directories first, then files" width="88%">
+</p>
+
+<p align="center">
+  <img src="docs/img/k2kmaced_browse_dir.png" alt="Browsing inside a directory, with .. to go back up" width="88%">
+</p>
+
+Only files a macro can load are listed (`.KRZ`, `.MAC`, `.AIF`, `.WAV`), so a
+folder holding nothing loadable does not appear. Picking from the disk rather than
+typing means the entry names a file that demonstrably exists.
+
+### Reordering (`o`)
+
+**Order is the macro's meaning, not its presentation.** It replays top to bottom,
+so which entry loads first decides what a later one overwrites — an `Overwrite`
+moved below the `Fill`s it used to precede wipes them instead of seeding them.
+
+`o` takes the destination directly: entry 4 to position 2 gives `0,1,4,2,3`.
+It **inserts rather than swaps**, because a swap would silently move a third entry
+you never mentioned, and that is a *different macro* rather than a differently
+drawn one.
+
+<p align="center">
+  <img src="docs/img/k2kmaced_move_to.png" alt="Moving an entry to an explicit position" width="88%">
+</p>
+
+### What touches what
+
+Being exact, because the dangerous parts are not where people expect:
+
+- **Reading an image can never change it.** `k2image` has no write path at all.
+- **`ctrl+s` writes one new `.MAC`** and nothing else. But it is an ordinary file
+  write: point `-o` at something valuable and that file is gone. Name a new one.
+- **Exactly one action writes into an image** — `i`, behind the gate and the
+  arm-then-fire (or `k2kmacli install` from a script, which asks you to type
+  `overwrite` instead). Everything else in either program is read-only on images.
+- **The largest risk is downstream of this tool.** A macro only matters once it is
+  on the instrument as `BOOT.MAC`, and a bad macro is a bad boot. Keep the
+  previous `BOOT.MAC`, and keep a current image backup before writing to a K2000
+  disk — not because the editor touches them, but because the next thing you do
+  does.
+
+> Nothing here goes over MIDI. Reading the **live** Macro Table over SysEx, and
+> sending a macro to a running instrument, are not implemented and their
+> groundwork is unverified against hardware — see [`TODO.md`](TODO.md). Today the
+> route onto the machine is the disk.
+
+`k2kmacli` scripts the same operations from a shell — `list`, `check`,
+`edit --rebank/--move`, `install`. See `k2kmacli --help`.
+
+---
+
+### The workflow, start to finish
+
+Putting the above together, from a card in your hand to an instrument that boots
+the way you wanted.
+
+**0 — The instrument is switched off throughout**, and its disk is in your
+computer. That is forced by the card *being* the disk, and it means nothing you do
+here can be checked against the hardware until the card goes back in. The
+`MISSING` column is the only verification you get.
+
+**1 — Open the macro.** `ctrl+o`, browse to the card, pick the image; if it holds
+more than one `.MAC` it asks which. Opening it this way is also what makes step 3
+possible: the install target is *where you opened from*, so it can never be aimed
+at the wrong file by a typo.
+
+**2 — Edit.** Change banks, modes, drives; repoint an entry by browsing the disk
+(`f`); reorder the load steps (`o`) — all as described above. Nothing so far has
+touched the image.
+
+**3 — Install it back into the image.** `w` to arm the write gate, then `i`.
+
+> #### 🛑 Back up your image first — this is on you
+>
+> This step writes into your disk image **in place**. There is no undo, and
+> **k2kmaced does not make a backup for you.** Keeping a good, current copy of
+> that image somewhere else — a different physical disk — is your responsibility.
+
+It is the only destructive thing `k2kmaced` does, and it is guarded in layers (the
+same shape the sibling `eosed` and `s3ked` use for their erase operations):
+
+- the **write gate** is off at start-up. `w` arms it, and the header says so —
+  blinking — for as long as it is on. Opening a different file disarms it:
+  permission is per-file and is never inherited.
+- `i` then opens the install dialog, which shows the plan and does **nothing** on
+  one keypress: `i` arms the write, `enter` fires it, `escape` cancels.
+- the **destination is not typed**, so it cannot be a typo.
+- the write itself only overwrites a file that already exists, within the clusters
+  it already owns — so the FAT is never written — and reads the bytes back
+  afterwards to confirm they landed. A `.lzo` image is refused outright, because
+  those are read through a temporary copy and the write would be silently lost.
+
+<p align="center">
+  <img src="docs/img/k2kmaced_install.png" alt="The install dialog: the plan, the backup warning, and an armed write awaiting Enter" width="88%">
+</p>
+
+**4 — Put the card back and power up.** `BOOT.MAC` must be in the **root** of the
+startup disk, and Disk Mode's `Startup` parameter must point at that drive. You
+should see *"About to load startup file…"* and then *"Macro BOOT.MAC completed"*.
+
+Two escape hatches worth knowing: the startup screen offers a **`Cancel`** soft
+button for its first few seconds, so a bad boot macro is recoverable at the panel
+rather than fatal — and you can load any `.MAC` by hand from Disk Mode's `Load`
+without touching `Startup` at all, which is the safer way to try one before
+committing it as the boot file.
 
 ## Installation (one-time setup)
 
@@ -242,7 +421,28 @@ and `Alt+letter` for their own menus — that's what `--alt-keys` /
 ```bash
 python -m k2kremote.braille    # braille renderer self-test
 python -m pytest               # the test suite — all synthetic, never opens MIDI
+
+# The macro (.MAC) tool — entirely offline; images read-only except 'install'
+k2kmacli list BOOT.MAC
+k2kmacli find  ~/backups/HD0.img.lzo         # macros in an image
+k2kmacli list  ~/backups/HD0.img.lzo:'\BOOT.MAC'
+k2kmacli check BOOT.MAC --image ~/backups/HD0.img.lzo
+k2kmacli edit  BOOT.MAC -o NEW.MAC --rebank 3=700 --move 5=0
+
+# …or the interactive editor (a separate app; it never opens a MIDI port)
+k2kmaced BOOT.MAC -o NEW.MAC --image ~/backups/HD0.img.lzo
 ```
+
+A `.MAC` is the K2000's macro — the list of "load this file, into that bank, in
+this mode" that `BOOT.MAC` replays at power-on. The format is documented in
+[`docs/MAC_FORMAT.md`](docs/MAC_FORMAT.md). Edits are always written to a **new**
+file, never to the K2000, and never over a `BOOT.MAC` whose predecessor you have
+not kept. The single exception is `k2kmacli install`, which writes into a raw
+image in place — see the warning in [**The macro editor**](#k2kmaced--the-macro-editor).
+
+See [**The macro editor**](#k2kmaced--the-macro-editor) above
+for the interactive version, with screenshots and what it does and does not
+touch.
 
 ### With a K2000 attached
 
@@ -404,6 +604,12 @@ alternate:
 | `k2kremote/name_cursor.py` | Software model of the name-edit cursor (the K2000 never exposes it over MIDI), drawn as the underline. |
 | `k2kremote/screenshot.py` | Saves a captured screen as a high-fidelity PNG (reuses psobot/k2000's `image`). |
 | `k2kremote/app.py` | The Textual TUI: the LCD mirror, live F1–F6 soft bar, mode/status lines, name entry, the rename tool, render-mode cycling. |
+| `k2kmaced/macfile.py` | Reads, edits and writes `.MAC` macro files (and the `PRAM` container they share with `.KRZ` banks). |
+| `k2kmaced/k2image.py` | Read-only reader for K2000 FAT16 disk images, raw or `lzop`-compressed — where the macros and the banks they load live. |
+| `k2kmaced/k2write.py` | The one write direction: overwrites a file that already exists inside an image, within the clusters it already owns, so the FAT is never touched. |
+| `k2kmaced/cli.py` | `k2kmacli` — list / check / edit / build macros, from a file or from inside an image. |
+| `k2kmaced/app.py` | `k2kmaced` — the standalone macro editor (TUI only): reorder entries, cycle drive / bank / load mode, browse the image for an entry's file, flag files the image no longer has, and install the result back into the image behind a write gate. |
+| `k2kmaced/mpc2emu_link.py` | Optional bridge to a sibling mpc2emu checkout, used to look inside the `.KRZ` banks a macro references. |
 
 See [DESIGN.md](DESIGN.md) for the architecture and [TODO.md](TODO.md) for open
 items.
@@ -441,6 +647,9 @@ GPL, and the MIT terms continue to apply to the files in `k2000/`.
 | `midi_bridge.py` | Connection plumbing (throttled output, merged multi-input, connect logic) ported from the author's sibling mpc2emu project; MIDI quirks RE'd in its `docs/k2000r_midi_comms.md`, verified on real K2000R hardware | GPL-2.0-or-later | Original code |
 | `braille.py` | Original work — renders the K2000's LCD pixel buffer | GPL-2.0-or-later | Original code |
 | `text_entry.py` / `name_cursor.py` | Naming model from the Kurzweil K2vx manual; button codes from the vendored `k2000.definitions.Button` (MIT) | GPL-2.0-or-later | Original code |
+| `macfile.py` | Macro semantics from the Kurzweil K2vx manual ch. 13; `PRAM` container framing from mpc2emu's `docs/KRZ_FORMAT.md` §2; verified against a real `BOOT.MAC` (see [`docs/MAC_FORMAT.md`](docs/MAC_FORMAT.md)) | GPL-2.0-or-later | Original code |
+| `k2image.py` / `cli.py` | Original work — FAT16 read direction for K2000 volumes, and the macro command-line tool | GPL-2.0-or-later | Original code |
+| `mpc2emu_link.py` | Optional bridge to the author's sibling [mpc2emu](https://github.com/lentferj/mpc2emu) project (`parsers/krz_parser.py`, `writers/fat16.py`) | GPL-2.0-or-later | Original code |
 
 ---
 
