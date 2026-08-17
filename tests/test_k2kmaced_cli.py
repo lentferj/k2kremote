@@ -249,3 +249,18 @@ def test_install_refuses_a_compressed_image(boot, tmp_path, capsys):
     fake.write_bytes(b"nope")
     assert main(["install", str(boot), str(fake), "\\BOOT.MAC", "--yes"]) == 1
     assert "lzop-compressed" in capsys.readouterr().err
+
+
+def test_parse_source_does_not_split_a_windows_drive_letter():
+    r"""A bare Windows path is a path, not image `C` plus member `\Users\...`.
+
+    parse_source's docstring claimed drive letters were left alone while it split
+    them, so every Windows job in CI failed with `FileNotFoundError: 'C'` the
+    first time the macro tests ran there. It is a pure string function, so this
+    catches it on any platform — which is where it should have been caught.
+    """
+    assert parse_source(r"C:\Users\me\hd0.img") == (r"C:\Users\me\hd0.img", None)
+    assert parse_source(r"D:\hd0.img") == (r"D:\hd0.img", None)
+    # ...while a member on a Windows path still splits, at the right colon.
+    assert parse_source(r"C:\Users\me\hd0.img:\BOOT.MAC") == (
+        r"C:\Users\me\hd0.img", r"\BOOT.MAC")

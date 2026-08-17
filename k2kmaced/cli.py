@@ -75,12 +75,18 @@ __all__ = ["parse_source", "load_macro", "format_table", "main"]
 def parse_source(spec: str) -> Tuple[str, Optional[str]]:
     """Split ``image.img:\\BOOT.MAC`` into ``(image, member)``.
 
-    A bare path returns ``(path, None)``. Only a ``:`` that is followed by a DOS
-    path separator splits, so Windows-style drive letters and ordinary file
-    names containing colons are left alone.
+    A bare path returns ``(path, None)``. Only a ``:`` followed by a DOS path
+    separator splits, and the part before it must be more than a single
+    character — otherwise ``C:\\Users\\me\\hd0.img`` splits at the **drive
+    letter** into image ``C`` and member ``\\Users\\me\\hd0.img``.
+
+    That is not hypothetical: this function claimed to leave drive letters alone
+    and did not, and every Windows job in CI failed on it with
+    ``FileNotFoundError: 'C'`` the first time the macro tests ran there. A
+    one-character head is never a real image path, so length is the whole test.
     """
     head, sep, tail = spec.rpartition(":")
-    if sep and tail.startswith("\\") and head:
+    if sep and tail.startswith("\\") and len(head) > 1:
         return head, tail
     return spec, None
 

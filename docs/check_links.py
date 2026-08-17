@@ -109,7 +109,8 @@ def main() -> int:
         print(f"network: {'available' if online else 'UNREACHABLE — URLs not checked'}")
     print(f"checking {len(md)} markdown files\n")
 
-    urls, problems, counts = {}, [], {"anchor": 0, "file": 0, "url": 0}
+    urls, problems, outside = {}, [], []
+    counts = {"anchor": 0, "file": 0, "url": 0}
     for path in md:
         own = anchors_of(path)
         for target in links_of(path):
@@ -126,7 +127,21 @@ def main() -> int:
                 counts["file"] += 1
                 file_part, _, frag = target.partition("#")
                 dest = (path.parent / file_part).resolve()
-                if not dest.exists():
+                # A link that leaves the repository cannot be verified from a
+                # checkout: docs/MAC_FORMAT.md points at the sibling mpc2emu
+                # project, which exists on the author's machine and on no CI
+                # runner. It passed locally for the wrong reason and then failed
+                # every job. Reported, not failed — an unverifiable link is not a
+                # broken one, and treating it as broken makes the check unusable
+                # exactly where it runs unattended.
+                try:
+                    dest.relative_to(REPO)
+                    inside = True
+                except ValueError:
+                    inside = False
+                if not inside:
+                    outside.append((path, target, dest.exists()))
+                elif not dest.exists():
                     problems.append((path, target, "file does not exist"))
                 elif frag and frag not in anchors_of(dest):
                     problems.append((path, target,
@@ -151,6 +166,9 @@ def main() -> int:
 
     print(f"\nlinks checked: {counts['anchor']} anchors, {counts['file']} files, "
           f"{counts['url']} urls ({len(urls)} distinct)")
+    for path, target, here in outside:
+        print(f"  ? {path.relative_to(REPO)}: {target}  -> outside the repo, "
+              f"{'present here' if here else 'not present here'}; not checked")
     if not problems:
         print("no broken links")
         return 0
