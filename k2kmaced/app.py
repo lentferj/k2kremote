@@ -496,21 +496,29 @@ else:
             self.rows: List[tuple] = []
 
         def compose(self) -> ComposeResult:
+            # The widgets are kept as attributes rather than looked up later with
+            # query_one. `on_mount` fires before a screen's composed children are
+            # necessarily mounted, so querying them there is a race: it worked on
+            # Linux, macOS and Windows/3.13 and lost on Windows/3.11, where the
+            # whole app died with NoMatches inside Mount. A reference cannot
+            # be unmounted out from under itself.
+            self._where = Static("", id="browsewhere")
+            self._list = OptionList(id="browselist")
             with Vertical():
-                yield Static("", id="browsewhere")
-                yield OptionList(id="browselist")
+                yield self._where
+                yield self._list
 
         def on_mount(self) -> None:
             self._show()
-            self.query_one("#browselist", OptionList).focus()
+            self._list.focus()
 
         def _show(self) -> None:
             """Redraw for :attr:`directory`, highlighting the current file."""
             self.rows = browse_rows(self._tree, self.directory)
-            options = self.query_one("#browselist", OptionList)
+            options = self._list
             options.clear_options()
             options.add_options([label for label, _, _ in self.rows])
-            self.query_one("#browsewhere", Static).update(
+            self._where.update(
                 f"{self.directory}   (enter opens · backspace up · esc cancels)")
             for i, (_, kind, target) in enumerate(self.rows):
                 if kind == "file" and target.upper() == self.current.upper():
@@ -573,13 +581,16 @@ else:
             self.rows: List[tuple] = []
 
         def compose(self) -> ComposeResult:
+            # References, not query_one — see PickFileScreen.compose.
+            self._where = Static("", id="openwhere")
+            self._list = OptionList(id="openlist")
             with Vertical():
-                yield Static("", id="openwhere")
-                yield OptionList(id="openlist")
+                yield self._where
+                yield self._list
 
         def on_mount(self) -> None:
             self._show()
-            self.query_one("#openlist", OptionList).focus()
+            self._list.focus()
 
         def _candidates(self) -> List[tuple]:
             import pathlib
@@ -606,10 +617,10 @@ else:
 
         def _show(self) -> None:
             self.rows = self._candidates()
-            options = self.query_one("#openlist", OptionList)
+            options = self._list
             options.clear_options()
             options.add_options([label for label, _, _ in self.rows])
-            self.query_one("#openwhere", Static).update(
+            self._where.update(
                 f"{self.here}   (enter opens · backspace up · esc cancels)")
             if self.rows:
                 options.highlighted = 0
@@ -647,12 +658,12 @@ else:
             self.macros = list(macros)
 
         def compose(self) -> ComposeResult:
-            options = OptionList(*self.macros)
-            options.border_title = "macro to open (esc cancels)"
-            yield options
+            self._list = OptionList(*self.macros)
+            self._list.border_title = "macro to open (esc cancels)"
+            yield self._list
 
         def on_mount(self) -> None:
-            self.query_one(OptionList).focus()
+            self._list.focus()
 
         def action_cancel(self) -> None:
             self.dismiss(None)
@@ -704,8 +715,9 @@ else:
             self.armed = False
 
         def compose(self) -> ComposeResult:
+            self._body = Static(id="installbody")
             with Vertical():
-                yield Static(id="installbody")
+                yield self._body
 
         def on_mount(self) -> None:
             self._refresh()
@@ -715,7 +727,7 @@ else:
             lines = [f"Write the macro back into the image, over {editor.member}", ""]
             if self.problem:
                 lines += [f"CANNOT: {self.problem}", "", "escape) close"]
-                self.query_one("#installbody", Static).update("\n".join(lines))
+                self._body.update("\n".join(lines))
                 return
             plan = self.plan or {}
             lines += [
@@ -738,8 +750,7 @@ else:
                 lines.append("ARMED — press Enter to WRITE, Escape to cancel.")
             else:
                 lines.append("i) arm     escape) cancel")
-            body = self.query_one("#installbody", Static)
-            body.update("\n".join(lines))
+            self._body.update("\n".join(lines))
 
         def action_arm(self) -> None:
             if not self.problem:

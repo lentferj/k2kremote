@@ -662,7 +662,17 @@ async def test_starting_with_nothing_open_is_survivable(capsys):
     async with app.run_test() as pilot:
         await pilot.pause()
         from k2kmaced.app import OpenScreen
-        assert isinstance(app.screen, OpenScreen), "should offer to open"
+
+        # Wait for the dialog rather than assuming one pause is enough. The open
+        # screen is pushed via call_after_refresh, and how many frames that takes
+        # is a scheduling detail that differs by platform and Python version —
+        # Windows/3.11 needed more than Linux. Bounded, so a dialog that never
+        # arrives still fails.
+        for _ in range(20):
+            if isinstance(app.screen, OpenScreen):
+                break
+            await pilot.pause()
+        assert isinstance(app.screen, OpenScreen), "should offer to open a file"
         await pilot.press("escape")            # dismiss it, then poke
         await pilot.pause()
         for key in ("b", "m", "d", "a", "o", "delete", "ctrl+s", "w", "i", "e", "f"):
