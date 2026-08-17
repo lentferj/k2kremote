@@ -6,16 +6,22 @@
 
 """Check every link in the project's Markdown: anchors, files, and URLs.
 
-    .venv/bin/python docs/check_links.py            # everything
-    .venv/bin/python docs/check_links.py --offline  # skip URLs (what CI runs)
+    .venv/bin/python docs/check_links.py         # anchors and paths (default)
+    .venv/bin/python docs/check_links.py --urls  # also check URLs over the network
 
 Exists because this project keeps finding its documentation out of date: paths
 that moved when the macro editor became its own package, an anchor that changed
 when a heading was reworded, images renamed. Those are all mechanically checkable,
 and none of them were being checked.
 
-`--offline` skips the network so CI is deterministic — a URL check that fails on
-someone else's rate limit teaches people to ignore the job.
+**URL checking is opt-in**, and that is not only about CI determinism. Running it
+a handful of times in one afternoon was enough to get this machine a 429 from
+raw.githubusercontent.com — which is where GitHub serves README images from, so
+every screenshot in the rendered README went blank in a browser on the same IP.
+A link checker that breaks the page it is checking has negative value, so the
+network pass now happens only when asked for.
+
+`--offline` is still accepted, and is what CI passes.
 
 Three classes, three different ways to be wrong:
 
@@ -101,10 +107,13 @@ def main() -> int:
             ".pytest_cache", ".mypy_cache", ".ruff_cache"}
     md = sorted(p for p in REPO.rglob("*.md")
                 if not (skip & set(p.parts)) and "egg-info" not in str(p))
-    offline = "--offline" in sys.argv
-    online = False if offline else have_network()
-    if offline:
-        print("network: skipped (--offline); URLs not checked")
+    # Default is offline. Checking URLs is the only part that can affect anything
+    # outside this repository, and it did: repeated runs earned a 429 from
+    # raw.githubusercontent.com and blanked every image in the rendered README.
+    want_urls = "--urls" in sys.argv
+    online = have_network() if want_urls else False
+    if not want_urls:
+        print("network: not used (pass --urls to check them)")
     else:
         print(f"network: {'available' if online else 'UNREACHABLE — URLs not checked'}")
     print(f"checking {len(md)} markdown files\n")
