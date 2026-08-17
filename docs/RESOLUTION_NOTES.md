@@ -103,11 +103,20 @@ notes playing at velocity 115, four seconds of capture reads:
 
     system:capture_17   rms 0.0369  (-28.7 dBFS)   peak 0.152
     system:capture_18   rms 0.0271  (-31.3 dBFS)   peak 0.134
-    system:capture_1/2         (-74.5 / -71.7 dBFS)  noise floor
     system:capture_19/20       (-90.8 / -89.5 dBFS)  silence
+    system:capture_1/2         (-74.5 / -71.7 dBFS)  NOT an input - see below
 
-Some 45 dB above the next-best pair, so the instrument is on 17/18 and `p13`'s
-hardcoded ports were right all along. Whatever the original run captured, the
+Some 60 dB above a genuinely idle input pair, so the instrument is on 17/18 and
+`p13`'s hardcoded ports were right all along.
+
+**`system:capture_1/2` is not a hardware input on this rig** — it is a stereo sum
+of everything playing on the computer. It read -74 dBFS here because the machine
+happened to be quiet, not because it is an idle input, and it would show signal
+for any application audio. So it is useless as a control pair and actively
+misleading for "is there signal anywhere" sweeps: a measurement that accidentally
+captured it would be recording the computer, including any monitoring of the
+instrument, which is a feedback path rather than a measurement. Use **19/20** as
+the idle reference. Whatever the original run captured, the
 fault was not the port numbers — and "captured only noise" became a claim about
 the routing rather than about that attempt, which then justified closing the
 probe. A negative result got promoted to a property of the rig.
