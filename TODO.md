@@ -631,29 +631,29 @@ predates the evidence; the busy state is nicer to use and is now known to be
 safe, since a loading K2000 answers nothing at all and cannot be disturbed by a
 poll it never receives. Worth doing when someone is annoyed enough by it.
 
-## Name-entry failures now raise — needs one live pass to confirm it is not noisy
+## Name-entry failures now raise — verified live, not noisy — RESOLVED
 
-**Status:** open, **blocked on** a hardware check. Both multi-tap branches in
-`type_name` used to give up quietly and leave a garbled name on the device while
-reporting success; they now raise `NameEntryFailed`, and the `Ctrl+O` rename tool
-keeps its dialog open when the INFO reply carries a name different from the one
-asked for. Both are correct against the synthetic fake and both are **untested
-against the real panel.**
+**Status:** **verified on hardware 2026-08-17** with Jan at the panel. Both
+multi-tap branches in `type_name` used to give up quietly and leave a garbled
+name on the device while reporting success; they now raise `NameEntryFailed`, and
+the `Ctrl+O` rename tool keeps its dialog open when the INFO reply carries a name
+different from the one asked for.
 
-Two things a live pass should settle:
+Both questions are answered:
 
-* Does a real multi-tap ever need more presses than the ring plus one reset? The
-  budget is now derived (`_passes`), not the old flat 12. If the hardware ever
-  drops a press, the old code silently typed the wrong character and the new code
-  raises — better, but it turns a rare cosmetic fault into a visible failure, and
-  it should be confirmed rare rather than routine.
+* ~~Does a real multi-tap ever need more presses than the ring plus one reset?~~
+  **No** (`probes/p29_multitap_budget.py`): 23 characters, ~97 pad presses,
+  **nothing over budget and nothing raised**. Digit *n* costs exactly *n*+1
+  presses; the worst cases are `'9'` at 10 of 11 and the third-position letters
+  at 3 of 4, so the tight margin is **one spare press**. A single dropped press
+  is therefore absorbed silently; two within one character would raise. No drop
+  was observed at all, so the raise is a genuine last resort rather than a
+  routine event, and the retry does *not* need to move inside `_type_char`.
 * ~~Does the K2000 pad a stored name with trailing blanks?~~ **Answered
   2026-08-17** (`probes/p28_name_padding.py`, read-only): **it does not pad.**
   INFO returns the name exactly as stored, verified across lengths 3, 4 and a
   full 16 (`'VZ1'`, `'FGTH'`, `'Cymb.SoftMallet1'`). The comparison's `rstrip` is
   a no-op, so the check is exact and cannot false-alarm on short names.
-
-Only the first question is still open, and it needs a human at the panel.
 
 See RESOLUTION_NOTES §20.
 ## README screenshots: one of five still predates the August UI work

@@ -1348,6 +1348,40 @@ padded with blanks, the strip would have been the only thing preventing a
 mismatch report on every rename of a short name; had it padded with anything
 else, the strip would not have helped and the tool would have false-alarmed
 every time. The check cost one read.
+
+### The derived multi-tap budget holds on hardware, with one press of slack
+
+`probes/p29_multitap_budget.py` (2026-08-17, Jan at the panel) drove the real
+`type_name` into an open name dialog and counted the presses it actually spent
+per character. 23 characters, ~97 pad presses: **nothing over budget, nothing
+raised, not one dropped press.**
+
+    digit n            n+1 presses      worst '9'  10 of 11
+    3rd-in-group A-Z   3 presses        worst      3 of 4
+    'Z' (ring of 2)    2 presses                   2 of 3
+
+So the tight margin is **exactly one spare press**. A single dropped press is
+absorbed silently; two within one character would raise `NameEntryFailed`. That
+is the right shape — the raise is a last resort, not a routine event, so the
+retry does not need to move inside `_type_char`.
+
+Two things worth knowing for anyone re-running it:
+
+* **`'0'` costs 9 presses, not 1, in that output** — and it is the probe's own
+  fault, not the device's. Locating the cursor presses `Number0` twice, leaving
+  the cell showing `'1'`, so reaching `'0'` cycles the long way round. It doubles
+  as confirmation that the ring is ten long and wraps.
+* **The cursor is measured, not assumed.** It cannot be read over MIDI, and every
+  read-back in `type_name` is offset from it — one cell out and each character is
+  verified against its *neighbour*, which is indistinguishable from the device
+  dropping presses. The probe writes one character, diffs the field to see which
+  column changed, walks the cursor to the first cell, and re-measures to confirm.
+
+The first version of this probe gated itself on `stdin.isatty()` to enforce "a
+human is watching". That is a proxy for the property, not the property: an idle
+terminal has a tty and an attended run through a wrapper has none. It locked out
+the very person it was written for. The gate is now an explicit `--attended`
+flag — passing it *is* the human act.
 ## 21. MAC editor — the `.MAC` format, RE'd offline
 
 Everything below was done **with no K2000 attached**, from the backup images in
