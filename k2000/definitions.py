@@ -16,6 +16,13 @@ class ObjectType(Enum):
     PressureMap = 105
     QuickAccessBank = 111
     IntonationTable = 103
+    # Type 100 is the K2000's "Table" type: the Master parameters are 100/16,
+    # the Macro Table 100/35 (the `Table  35  Macro` line the manual's
+    # Save-Object list shows). The disk-file hash in a .MAC decodes to the same
+    # pair — see k2kmaced.macfile. UNVERIFIED over MIDI: no hardware session
+    # has dumped it yet, and DUMP returns the RAM layout, which for other types
+    # differs from the disk layout.
+    MacroTable = 100
 
 
 class ButtonEventType(Enum):

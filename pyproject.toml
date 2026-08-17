@@ -30,11 +30,16 @@ image = ["textual-image>=0.6"]
 
 [project.scripts]
 k2kremote = "k2kremote.app:main"
+# k2kmaced is a separate program that ships alongside the mirror: the macro
+# editor needs the instrument switched OFF and its disk in the computer, so it
+# and the mirror can essentially never run usefully at the same time.
+k2kmaced = "k2kmaced.app:main"
+k2kmacli = "k2kmaced.cli:main"
 
 [tool.setuptools]
 # "k2000" is the vendored psobot/k2000 library (MIT); shipped so the app runs
 # without any manual dependency install.
-packages = ["k2kremote", "k2000"]
+packages = ["k2kremote", "k2000", "k2kmaced"]
 
 [tool.setuptools.package-data]
 k2000 = ["LICENSE"]

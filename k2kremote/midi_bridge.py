@@ -65,6 +65,13 @@ from k2000.client import K2000Client  # noqa: E402
 from k2000.definitions import Button, ButtonEventType, ObjectType  # noqa: E402
 from k2000.messages import ButtonEvent, Change, Del, DelBank, Panel  # noqa: E402
 
+# The live Macro Table's object id. Defined here rather than imported from
+# k2kmaced: that is the *macro editor*, and the mirror must not depend on it —
+# the two ship together but are separate programs, and this is a fact about the
+# device's object database (type 100 "Table", id 35 — the `Table  35  Macro`
+# line in the Save-Object list), which is this module's own subject matter.
+MACRO_TABLE_ID = 35
+
 # --- defaults (RE'd values; see module docstring) ---------------------------
 # The RE'd hard floor is ~120 ms. We sit just above it.
 #
@@ -725,6 +732,22 @@ class MidiBridge:
     def object_name(self, obj_type: ObjectType, idno: int) -> str:
         """Current name of an object (DIR → INFO) — the rename tool's preview."""
         return self.client.dir(obj_type, idno).name
+
+    def read_macro_table(self, timeout: Optional[float] = None) -> bytes:
+        """Dump the live Macro Table's object data — DUMP (0x00), a pure read.
+
+        The macro list the K2000 is recording into lives in battery-backed RAM as
+        object type 100, id 35 (``Table  35  Macro`` in the Save-Object list). The
+        bytes come back in the K2000's **RAM** layout, which for programs and
+        keymaps is known to differ from the ``.KRZ``/``.MAC`` disk layout
+        (mpc2emu, ``docs/k2000r_midi_comms.md`` §4). Whether the Macro Table's two
+        layouts coincide is **unverified** — feed the result to
+        :func:`k2kmaced.macfile.MacroTable.parse` and expect it to raise if they
+        do not. See ``docs/RESOLUTION_NOTES.md`` §MACLIVE for the probe.
+
+        Raises if Macro mode is Off, because then no Macro Table object exists.
+        """
+        return self.client.dump(ObjectType.MacroTable, MACRO_TABLE_ID).data
 
     # DELBANK's "all object types" selector: the protocol's type field = 0. No
     # ObjectType enum member has value 0, so a tiny stand-in supplies `.value`
