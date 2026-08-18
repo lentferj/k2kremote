@@ -169,11 +169,32 @@ Three independent checks agree on the real file:
    ID 0.
 3. Every referenced path exists on that disk (§4).
 
-Still: this is **one file**, and nothing has been confirmed against the
-hardware. Both codes are also plausibly stored as the displayed value
-(`drive = 1` → SCSI 1, `mode = 3` → some other mode), which would make the
-decode wrong by one drive and shuffle the modes. Treat any macro you write as
-unverified until §7's probe has run.
+### Codes 2 and 3 are now confirmed against the instrument (2026-08-17)
+
+Driving the panel to *Disk → Macro* makes the K2000 render its own macro table,
+one line per entry, with the mode as a letter in exactly the position this
+decoder predicts. On a 19-entry macro the device printed `O` on every entry we
+decode as `mode = 3` and `F` on every entry we decode as `mode = 2`:
+
+```
+ 0:\NULL.KRZ                       E:O:      mode 3  ->  device shows O
+ 0:\<path>\<bank>.KRZ            200:O:      mode 3  ->  device shows O
+ 0:\<path>\<bank>.KRZ            200:F:      mode 2  ->  device shows F
+```
+
+So **`3` → Overwrite and `2` → Fill are measured, not inferred**, and the
+list-index reading is right where it has been exercised. This also rules out the
+displayed-value alternative for the mode field: were `3` stored as the displayed
+value it would not land on Overwrite, and the `NULL.KRZ` entry would not work.
+
+Codes `0` (Append), `1` (Merge) and `4` (OvFill) remain **unconfirmed**, as does
+the entire drive column — the observed macro uses drive `1` throughout, which is
+consistent with SCSI 0 but does not discriminate it from the alternative. The
+table is therefore *partly* measured, and §7's probe is still the way to finish
+it.
+
+Treat modes `0`, `1`, `4` and every drive code as unverified when writing a
+macro.
 
 ---
 
@@ -201,7 +222,9 @@ Nothing here has touched the K2000. When a session is authorised:
   table saves to disk.
 * **Drive and mode codes** (§5): set one entry to each of the eleven drives and
   five modes from the front panel, save a `.MAC` each time, and read the code
-  back.
+  back. *Partly done* — modes `2` and `3` were confirmed by reading the device's
+  own Macro page (§5). What remains is modes `0`, `1`, `4` and the drive column,
+  none of which the observed macro exercises.
 * **Object lists** (§6): record one macro entry with a selected-object list and
   diff it against the same entry without one.
 
