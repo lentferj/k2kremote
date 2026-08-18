@@ -123,6 +123,13 @@ MODE_LABELS = {
     4: ("OvFill", "V"),
 }
 
+#: Top bit of an entry's length word: the K2000's **selected** marker, shown as
+#: a `*` beside the entry on the Macro page and set for every entry by the Save
+#: page's `All` soft key. It is stored in the object, so a table read back after
+#: a Select has 0x8000 on each length — which parsed as a 32802-byte entry and
+#: failed with "runs past the object data". It is a flag, not corruption.
+ENTRY_SELECTED = 0x8000
+
 #: Byte length of the fixed part of an entry, and of the file-name field.
 _ENTRY_HEADER = 14
 _NAME_FIELD = 16
@@ -162,6 +169,10 @@ class MacroEntry:
     unknown4: int = 0
     unknown10: int = 0
     unknown12: int = 0
+    #: The K2000's own "selected" marker (ENTRY_SELECTED in the length word),
+    #: shown as `*` on the Macro page. Carried through so a table read after a
+    #: Select re-serialises byte-for-byte instead of quietly losing the marks.
+    selected: bool = False
     trailer: int = 0
 
     #: Bytes past the end of the modelled layout.  A macro entry that carries
@@ -226,7 +237,9 @@ class MacroEntry:
 
     @classmethod
     def parse(cls, buf: bytes, offset: int) -> "MacroEntry":
-        (length,) = struct.unpack_from(">H", buf, offset)
+        (word,) = struct.unpack_from(">H", buf, offset)
+        selected = bool(word & ENTRY_SELECTED)
+        length = word & ~ENTRY_SELECTED
         if length < _ENTRY_HEADER + _NAME_FIELD + 2:
             raise MacError(f"macro entry at {offset} is too short ({length} bytes)")
         if offset + length > len(buf):
@@ -256,6 +269,7 @@ class MacroEntry:
             unknown10=unknown10,
             unknown12=unknown12,
             trailer=trailer,
+            selected=selected,
             extra=bytes(tail[2:]),
             _source=raw,
         )
@@ -282,7 +296,7 @@ class MacroEntry:
         return (
             struct.pack(
                 ">7H",
-                length,
+                length | (ENTRY_SELECTED if self.selected else 0),
                 self.drive,
                 self.unknown4,
                 self.bank,
@@ -321,9 +335,13 @@ class MacroTable:
         entries: List[MacroEntry] = []
         pos = 0
         while pos + 2 <= len(data):
-            (length,) = struct.unpack_from(">H", data, pos)
-            if length == 0:
+            (word,) = struct.unpack_from(">H", data, pos)
+            if word == 0:
                 return cls(entries=entries, tail=bytes(data[pos + 2 :]))
+            # Mask the selected marker here too: the walk advances by the entry
+            # length, and 0x8000 in that word made it step 32802 bytes and fall
+            # off the end of a perfectly good table.
+            length = word & ~ENTRY_SELECTED
             entry = MacroEntry.parse(data, pos)
             entries.append(entry)
             pos += length

@@ -80,7 +80,7 @@ object framing).
 
 | Offset | Size | Field | Notes |
 |---|---|---|---|
-| `0:2` | 2 | `length` | total bytes of this entry, **including** this field |
+| `0:2` | 2 | `length` | total bytes of this entry, **including** this field. **Bit `0x8000` is the K2000's "selected" marker**, not part of the length — see below |
 | `2:4` | 2 | `drive` | drive-ID code — §5 |
 | `4:6` | 2 | — | `0` in every observed entry; meaning unknown |
 | `6:8` | 2 | `bank` | `0`, `100` … `900`, or `0xFFFF` = **Everything** |
@@ -98,6 +98,36 @@ The fields marked uninitialised are firmware leftovers, not data: they differ
 between entries that are otherwise identical in kind. `macfile.py` keeps them
 so an untouched entry re-serialises byte-for-byte, and zeroes them on any entry
 you actually edit.
+
+### `0x8000` in the length word — the selection marker
+
+Found 2026-08-18 on a live table that suddenly would not parse: *"macro entry at
+0 runs past the object data"*, because the first length word read `0x8022` =
+32802.
+
+Nothing was wrong with the table. **The top bit of the length word is the
+K2000's own `*` selection marker** — the one the Macro page shows beside a
+selected entry — and the Save page's `All` soft key sets it on *every* entry. It
+is stored in the object, so any table read back after a Select carries it.
+
+Masking it chains the entries perfectly:
+
+```
+entry  0 at    0: raw=0x8022 len=34  *  NULL.KRZ
+entry  1 at   34: raw=0x802a len=42  *  <bank>.KRZ
+...
+entry 19 at  812: raw=0x802c len=44  *  <bank>.KRZ
+terminator at 856
+```
+
+`macfile.py` masks it in both the entry parser and the table walk (the walk
+advances by the length, so an unmasked `0x8000` stepped 32802 bytes and fell off
+the end), and carries it on `MacroEntry.selected` so an untouched table
+re-serialises byte-for-byte with its marks intact.
+
+**Take it as a warning about the whole field.** A length is the last place one
+looks for a flag, and the failure it produced — a plausible-sounding parse error
+— pointed at the data rather than at the reader.
 
 ### Annotated first entry
 

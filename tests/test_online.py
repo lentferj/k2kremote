@@ -290,3 +290,50 @@ def test_push_points_at_the_backup_when_verification_fails(tmp_path):
     with pytest.raises(online.PushUnverified) as exc:
         online.push(bridge, table(entry("B.KRZ", 300)), backup_path=str(backup))
     assert str(backup) in str(exc.value)
+
+
+# --- the selected marker -----------------------------------------------------
+
+def test_a_selected_entry_parses_and_round_trips():
+    """The K2000 stores its `*` selection marker in the entry's length word.
+
+    The Save page's `All` soft key sets it on every entry, so a table read back
+    afterwards carried 0x8000 on each length — which parsed as a 32802-byte
+    entry and failed with "runs past the object data". It is a flag, not
+    corruption, and the table behind it was perfectly intact."""
+    from k2kmaced.macfile import ENTRY_SELECTED
+
+    plain = serialized(entry("A.KRZ", 200), entry("B.KRZ", 300, FILL))
+    marked = bytearray(plain)
+    marked[0] |= ENTRY_SELECTED >> 8          # mark the first entry
+
+    table = MacroTable.parse(bytes(marked))
+    assert len(table.entries) == 2
+    assert table.entries[0].selected is True
+    assert table.entries[1].selected is False
+    assert table.serialize() == bytes(marked), "the marker must survive a round trip"
+
+
+def test_every_entry_marked_still_parses():
+    """`All` marks the lot, which is the case that actually failed."""
+    from k2kmaced.macfile import ENTRY_SELECTED
+
+    data = bytearray(serialized(entry("A.KRZ", 200), entry("B.KRZ", 300),
+                                entry("C.KRZ", 400)))
+    pos = 0
+    for _ in range(3):
+        length = ((data[pos] << 8) | data[pos + 1]) & ~ENTRY_SELECTED
+        data[pos] |= ENTRY_SELECTED >> 8
+        pos += length
+    table = MacroTable.parse(bytes(data))
+    assert len(table.entries) == 3
+    assert all(e.selected for e in table.entries)
+    assert table.serialize() == bytes(data)
+
+
+def test_clearing_the_marker_shortens_nothing():
+    """Length and flag share a word; clearing the flag must not change the size."""
+    table = MacroTable.parse(serialized(entry("A.KRZ", 200)))
+    before = len(table.serialize())
+    table.entries[0].selected = True
+    assert len(table.serialize()) == before
