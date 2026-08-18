@@ -709,6 +709,7 @@ class DiskBrowserScreen(ModalScreen):
     #browsebox { width: 74; max-height: 90%; padding: 1 2; border: round $accent;
                  background: $surface; }
     #browsescroll { height: 1fr; min-height: 3; }
+    #browsewarn { color: $warning; text-style: bold; }
     #browsetitle { text-style: bold; }
     #browsehint { color: $text-muted; }
     """
@@ -728,6 +729,8 @@ class DiskBrowserScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="browsebox"):
+            yield Static("⚠  EXPERIMENTAL — reads the instrument's disk by "
+                         "driving its panel", id="browsewarn")
             yield self._title
             with self._scroll:
                 yield self._list
@@ -929,6 +932,7 @@ class MacroScreen(ModalScreen):
     #macrobox { width: 82; max-height: 90%; padding: 1 2; border: round $warning;
                 background: $surface; }
     #macroscroll { height: 1fr; min-height: 3; }
+    #macrowarn { color: $warning; text-style: bold; }
     #macrotitle { text-style: bold; }
     #macrohint { color: $text-muted; }
     #macrostatus { color: $warning; }
@@ -976,6 +980,11 @@ class MacroScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="macrobox"):
+            # Said on the screen itself, not only in the README: this drives the
+            # instrument's own panel for anything SysEx cannot express, and the
+            # person about to press `p` or `s` is the one who needs to know.
+            yield Static("⚠  EXPERIMENTAL — writes to the running instrument",
+                         id="macrowarn")
             yield Static("Macro table on the running K2000 (type 100, id 35)",
                          id="macrotitle")
             with self._scroll:

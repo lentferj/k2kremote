@@ -195,3 +195,20 @@ async def test_browser_list_follows_the_cursor_off_screen():
         top = int(screen._scroll.scroll_offset.y)
         assert top <= screen._index < top + height, (
             f"cursor {screen._index} outside the visible window {top}..{top+height}")
+
+
+async def test_both_screens_say_they_are_experimental():
+    """The warning belongs where the finger is, not only in the README."""
+    from textual.widgets import Static
+
+    app = Harness()
+    async with app.run_test() as pilot:
+        await _open(app)
+        await pilot.pause(); await pilot.pause()
+        assert "EXPERIMENTAL" in str(app.screen.query_one("#macrowarn", Static).render())
+
+    app2 = Harness(op_result=("\\", []))
+    async with app2.run_test() as pilot:
+        app2.push_screen(DiskBrowserScreen(app2))
+        await pilot.pause(); await pilot.pause()
+        assert "EXPERIMENTAL" in str(app2.screen.query_one("#browsewarn", Static).render())
