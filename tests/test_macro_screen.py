@@ -133,14 +133,65 @@ async def test_push_refuses_until_something_changed():
         assert not screen._armed, "nothing changed, so there is nothing to arm"
 
 
-async def test_push_arms_before_it_writes():
+async def test_push_arms_but_does_not_write():
     app = Harness()
     async with app.run_test() as pilot:
         screen = await _open(app)
         await pilot.pause(); await pilot.pause()
         await pilot.press("b")            # make a change
         await pilot.press("p")
-        assert screen._armed, "the first p must only arm"
+        assert screen._armed, "p must only arm"
+        assert "macro push" not in app.paused_for, "p alone must not write"
+
+
+async def test_a_second_p_still_does_not_write():
+    """The confirm is a DIFFERENT key: p twice is a double-tap, and a double-tap
+    must not be able to write to the instrument."""
+    app = Harness()
+    async with app.run_test() as pilot:
+        screen = await _open(app)
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("b")
+        await pilot.press("p")
+        await pilot.press("p")
+        await pilot.pause()
+        assert "macro push" not in app.paused_for
+
+
+async def test_w_commits_the_armed_push():
+    app = Harness()
+    async with app.run_test() as pilot:
+        screen = await _open(app)
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("b")
+        await pilot.press("p")
+        await pilot.press("w")
+        await pilot.pause()
+        assert "macro push" in app.paused_for
+
+
+async def test_w_does_nothing_when_no_write_is_armed():
+    app = Harness()
+    async with app.run_test() as pilot:
+        await _open(app)
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        assert "macro push" not in app.paused_for
+
+
+async def test_escape_disarms_a_pending_push():
+    app = Harness()
+    async with app.run_test() as pilot:
+        screen = await _open(app)
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("b")
+        await pilot.press("p")
+        await pilot.press("escape")
+        assert not screen._armed
+        await pilot.press("w")
+        await pilot.pause()
+        assert "macro push" not in app.paused_for
 
 
 async def test_save_prompt_opens_and_ctrl_t_reaches_the_browser():

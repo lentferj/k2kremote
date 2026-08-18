@@ -921,7 +921,11 @@ class MacroScreen(ModalScreen):
         # Deliberately NOT Enter: Enter accepted the filename, and confirming an
         # overwrite with the same key one keystroke later is how a double-tap
         # destroys a file. A different finger, a different decision.
-        ("w", "confirm_overwrite", "Confirm overwrite"),
+        # One key that COMMITS whatever write is pending -- a push, or a save
+        # over an existing file. Never the key that armed it: `p` arms the push
+        # and Enter accepts a filename, and confirming with the same key one
+        # keystroke later is how a double-tap writes to the instrument.
+        ("w", "confirm_write", "Confirm write"),
     ]
 
     CSS = """
@@ -1051,14 +1055,13 @@ class MacroScreen(ModalScreen):
         if not self._dirty:
             self._status.update("nothing changed — reorder or re-bank first")
             return
-        if not self._armed:
-            self._armed = True
-            self._refresh_hint()
-            self._status.update("ARMED — press p again to write it to the K2000")
-            return
-
-        self._armed = False
+        self._armed = True
         self._refresh_hint()
+        self._status.update("ARMED — press w to write it to the K2000, Esc to "
+                            "cancel")
+        return
+
+    def _write_table(self) -> None:
         self._status.update("writing ...")
         table = self._table
         backup = os.path.join(os.path.expanduser("~"),
@@ -1116,13 +1119,21 @@ class MacroScreen(ModalScreen):
         self._status.update("file name (up to 8 chars, no extension) — or Ctrl+t "
                             "to pick a file to save OVER; Enter saves, Esc cancels")
 
-    def action_confirm_overwrite(self) -> None:
-        """Go ahead with a save that will replace an existing file."""
-        if not self._pending_save:
+    def action_confirm_write(self) -> None:
+        """Commit whatever write is armed: a save over a file, or a push.
+
+        The two cannot both be pending — a push needs unsaved edits and a save
+        refuses to run with any — so one key is unambiguous.
+        """
+        if self._pending_save:
+            stem, self._pending_save = self._pending_save, None
+            self._save_overwrites = None
+            self._do_save(stem, overwrite=True)
             return
-        stem, self._pending_save = self._pending_save, None
-        self._save_overwrites = None
-        self._do_save(stem, overwrite=True)
+        if self._armed:
+            self._armed = False
+            self._refresh_hint()
+            self._write_table()
 
     def _do_save(self, stem: str, *, overwrite: bool = False) -> None:
         self._status.update(f"saving as {stem}.MAC — the K2000 goes quiet while "
@@ -1383,8 +1394,9 @@ class MacroScreen(ModalScreen):
         self._hint.update(
             f"{state}{arm}   a add · f pick · e path · del remove · b/B bank · m mode · "
             f"ctrl+up/down move · r reload · p push · s save to disk · "
-            f"esc close" + ("   [w = CONFIRM OVERWRITE]" if self._pending_save
-                            else ""))
+            f"esc close"
+            + ("   [w = CONFIRM OVERWRITE]" if self._pending_save
+               else "   [w = CONFIRM PUSH]" if self._armed else ""))
 
     def action_close(self) -> None:
         # Esc closes the path editor first: losing a half-typed path is annoying,
@@ -1403,6 +1415,11 @@ class MacroScreen(ModalScreen):
             self._pending_save = None
             self._save_overwrites = None
             self._status.update("overwrite cancelled; nothing was saved")
+            return
+        if self._armed:
+            self._armed = False
+            self._refresh_hint()
+            self._status.update("push cancelled; nothing was written")
             return
         self.app.resume_mirror()
         self.dismiss(None)
