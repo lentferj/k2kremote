@@ -115,3 +115,59 @@ def test_enter_refuses_when_the_device_shows_a_different_entry():
     with pytest.raises(disk_browse.BrowseError) as exc:
         disk_browse.enter(bridge, 1, len(names), "NOTTHERE")
     assert "not pressing Open" in str(exc.value)
+
+
+# --- backing out of a dialog -------------------------------------------------
+
+class _PanelBridge:
+    """Replays a sequence of screens, advancing when a soft key is pressed."""
+
+    def __init__(self, screens):
+        self.screens = list(screens)
+        self.presses = []
+
+    def get_screen_text(self):
+        return "\n".join(self.screens[0])
+
+    def press_button(self, button):
+        self.presses.append(button)
+        if len(self.screens) > 1:
+            self.screens.pop(0)
+
+
+DIALOG = ["Dir:\\-GRANDPI\\    Sel:0/9    Index:   9", "", "",
+          "  File to rename:STWAYDSO .KRZ", "", "", "Total: 1K",
+          "        Root  Parent  Open   OK   Cancel"]
+DISKPAGE = ["DiskMode    Samples:1138K   Memory:414K", "Path = \\", "", "", "",
+            "", "", "<more   Load   Save  Macro  Delete more>"]
+
+
+def test_ensure_disk_mode_cancels_out_of_a_dialog():
+    """A browser or prompt left open by anything at all -- an abandoned save, a
+    probe, a human at the panel -- used to make this fail outright, because
+    pressing Disk does nothing while a dialog is up."""
+    from k2000.definitions import Button
+
+    bridge = _PanelBridge([DIALOG, DISKPAGE])
+    assert disk_browse.ensure_disk_mode(bridge) is True
+    assert bridge.presses, "it has to press something to get out"
+    assert Button.SoftF in bridge.presses, "Cancel is soft key 5 on that row"
+
+
+def test_ensure_disk_mode_is_a_no_op_when_already_there():
+    bridge = _PanelBridge([DISKPAGE])
+    assert disk_browse.ensure_disk_mode(bridge) is True
+    assert bridge.presses == []
+
+
+def test_ensure_disk_mode_never_answers_a_question():
+    """Yes/No/OK answer questions this code has not read. Only Cancel and Exit
+    abandon, so only those are pressed."""
+    from k2000.definitions import Button
+
+    confirm = ["", "", "", "Are you sure you want to delete", "the selected file?",
+               "", "", "                             Yes    No "]
+    bridge = _PanelBridge([confirm, DISKPAGE])
+    disk_browse.ensure_disk_mode(bridge)
+    # No Cancel on that row, so it must fall back to Exit rather than pick Yes/No.
+    assert Button.Exit in bridge.presses

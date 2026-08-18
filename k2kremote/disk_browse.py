@@ -149,13 +149,41 @@ def header(bridge) -> str:
     return _rows(bridge)[0].rstrip()
 
 
-def open_browser(bridge) -> str:
-    """Enter Disk mode and open the Load browser. Returns its header."""
+def ensure_disk_mode(bridge, attempts: int = 6) -> bool:
+    """Get back to the Disk page from wherever the panel happens to be.
+
+    Pressing `Disk` does nothing while a dialog is up, so a browser or a prompt
+    left open by anything at all — an earlier probe, a save that was abandoned,
+    a human at the panel — used to make this fail with "could not reach Disk
+    mode" and no way forward. It backs out first.
+
+    Only ever presses **Cancel** (or Exit when there is no Cancel): those abandon
+    whatever is open. `Yes`, `No` and `OK` are answers to questions this code has
+    not read, and are never pressed here.
+    """
+    for _ in range(attempts):
+        rows = _rows(bridge)
+        if "DiskMode" in rows[0]:
+            return True
+        i = _soft_index(rows[7], "Cancel")
+        if i is not None:
+            bridge.press_button(_SOFT[i])
+        else:
+            bridge.press_button(Button.Exit)
+        time.sleep(1.1)
     if "DiskMode" not in _rows(bridge)[0]:
         bridge.press_button(Button.Disk)
         time.sleep(1.2)
-    if "DiskMode" not in _rows(bridge)[0]:
-        raise BrowseError("could not reach Disk mode")
+    return "DiskMode" in _rows(bridge)[0]
+
+
+def open_browser(bridge) -> str:
+    """Enter Disk mode and open the Load browser. Returns its header."""
+    if not ensure_disk_mode(bridge):
+        raise BrowseError(
+            f"could not reach Disk mode; the panel shows "
+            f"{_rows(bridge)[0].rstrip()!r}"
+        )
     _press(bridge, "Load", settle=1.6)
     if "Dir:" not in _rows(bridge)[0]:
         raise BrowseError(f"expected a listing, got {_rows(bridge)[0].rstrip()!r}")

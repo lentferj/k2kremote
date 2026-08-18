@@ -152,11 +152,12 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
 
     # 1. The drive, before anything else. This is the check that a save landing
     #    on the floppy would have needed.
-    if "DiskMode" not in _rows(bridge)[0]:
-        bridge.press_button(Button.Disk)
-        time.sleep(1.2)
-    if "DiskMode" not in _rows(bridge)[0]:
-        raise SaveRefused("could not reach Disk mode")
+    from k2kremote import disk_browse
+    if not disk_browse.ensure_disk_mode(bridge):
+        raise SaveRefused(
+            f"could not reach Disk mode; the panel shows "
+            f"{_rows(bridge)[0].rstrip()!r}"
+        )
     drive = current_disk(bridge)
     if drive is None:
         raise SaveRefused("could not read CurrentDisk from the device")
