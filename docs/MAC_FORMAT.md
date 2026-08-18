@@ -215,11 +215,13 @@ are captured verbatim in `MacroEntry.extra`, reported through
 
 Nothing here has touched the K2000. When a session is authorised:
 
-* **Does the RAM layout match the disk layout?** `DUMP` returns the K2000's
-  in-RAM structure, which for programs and keymaps is known to differ from the
-  disk serialization (mpc2emu, `k2000r_midi_comms.md` §4). Dump object type
-  100 / id 35 with Macro Record on and compare against the `.MAC` the same
-  table saves to disk.
+* ~~**Does the RAM layout match the disk layout?**~~ **ANSWERED 2026-08-17: yes.**
+  Object type 100 / id 35 reads back as `name='Macro'`, and its 814 bytes are
+  byte-for-byte this file's object block at offset 48; `MacroTable.parse` reads it
+  and `serialize()` returns it unchanged. Macro Record does **not** need to be On —
+  the object exists with `Func:MACRO` showing `[ Off ]`. Note that type 100 is the
+  *Table* type: id 16 is `Master` and other ids hold further tables, all of which
+  return plausible-looking objects, so the id matters. See RESOLUTION_NOTES §24.
 * **Drive and mode codes** (§5): set one entry to each of the eleven drives and
   five modes from the front panel, save a `.MAC` each time, and read the code
   back. *Partly done* — modes `2` and `3` were confirmed by reading the device's

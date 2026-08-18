@@ -1714,3 +1714,335 @@ directions) and, chasing why the fix appeared to do nothing, the shadowed `k2000
 package. Both are written up in **§22**, since they are core protocol/transport
 faults rather than anything to do with the survey this section describes.
 
+---
+
+## 25. The live macro table, and the plan for editing it online (2026-08-18)
+
+### It reads, and the layout is the file's
+
+`Read`/`DUMP` of **type 100, id 35** returns `name='Macro'`, 814 bytes for a
+19-entry macro. Those bytes are **byte-for-byte the `.MAC` container's object
+block at offset 48** — checked against the same macro extracted from a disk image:
+814/814 equal. `macfile.MacroTable.parse` reads it, lists all 19 entries, and
+`serialize()` returns the input unchanged.
+
+So the long-standing question in MAC_FORMAT §7 — does the RAM layout match the
+disk layout — is **yes, for the Macro Table**. Programs and keymaps still differ;
+this one does not.
+
+Both transports agree: `Read` + `Nibblized` and `bridge.read_macro_table()`
+(`DUMP` + `BitStream`) returned identical bytes. That is also a second, independent
+confirmation of the bit-alignment fix in §22, through a different code path.
+
+### Two ways to look at the right object and see the wrong thing
+
+**Type 100 is the *Table* type, not "the macro type".** Several unrelated objects
+live under it:
+
+```
+type 100 id 35 -> 'Macro'           814 B   the macro table
+type 100 id 16 -> 'Master'          524 B   Master parameters (ch. 30 documents this)
+type 100 id  1 -> 964 B, no ASCII           some other table
+```
+
+Reading id 1 and id 16 produced hundreds of bytes of plausible-looking object, and
+that was briefly written up as "the macro table is not readable over MIDI and the
+object route is a dead end". It was the wrong id, twice, on a type whose other
+members answer happily. `ObjectType.MacroTable = 100` is *correct* as a type code
+but reads as a promise about the id, which there is none of.
+
+`Func:MACRO` showing `[ Off ]` does **not** prevent the read — the object exists
+regardless; Off disables recording.
+
+### Why online editing is worth building
+
+`k2kmaced` edits `BOOT.MAC` offline and is hardware-verified, but on a modern rig
+the K2000's disk *is* its SD/CF card, so using it means powering the instrument
+down and pulling the card. The card shuffle is the slow, error-prone part — not
+the editing.
+
+The online route removes it: write the Macro Table object into RAM with the
+machine running, then let the K2000 save its own `BOOT.MAC` from Disk → `Macro`.
+No filesystem writing, no power cycle, and the instrument does the formatting.
+
+### The panel route is the one to avoid
+
+`Disk → Macro → Modify` opens a real edit page (`Modify:Drive` selects the
+attribute, applied to "*1 entry selected*"), so panel-driven editing looks
+feasible. It is not, safely: **SysEx 0x17 returns `'CurrentDisk'` for every cursor
+position on that page** — a stale value from Disk mode. The parameter-name read
+that lets `p39` refuse to type into the wrong field is unavailable there, so any
+implementation would be counting presses while mutating the boot configuration.
+That combination — unverifiable *and* destructive — is the one that produced four
+separate bugs on 2026-08-17, each returning correct-looking rows.
+
+The object route sidesteps it entirely: one `Write`, then read the object back and
+diff it.
+
+### Stage 1 (done): `k2kmacli live` and `k2kmacli diff`
+
+`k2kmaced/online.py`, read-only, and deliberately thin because the offline parser
+does the work:
+
+* `read_live(bridge) -> MacroTable`, with errors that distinguish *nothing
+  recorded* (empty object) from *wrong id* (bytes that do not parse) — since the
+  second is the mistake actually made.
+* `diff(live, other) -> [DiffRow]`, comparing the **rendered** entry and padding
+  the shorter side with `None`. `zip()` would drop the tail, which is exactly
+  where an appended entry sits.
+* `k2kmacli diff` exits **1** on a difference, so it works as a scripted check.
+
+Verified live: `diff` against the matching backup reports *identical — 19 entries
+match*; against an older 6-entry macro it marks each differing row and pads the
+missing six.
+
+**`MacroEntry.extra` is not cosmetic.** A test was written asserting that a diff
+could ignore it, and it failed — `extra` is where a **selected-object list** lives,
+which makes an entry load particular objects instead of the whole file.
+`display()` marks it `Obj`. So the diff reports it, correctly: two entries naming
+the same file with and without an object list do not load the same thing. A byte
+compare would also flag unknown padding (noise); a field compare ignoring `extra`
+would miss the object list (not noise).
+
+### Stage 3 (done): `k2kmacli push`, verified on hardware
+
+**The encoder had to be fixed first, and it was worse than the decode bug.**
+`encode_n` right-aligns the payload in a fixed-width field; the data field is
+left-aligned with trailing zeros. `client.write` transmits in **bit-stream** form,
+so writing any object — a macro table, a program — would have sent a mis-packed
+payload into the object database. The manual's example: 4 data bytes must pack to
+`27 76 00 12 48`, and the old path produced `04 7e 60 02 29`.
+
+`encode_data_field()` fixes both call sites, and the check is as strong as one gets
+without a second implementation: **re-encoding what the instrument sent reproduces
+the device's own payload byte-for-byte** — 1628 bytes nibblized, 931 bit-stream,
+checksums matching. Our packing and the K2000's agree exactly, both directions,
+both forms.
+
+**Verified end to end on the instrument (2026-08-18):**
+
+```
+push a one-field change (entry 2, bank 300 -> 900)
+  read back .............. byte-identical to what was sent
+  device's Macro page .... shows 900:O:      <- independent of our own read
+restore the original
+  live vs pre-test capture ... 814/814 identical
+  live vs on-disk BOOT.MAC ... identical, 19 entries match
+```
+
+The read-back is the guard, not the `DACK`: a `DACK` says the message was accepted,
+not that the bytes are right, and a mis-encoded write would leave the machine
+booting something nobody chose while the macro page rendered it as intended.
+`push()` therefore saves the previous table first, writes, reads back, and raises
+`PushUnverified` unless the object matches — naming the backup in the message. An
+empty table is refused by default, being indistinguishable from a bug that produced
+no entries.
+
+**The disk is never touched.** The instrument saves the table itself, and **it can
+save under any filename** — so the safe order is push, save as e.g. `TEST.MAC`, try
+it with Disk → Load, and promote it only when it works. A working `BOOT.MAC` never
+has to be overwritten. That reframes the whole risk profile of the online route and
+was not obvious from the offline tool.
+
+### The full round trip, proven (2026-08-18)
+
+Built offline → pushed over SysEx → **saved to disk by the instrument** → loaded
+and run from disk:
+
+```
+k2kmacli new    one entry: \-ORGANS\ORG_E1.KRZ -> bank 800, Fill
+k2kmacli push   read back byte-identical
+Disk -> Save -> Macro -> All -> OK -> name -> OK -> "use current directory?" OK
+   (device goes SILENT during the write -- §17; ~12 s, then returns to DiskMode)
+Disk -> Load -> Root -> T.MAC -> OK -> "as specified" -> OK
+   result: bank 800, previously EMPTY, now holds  800 'GARAGE ORGAN'
+```
+
+Nothing was overwritten: the save created a new file (root went 25 → 26 entries),
+which is the `\BACKUP\`-style discipline working in practice. The macro table was
+restored afterwards, byte-identical to the pre-test capture.
+
+### The save flow, and the naming dialog's real model
+
+`Disk → Save` offers `Export | Macro | Object | NewDir | OK | Cancel`. Choosing
+`Macro` shows the **live** table (another confirmation that `push` reached it),
+then `All` → `OK` opens the filename editor:
+
+```
+Save as:        WAVSTFAV
+Delete Insert >>End  Choose  OK   Cancel
+```
+
+Two things about that editor cost time and are worth knowing:
+
+* **It pre-fills a stale name** from an earlier buffer. Pressing `OK` straight
+  through saves under whatever that was — here `WAVSTFAV.MAC`, which has nothing
+  to do with the macro being saved. Always set the name explicitly.
+* **`Delete` removes the character to the RIGHT of the cursor**, so the first
+  character can never be deleted, only changed — a loop that deletes until the
+  field is empty never terminates.
+
+**The character model is NOT multi-tap, and `text_entry.type_name` does not work
+here.** Measured directly: key `8` cycles `V → W → X → V`, key `3` gives `G → H`.
+So **each number key selects a 3-letter group** — key *k* covers letters
+3(*k*−1)+1 … +3 (1→ABC, 2→DEF, 3→GHI, 7→STU, 8→VWX) — the chosen letter
+**replaces** the character under the cursor, and **the cursor does not advance**.
+Multi-tap assumes repeated presses of one key walk a group *and* that the cursor
+advances on a different key; neither holds. `type_name("TEST")` produced `WSDSS`.
+
+Whatever automates saving needs a small dialog-specific driver: position the
+cursor explicitly, press the group key the right number of times for each letter,
+and move with `CursorRight` between characters. That is the real work in the
+"rename before saving" item, not the renaming.
+
+### Stage 2, when picked up
+
+Triggering a load from the computer is **proven manually** (2026-08-17) but not
+implemented as a command: `Disk → Load → Root → BOOT.MAC → OK → "as specified" →
+OK`, reading the screen before every press. Two cautions for whoever writes it:
+
+* `LoadMacro` (0x10) replays *the macro currently in memory*, which is **not** the
+  same as loading one from disk. Firing it when RAM holds something unexpected is a
+  wipe followed by an unknown load.
+* The macro page's own `Load` soft key prompts *"Load current item or all items?"* —
+  and that prompt **can** be cancelled cleanly (tested), so it is a genuine confirm
+  step rather than a point of no return.
+
+With stage 3 done, stage 2 is a convenience rather than a requirement: `push` plus
+the instrument's own save covers the workflow that mattered.
+
+---
+
+---
+
+## 26. Two undocumented SysEx types, and why saving still needs the panel (2026-08-18)
+
+### `0x12` / `0x13` — an undocumented memory query
+
+Chapter 30 documents `0x00`–`0x11` and `0x14`–`0x19`. **`0x12` and `0x13` are
+absent from the manual but real**, and they are a request/response pair:
+
+```
+->  f0 07 00 78 12 f7                       (no body)
+<-  f0 07 00 78 13  00 03 1e  00 05 22  f7  (two 3-byte 7-bit values)
+                    = 414      = 674
+```
+
+Correlated against the Disk-mode header `Samples:1349K   Memory:414K`:
+
+| field | value | meaning |
+|---|---|---|
+| 1 | 414 | **program RAM free, in K** — exact match, repeatedly |
+| 2 | 674 | **sample RAM free, in 2K units** — 674 × 2 = 1348 ≈ 1349K displayed |
+
+`0x13` sent bare gets no reply, consistent with it being the *response* type.
+
+The unit on field 2 rests on one screen comparison (674.5 exactly halves the
+displayed figure), so treat "2K units" as strongly indicated rather than proven —
+a load or delete large enough to move sample memory by megabytes would settle it.
+
+Useful because it is far cheaper than `ALLTEXT` for a free-memory check: no 320-byte
+screen transfer, and it works in any mode rather than only on the Disk page.
+
+### There is NO save-to-disk message, and no message carries a filename
+
+Worth stating flatly, because it is the natural thing to want. The full message set
+addresses the **object database** (`Dir`, `Info`, `New`, `Del`, `Change`, `Read`,
+`Write`, the Bank messages) plus the panel and screen. Nothing writes a file,
+names a file, or triggers a Save. `LoadMacro` (0x10) loads *from RAM*, not disk.
+
+So persisting a macro requires the panel. **But the common case does not need
+persistence at all:** `push` + `LoadMacro` loads the files a macro names, straight
+from RAM. That is not a workaround — it is Kurzweil's own documented technique for
+automating macro loading from a sequencer: the macro object is sent as SysEx,
+replacing whatever is in the Macro Recorder, then the Load Macro command makes it
+execute. `MacroDone` (0x11) acknowledges completion with a status code, which is
+better than the panel route, where a load must be waited out blind.
+
+### `Choose` in the save dialog is a real browser — pointed at another drive
+
+The filename dialog's `Choose` key opens `Choose file name:` with `Root` / `Parent`
+navigation. It first appeared to list a single phantom file (`IDALL.KRZ`, 1251K)
+that exists nowhere in the SCSI 0 image, and the wheel would not move.
+
+Explanation: **it had opened the floppy drive**, where that bank is the only file —
+so the listing was correct and complete, just for a different drive. It is
+therefore a usable way to set a filename by picking an existing one, with no
+character entry at all, provided the drive is set first. Do not conclude "phantom
+entry" from a listing that does not match the drive you had in mind.
+
+### `type_name` is not broken — the caller must supply the cursor offset
+
+`type_name(bridge, "TEST", name_row=3, name_col=16)` produced `WSDSS` in the save
+dialog, which was briefly written up as the function being wrong for that dialog.
+It is not.
+
+Both dialogs share the same character model, measured directly:
+
+```
+object Name dialog   key 8 -> v, w, x     key 3 -> g, h
+Disk save dialog     key 8 -> V, W, X     key 3 -> G, H
+```
+
+Each number key selects a **3-letter group** (key *k* → letters 3(*k*−1)+1 … +3),
+the letter **replaces** the character under the cursor, and **the cursor does not
+advance** — which is exactly what `_LETTER_TAPS` and `_type_char` implement.
+
+The failure was `start_col`. `shown()` reads `name_col + start_col + col`, and after
+several `Delete` presses the cursor was parked at offset **1**, not 0. So each letter
+was written at column *n*+1 while being verified at column *n*: the check never
+matched, the loop pressed the group key to exhaustion, and each character was left
+on its group's **first** letter — `S, D, S, S` for `T, E, S, T`. The docstring warns
+about exactly this.
+
+**Fix: home the cursor before typing** rather than assuming it. `CursorLeft` clamps
+at the field start, so pressing it field-width times is sufficient and idempotent.
+Two further quirks of these dialogs:
+
+* `Delete` removes the character to the **right** of the cursor, so the first
+  character can never be deleted, only overwritten — a "delete until empty" loop
+  never terminates.
+* The field arrives **pre-filled**, and the default is *derived from content* (it
+  offered `WAVSTFAV` for a 19-entry macro and `ORG_E1` for a one-entry one). Pressing
+  `OK` straight through therefore saves under a plausible but unintended name.
+
+### `CurrentDisk` changes under you — and a save follows it silently
+
+The single most dangerous thing found while automating the save flow.
+
+Opening the filename dialog's `Choose` browser and navigating in it **changes the
+Disk page's `CurrentDisk` parameter, and leaves it changed** after you cancel out.
+On this rig `Choose` opened the Floppy, and `CurrentDisk` then read `Floppy`
+indefinitely — so the *next* save went to the floppy, while the confirm prompt said
+only `Use current directory for TESTMAC.MAC? (Path = \)`. The path is shown; **the
+drive is not**. The same applies to the Delete browser, which then listed the
+floppy's files and looked wrong until the drive was checked.
+
+That means a macro save can land on an entirely different disk than intended, with
+nothing in the prompt to reveal it. Anything automating a save **must read
+`CurrentDisk` and set it explicitly** rather than assuming, and should re-read it
+after any browser excursion.
+
+It is readable and settable over MIDI without press-counting: the Disk page's field
+reports as `('CurrentDisk', 'Floppy')` through 0x17/0x16, so a driver can walk the
+cursor until the device names the field, then wheel until the device reports the
+wanted drive. That is how it was restored to `SCSI 0` here — no counted presses.
+
+This also explains the `Choose` listing that appeared to be a phantom: it was the
+floppy's only bank, correctly listed, on a drive nobody had chosen deliberately.
+
+### The save flow, end to end, as verified
+
+```
+CHECK CurrentDisk first (0x17 on the Disk page) -- do not assume
+Disk -> Save -> Macro -> All            -> filename editor
+home_cursor(bridge, width)              -> cursor to offset 0; do NOT assume it
+type_name(bridge, "TESTMAC", ...)       -> verified: field read back as TESTMAC
+OK -> "Use current directory ...?" -> OK -> written (device silent ~10 s)
+```
+
+Delete, for cleaning up afterwards, is `Disk -> Delete`, then `CursorDown` to the
+file (**the alpha wheel does not scroll this browser**), `Select` to mark it — the
+name gains a `*` and the header shows `Sel:1/26` — then `OK` and `Yes`. Always
+assert the selected name before confirming; the browser opens on whatever drive
+`CurrentDisk` points at.

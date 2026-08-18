@@ -193,6 +193,160 @@ treatment as `DelBank`)? (3) Move — does `Change` with a new id repaint withou
 panel reselect (rename needed one)? Test against scratch objects with a full backup.
 See RESOLUTION_NOTES §10.
 
+## Never overwrite a macro on disk — RENAME the existing file first
+
+**Status:** open, requested 2026-08-18. Before writing a macro to disk, rename
+whatever is already there (`BOOT.MAC` → `BOOT.BAK`, then `.BK2`, `.BK3`, … if that
+is taken), so a save can never destroy the previous version. Applies to both the
+online and the offline path.
+
+**Rename, not copy** — and that distinction is what makes it cheap. A rename edits
+only the **name field of the directory entry**: no cluster is allocated, no
+directory entry is created, and the FAT is never written. That is the same class of
+operation `k2write` already performs when it updates the 4-byte size field in that
+record, so it fits its safety model instead of breaking it. (An earlier note here
+claimed this needed FAT writes; that was about *copying* to a new file, which is a
+different and riskier thing nobody asked for.)
+
+**The instrument can do it itself** — verified 2026-08-18: Disk mode's **third**
+soft-key page is `<more  Rename  Move  Util  NewDir  more>`. So the online flow is
+entirely device-side, with no host filesystem access at all:
+
+1. `k2kmacli push` the new table into RAM (done, verified);
+2. Disk → `Rename` → pick `BOOT.MAC` → new name `BOOT.BAK`;
+3. Disk → `Save` → the macro → name it `BOOT.MAC`.
+
+Steps 2 and 3 need panel automation, and both involve the **naming dialog** — which
+means the multi-tap alphanumeric entry this project already has machinery for
+(feedback-driven name entry, `NameCursor`). That is the real work here, not the
+renaming.
+
+**Decided 2026-08-18: generations go in a `\BACKUP\` directory, named
+`BOOT.BAK`, `BOOT.BK2`, `BOOT.BK3`, …** — first free name in the series wins, so one
+operation per save and older generations keep stable names. A directory also keeps
+the root uncluttered and makes the set obvious to a human at the panel.
+
+Naming must stay **8.3**: `BOOT.MAC.BAK` is not a valid FAT16 short name (one
+extension, three characters), and reading it back would need VFAT long-name entries
+`k2image` does not implement. `BOOT.BAK` and friends fit.
+
+Implementation notes for whoever builds it:
+
+* `NewDir` is on the same soft-key page as `Rename`, so creating `\BACKUP\` when it
+  is absent needs no extra route — but it must be **checked for** first, since
+  creating it twice is an error path nobody wants mid-save.
+* `Rename` and `Move` are **separate** soft keys. Getting a file into
+  `\BACKUP\BOOT.BAK` is therefore two operations (rename in place, then move), and
+  the order matters: rename first, so a half-finished sequence leaves the old macro
+  under a distinct name rather than two files claiming to be `BOOT.MAC`.
+* Because a `.BAK` is not a `.MAC`, the K2000's Load page filters it out of the
+  macro list. That is fine for storage, but a **restore** means renaming it back
+  first — worth saying in whatever UI offers this, so a backup does not look
+  unusable at the moment someone needs it.
+
+## Name entry — cursor homing added; alpha dialling is NOT the general answer
+
+**Status:** the immediate bug is **fixed and verified on hardware** (2026-08-18).
+`text_entry.home_cursor()` drives the cursor to offset 0 with `CursorLeft`, which
+clamps at the field start, so `type_name` can be called with a truthful
+`start_col=0` on any dialog. Typing `TESTMAC` over a pre-filled `ORG_E1` now
+produces exactly `TESTMAC`.
+
+`type_name` itself was **not** wrong. Both the object Name dialog and the Disk save
+dialog use the same model it implements — each number key selects a 3-letter group,
+the letter replaces the character under the cursor, the cursor does not advance.
+The earlier `WSDSS` came from passing `start_col=0` when `Delete` presses had parked
+the cursor at offset 1, so every character was written one column right of where it
+was verified. See RESOLUTION_NOTES §25.
+
+**Researched: alpha dialling is not how naming should normally be done.**
+
+* **Objects — do not dial at all.** `Change` (0x08) sets a name over SysEx in one
+  message; the `Ctrl+o` tool already does this. Third-party tools take the same
+  route (Kurzweil Kruiser types object names from a computer keyboard over MIDI),
+  so this is the established approach rather than ours alone.
+* **Files — dialling is unavoidable for a genuinely new name.** The protocol has no
+  filesystem messages at all, so nothing can pass a filename. But it is often
+  avoidable in practice: `Choose` picks an **existing** filename from a browser with
+  no typing, and the field arrives pre-filled with a content-derived default.
+* **Most of the time no filename is needed.** `push` + `LoadMacro` executes a macro
+  straight from RAM — Kurzweil's own documented technique for sequencer-driven macro
+  loading. Saving is only for persistence across power-off.
+
+**Still open:**
+
+* Wire `home_cursor` into the callers that type into dialogs, and decide whether
+  `type_name` should home by default (it cannot always: some callers legitimately
+  continue from a known offset, which is why `start_col` exists).
+* A `save_macro_as(name)` helper for `k2kmaced`, which must **read `CurrentDisk`
+  first** — a browser excursion silently repoints it and the save prompt does not
+  show the drive (§25). This is what makes the `\BACKUP\` scheme buildable.
+* `Delete`'s browser does not respond to the alpha wheel; use `CursorDown`.
+
+## A SysEx disk/object tool instead of screen-scraping (browse, load, rename, delete)
+
+**Status:** open idea, recorded 2026-08-18. Attractive because everything driven
+through the panel today is press-counting against a screen, and `k2kmon`/§24 showed
+how many ways that misreads. But the protocol splits the request in two, and only
+one half is available.
+
+**Chapter 30's message set addresses the OBJECT DATABASE, not the filesystem.**
+The complete set is `Dump Load DACK DNAK Dir Info New Del Change Write Read
+ReadBank DirBank EndOfBank DelBank MoveBank LoadMacro MacroDone Panel AllText
+ParameterValue ParameterName GetGraphics ScreenReply`. Note `Dir` and `DirBank`
+list **objects by type and id**, not files — there is **no** message to list a
+directory, rename a file, delete a file, or load one by name.
+
+### What IS possible over SysEx today (no screen, no press-counting)
+
+| Want | Message | Notes |
+|---|---|---|
+| browse what is resident | `DirBank` 0x0C | bank 0–9, or **127 for all banks** in one sweep |
+| one object's metadata | `Dir` 0x04 → `Info` | type, id, name, size, RAM/ROM |
+| rename | `Change` 0x08 | already shipped as the `Ctrl+o` tool |
+| relocate / renumber | `Change` 0x08 (new id) | untested for repaint behaviour |
+| delete | `Del` 0x07 | and `DelBank` 0x0E for whole banks |
+| move a bank | `MoveBank` 0x0F | |
+| read / replace an object | `Read` 0x0A / `Write` 0x09 | ~0.5 s per object |
+
+That is a complete **object manager** with no panel involvement — worth building,
+and it subsumes the F11 "master functions" item above.
+
+### Loading a FILE over SysEx — possible, indirectly, and now cheap
+
+There is no "load file X" message, but there is a two-step route that tonight's
+work makes practical:
+
+1. `k2kmacli push` a **one-entry macro** naming the drive, path, file, bank and
+   mode (verified working, and read-back checked);
+2. send `LoadMacro` (0x10), which replays *the macro currently in RAM*.
+
+The earlier objection to `LoadMacro` — that RAM might hold something unexpected,
+making it a wipe followed by an unknown load — is exactly what `push` removes: you
+write the macro you want first and verify it came back. **And `MacroDone` (0x11)
+acknowledges completion with a status code**, which the panel route does not: the
+2026-08-17 load had to be waited out blind for five minutes and then inspected. A
+load with a completion signal is strictly better.
+
+Care: a macro entry with bank *Everything* + *Overwrite* is the documented
+memory-clearing trick. A single `Fill` entry loads without wiping.
+
+### What still needs the panel
+
+Browsing, renaming and deleting **files** — the protocol simply has no messages for
+them. Options, none free:
+
+* **Panel automation with screen reads.** Works (the 2026-08-17 disk browse and
+  load did exactly this), but it is press-counting; and note the *Disk → Macro →
+  Modify* page cannot be verified at all, because 0x17 reports `CurrentDisk` for
+  every cursor position there (§24).
+* **Read the image offline** via `k2kmaced.k2image`, which needs the card out of
+  the instrument — the very thing the online route exists to avoid.
+
+So a realistic tool is: **object operations over SysEx, file loading via
+push + LoadMacro, and file browsing left to the offline image reader** — rather
+than one uniform SysEx disk tool, which the protocol does not permit.
+
 ## "Delete object with dependents" (F11) — not planned
 
 **Status:** open, **low priority / high effort / low gain / error-prone.** `Del`
@@ -307,8 +461,49 @@ slow, error-prone part — not the editing.
 The MIDI route would avoid all of it: send the Macro Table object into RAM with
 the machine running and the card in place, then let the K2000 save its own
 `BOOT.MAC` through Disk → `Macro`. No filesystem writing, no power cycle, and the
-instrument itself does the formatting. It depends on the type-100/id-35 layout
-question below, which is unverified.
+instrument itself does the formatting.
+
+**The layout question is now ANSWERED (2026-08-17/18), and favourably.** The live
+object at **type 100, id 35** reads back as `name='Macro'`, 814 bytes, and is
+**byte-for-byte the `.MAC` file's object block** at offset 48;
+`macfile.MacroTable.parse` reads it and `serialize()` returns it unchanged. So RAM
+and disk layouts coincide for the Macro Table, and no separate parser is needed
+for either direction. Both transports agree too (`Read`/Nibblized and
+`DUMP`/BitStream returned identical bytes) after the bit-alignment fix in
+RESOLUTION_NOTES §23.
+
+Two traps found while establishing that:
+
+* **Type 100 is the *Table* type, not "the macro type".** id 16 is `Master`
+  (524 B), other ids hold further tables. Every one returns a plausible-looking
+  object, so a wrong id gives you data, not an error — reading id 1 produced 964
+  bytes that were briefly taken as evidence the macro table was unreadable.
+* `Func:MACRO` showing `[ Off ]` does **not** prevent the read. Off disables
+  *recording*, not the object.
+
+**Staged plan (2026-08-18).** Full rationale and the panel measurements behind it
+in RESOLUTION_NOTES §24.
+
+| Stage | What | Risk | Status |
+|---|---|---|---|
+| 1 | Read the live table; diff it against a `.MAC` | none — read-only | **done**: `k2kmacli live` / `k2kmacli diff` |
+| 3 | Write the table over MIDI; the K2000 saves it itself | moderate | **done and hardware-verified**: `k2kmacli push` |
+| 2 | Trigger a macro load from the computer | destructive | **proven manually**, not implemented — now only a convenience |
+
+Stage 3 removes the card shuffle entirely, and is **done**: pushed a one-field
+change, read it back byte-identical, confirmed it on the instrument's own Macro
+page, then restored the original byte-exactly. It required fixing the data-field
+**encoder** first — `client.write` transmits bit-stream, which was mis-packed, so
+writing *any* object would have corrupted it (RESOLUTION_NOTES §24).
+
+**Also: the instrument can save the macro under any filename**, so the persist step
+never needs to overwrite a working `BOOT.MAC` — push, save as `TEST.MAC`, try it
+with Disk → Load, promote it when it works.
+
+**Do not** drive the `Disk → Macro → Modify` page with counted presses: SysEx 0x17
+returns `'CurrentDisk'` for every cursor position on that page, so the cursor is
+**not readable** there and the check that makes `p39` safe is unavailable. The
+object route avoids the question.
 
 Note the same observation makes *reading* the live Macro Table a **different use
 case** rather than part of this workflow: when you want to edit `BOOT.MAC` the
