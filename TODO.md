@@ -155,6 +155,20 @@ screens and stays clean. **Known limits (so `p` pause is still the only guarante
 detection must happen before you press Yes/OK; a delete with no on-screen confirm
 wouldn't be caught.
 
+## `k2kmon learn` — the one inspector mode not verified on hardware
+
+**Status:** implemented; `watch`, `ask`, `read`, `compare` and `types` were all
+exercised against the K2000R on 2026-08-17 (ALLTEXT round trip 127.3 ms, `read`
+538 ms for a 722-byte object). `learn` ran cleanly and reported **0 events**,
+which is the correct output for this rig rather than a pass: `XMIT Bttns` is
+**Off** on the MIDI TRANSMIT page, so the instrument transmits no panel events.
+**Blocked on:** enabling `XMIT Bttns` — a change to the owner's instrument
+configuration, so not done unasked — then pressing a few buttons and the wheel and
+confirming each is named, including that a wheel turn reads as `wheel +n` and not
+as its filler button field. **Why it matters:** `learn` exists precisely so panel
+behaviour is read from the device instead of inferred from keypress counts, which
+is how this project got a soft-key cycle one short and a cursor two fields off.
+
 ## Heartbeat safety: switch to default-deny polling (follow-up)
 
 **Status:** open. **Why:** the auto-pause above is a denylist of destructive

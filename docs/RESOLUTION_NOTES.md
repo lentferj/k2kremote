@@ -1566,3 +1566,151 @@ every character is left on its group's *first* letter — typing `TEST` produced
 the field start, so it is idempotent and needs no screen read. It is **additive**:
 nothing calls it yet. The app threads `NameCursor`'s tracked position and is
 unaffected; this is for callers that did not open the dialog themselves.
+
+---
+
+## 23. Validating a converter against a full machine (2026-08-17)
+
+The instrument was filled from its boot macro — eighteen bank files, 441 programs
+— specifically to check a sibling project's field map against *diverse* material
+rather than one soundset. What follows is mostly about how nearly every step
+produced plausible wrong answers first.
+
+### `Fill` ignores bank boundaries — so `id - base` is not a join
+
+The macro loads three banks in *Overwrite* and the rest in *Fill*. Measured:
+
+```
+one 108-object file            ids 500 … 607     crosses the 599/600 boundary
+the next file, entry says 600  ids 608 … 619     starts after the spill, not at 600
+```
+
+So **`Fill` continues from the highest occupied id**, and the bank number in a
+macro entry is a starting hint rather than a destination. Computing a file's base
+from its entry would have mis-joined **403 of 441** programs — every one landing
+on a real program with a real name, i.e. silently.
+
+Joining on the object **name** instead came out **441/441 exact**. Names must be
+compared *verbatim*: they carry significant leading and trailing spaces, embedded
+quote characters, and `0x7f` stereo-pair markers. Any `strip()` turns exact
+matches into near-matches.
+
+### Panel `Fn` = manual slot `n + 1`
+
+The manual numbers DSP slots counting `PITCH` as slot 1 and the amplitude stage
+last. The panel's `Fn` labels count only the blocks *after* `PITCH`:
+
+| manual slot | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| panel | *(none)* | `F1` | `F2` | `F3` | *(amp stage)* |
+
+Confirmed on 40 layer rows across 22 algorithm/chain combinations, and
+independently from the byte side by the sibling project's own code join.
+
+This matters because a slot's option **list differs per slot**: for algorithm 10,
+slot 3 offers 16 functions beginning `LOPASS HIPASS ALPASS`, while slot 4 offers 13
+beginning `LPCLIP SINE+ NOISE+`. Decoding a slot-4 code through slot 3's list
+yields a wrong function *and* a wrong offset.
+
+Consequence: for algorithms 17 and 18 **`F3` does not exist** — two DSP slots and
+then the amplitude stage.
+
+### The block chain is NOT a property of the algorithm
+
+Setting an algorithm on a borrowed edit buffer draws its *default* chain. The same
+algorithm in a real program draws a different one:
+
+```
+alg 17, borrowed buffer   PITCH  LOPASS  NONE          AMP
+alg 17, a real program    PITCH  SHAPER  AMP MOD OSC   AMP
+```
+
+The algorithm fixes **topology** — slot count, widths, wiring — and each slot's
+**function is selected per program**. An `algorithm -> filter_slots` table is
+therefore not an answer to "does this program have a filter in slot 4", and a
+sweep of the algorithms cannot produce one.
+
+### The wiring is in the graphics plane
+
+`ALLTEXT` gives block *names* only; the lines connecting them — the signal flow,
+and whether a slot is single, double or triple width — are drawn in the graphics
+layer (`GETGRAPHICS`, 0x18, ~960 ms). `x AMP` / `+ AMP` / `! AMP` are the only
+hints text carries. `probes/p40_algorithm_pictures.py` captures both planes.
+
+### Reading the chain: match a vocabulary, do not split on whitespace
+
+Block names contain spaces (`AMP MOD OSC`, `2POLE LOWPASS`, `4POLE HIPASS W/SEP`),
+so splitting the chain on whitespace mis-slots them. Matching against the set of
+functions each slot is *allowed* to hold, longest option first, resolved 40/40
+rows with every slot filled — and cross-validated the option table at the same
+time, since no name appeared that the table did not allow.
+
+### Four probe bugs, all of which returned correct-looking rows
+
+Each needed an external contradiction to surface; none raised:
+
+1. **`len()` of a tuple as a count.** `list_bank()` returns `(infos, done)`; bound
+   to one name it reports `2` for every bank. Two banks "had 2 programs".
+2. **First-match filter page.** Taking the first `Fn FRQ` label found hides the
+   second filter — `PITCH SAW LOPASS LOPASS` has one in `F2` *and* `F3`. This
+   reported two programs as contradicting a correct analysis.
+3. **Layer 1 only.** Layers of one program carry different algorithms and
+   different cutoffs. "This program's filter is in F1" is not a property of a
+   program.
+4. **A globally-ordered expectation.** Concatenating files in macro order ignores
+   that they load into different banks. The tell was that mismatches began at
+   exactly the first file's length, and the "wrong" name was the *correct* next
+   file's first name — a disagreement that resolves into the right answer to a
+   different question is a bug in the question.
+
+### Round-tripping proves self-consistency, not correctness
+
+The sibling's filter-code table was believed good on the strength of 581/581
+agreement. The anchors from this session found a code mapped to the **wrong**
+filter type and two codes **refused** outright. Both survive a round-trip
+perfectly: re-reading what you wrote cannot detect either. Compare a green test
+suite saying nothing about a dead branch, and a corpus gate whose measured effect
+was exactly zero.
+
+---
+
+---
+
+## 24. The SysEx spec was on this machine all along (2026-08-17)
+
+Chapters 29 (MIDI) and 30 (System Exclusive Protocol) of the K2vx Musician's
+Guide are at
+`~/Seafile/Bibliothek/Handbücher/…/Synthesizer/K2000/30 SysEx.pdf`.
+**Read chapter 30 before reverse-engineering anything about the protocol.** Several
+things this project measured, argued about, or got wrong are stated there plainly.
+
+### Confirmed by the spec
+
+* Header is `sox(1) kid(1) dev-id(1) pid(1) msg-type(1) message(n) eox(1)` — so
+  the device id is byte **2** and the message type is byte **4**, with byte 3 the
+  constant product id `78h`. Matches `monitor.TYPE_INDEX = 4` (which was briefly 3).
+* Device id: the instrument matches its own SysEx ID, *or* anything when its ID is
+  set to 127. So 127 is a wildcard on the **receiving** side.
+* `DIRBANK`/`READBANK` `bank` is a single digit **0–9**, or 127 for all banks —
+  not an id base. Passing 200 raises, which is how this was found.
+* DNAK codes: 1 being edited, 2 bad checksum, 3 ID out of range, 4 not found,
+  5 RAM full.
+* `ALLTEXT` returns **320** bytes (8 × 40); **a short reply means the screen was
+  mid-redraw and should be re-requested** — a documented retry condition.
+* `GETGRAPHICS` returns **2560** bytes, 6 pixels per byte in the low 6 bits.
+* `PANEL` wheel delta is `byte − 64`.
+* `READBANK` inserts a **50 ms** delay between `WRITE` messages of its own accord.
+
+### Not in our object-type table
+
+Master parameters are readable as **type 100, ID 16**, and cannot be reached with
+any Bank message. `MacroTable` is *not* a documented object type, which is why
+reading it returns something that does not parse as a macro.
+
+### The two faults it exposed are recorded in §22
+
+Reading this chapter is what found the `data`-field bit-alignment bug (both
+directions) and, chasing why the fix appeared to do nothing, the shadowed `k2000`
+package. Both are written up in **§22**, since they are core protocol/transport
+faults rather than anything to do with the survey this section describes.
+
