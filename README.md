@@ -155,6 +155,13 @@ Characters beyond the K2000's 16-character display field are shown in **orange**
 > prefer [`k2kmaced`](#k2kmaced--the-macro-editor) when the instrument can simply
 > be switched off.
 >
+> **Watch the K2000's own LCD while you use it.** The mirror auto-pauses for the
+> duration of every operation — panel navigation and object writes must not race
+> the heartbeat — so the mirror is frozen at exactly the moment something might
+> go wrong, and it is the hardware display that shows what the instrument is
+> really doing. If a step fails it can leave the K2000 sitting in a dialog, which
+> the panel shows plainly and a paused mirror does not.
+>
 > **Slow.** Browsing costs about 0.6 s per directory entry (see below). Editing
 > and pushing are fast; looking around is not.
 

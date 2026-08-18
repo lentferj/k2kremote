@@ -205,10 +205,15 @@ async def test_both_screens_say_they_are_experimental():
     async with app.run_test() as pilot:
         await _open(app)
         await pilot.pause(); await pilot.pause()
-        assert "EXPERIMENTAL" in str(app.screen.query_one("#macrowarn", Static).render())
+        warn = str(app.screen.query_one("#macrowarn", Static).render())
+        assert "EXPERIMENTAL" in warn
+        # The mirror is paused for the duration of every op, so the hardware LCD
+        # is the only live view exactly when something goes wrong.
+        assert "LCD" in warn and "PAUSED" in warn
 
     app2 = Harness(op_result=("\\", []))
     async with app2.run_test() as pilot:
         app2.push_screen(DiskBrowserScreen(app2))
         await pilot.pause(); await pilot.pause()
-        assert "EXPERIMENTAL" in str(app2.screen.query_one("#browsewarn", Static).render())
+        warn2 = str(app2.screen.query_one("#browsewarn", Static).render())
+        assert "EXPERIMENTAL" in warn2 and "LCD" in warn2

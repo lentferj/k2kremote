@@ -729,8 +729,9 @@ class DiskBrowserScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="browsebox"):
-            yield Static("⚠  EXPERIMENTAL — reads the instrument's disk by "
-                         "driving its panel", id="browsewarn")
+            yield Static("⚠  EXPERIMENTAL — reads the disk by driving the "
+                         "panel\n   keep the K2000's own LCD in sight: the "
+                         "mirror is PAUSED while this works", id="browsewarn")
             yield self._title
             with self._scroll:
                 yield self._list
@@ -983,8 +984,9 @@ class MacroScreen(ModalScreen):
             # Said on the screen itself, not only in the README: this drives the
             # instrument's own panel for anything SysEx cannot express, and the
             # person about to press `p` or `s` is the one who needs to know.
-            yield Static("⚠  EXPERIMENTAL — writes to the running instrument",
-                         id="macrowarn")
+            yield Static("⚠  EXPERIMENTAL — writes to the running instrument\n"
+                         "   keep the K2000's own LCD in sight: the mirror is "
+                         "PAUSED while this works", id="macrowarn")
             yield Static("Macro table on the running K2000 (type 100, id 35)",
                          id="macrotitle")
             with self._scroll:
