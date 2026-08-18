@@ -754,6 +754,12 @@ class DiskBrowserScreen(ModalScreen):
         if error:
             self._hint.update(f"browser failed: {error}")
             return
+        if not result:
+            # A callback with neither a result nor an error. Unpacking it blindly
+            # raised TypeError and took the whole app down, which is a poor trade
+            # for a browser that could simply say it got nothing.
+            self._hint.update("the browser returned nothing — esc to close")
+            return
         self._path, self._items = result
         self._index = 0
         self._redraw()
