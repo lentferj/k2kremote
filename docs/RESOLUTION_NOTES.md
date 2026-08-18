@@ -2166,3 +2166,58 @@ file (**the alpha wheel does not scroll this browser**), `Select` to mark it —
 name gains a `*` and the header shows `Sel:1/26` — then `OK` and `Yes`. Always
 assert the selected name before confirming; the browser opens on whatever drive
 `CurrentDisk` points at.
+
+---
+
+## 27. The K2000's LCD truncates a path with `..` — and the browser was trusting it (2026-08-18)
+
+A live macro table carried an entry with path `..\-SLAP\`, pointing at nothing.
+The file is real: `\-BAESSE\-SLAP\E3_SLAPB.KRZ`, verified against the disk image.
+One directory component — `-BAESSE` — was simply missing.
+
+### The cause
+
+`DiskBrowserScreen` read the current directory back from the device after every
+navigation, via `disk_browse.current_path()`, which parses the `Dir:` field of
+the panel header. Reproduced live:
+
+```
+after entering -BAESSE, raw header: 'Dir:\-BAESSE\     Sel:0/6    Index:   1'
+after entering -SLAP,   raw header: 'Dir:..\-SLAP\     Sel:0/6    Index:   1'
+```
+
+**The K2000's 40-column header truncates a path that does not fit, and marks
+the cut with a leading `..`.** That is the device's own ellipsis convention —
+"there is more before this" — not a literal parent-directory reference. Reading
+it back verbatim and storing it as a macro entry's path produced exactly the
+corrupted entry found live. The device does not validate a macro entry's path
+at write time, so nothing complained until the entry was loaded.
+
+### The fix
+
+The screen already knows, by name, every directory it has entered — it chose
+each one from a listing to get there. There was never a need to ask the device
+what the resulting path is. `disk_browse.descend(path, name)` and
+`disk_browse.ascend(path)` are pure string operations that compose the path
+from what the caller already knows, and `DiskBrowserScreen` now uses them
+exclusively — a source-inspection test asserts `current_path` never appears in
+its methods again.
+
+`current_path()` itself is kept, since it remains useful for a human reading the
+screen, but its docstring now states the trap explicitly rather than leaving the
+next caller to rediscover it.
+
+Verified against the real captured names: `descend(descend("\", "-BAESSE"),
+"-SLAP")` gives `\-BAESSE\-SLAP\`, matching the file's actual location exactly —
+where the old code gave `..\-SLAP\`.
+
+### The general shape
+
+This is the same class of bug as the Macro page's `0x8000` selection flag (§21)
+and the `CurrentDisk` repointing (§25): **trusting a device's rendering of state
+as the state itself**, when the rendering is a display convention rather than a
+faithful readout. The K2000's screens are built for a human at a 40-column LCD,
+not for a caller expecting a machine-readable value — the panel truncates,
+abbreviates and flags things for legibility, and each of those has now cost a
+silent corruption once. A caller that can track its own state should, rather
+than asking the panel and trusting the answer is complete.

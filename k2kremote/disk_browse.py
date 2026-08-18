@@ -385,8 +385,71 @@ def root(bridge) -> str:
     return header(bridge)
 
 
+def disk_page_path(bridge) -> str:
+    """The Disk page's own `Path = \...` line — where a save or load will land.
+
+    Distinct from `current_path()`, which reads a BROWSER's `Dir:` header and is
+    subject to the same-field truncation this module works around elsewhere.
+    This line has room for the whole path on its own row and has not been
+    observed truncated, but is still a rendering rather than a value this code
+    tracked itself, so treat it as informational.
+    """
+    for row in _rows(bridge):
+        if row.strip().startswith("Path ="):
+            return row.split("=", 1)[1].strip()
+    return "\\"
+
+
+def reset_to_root(bridge) -> None:
+    """Move the instrument's current directory to the root, touching no files.
+
+    There is no "cd" message and no field to set directly — the only way to
+    change where a save or load lands is to browse there. This opens the (never-
+    OK'd) Load browser, presses Root, and closes it again with Cancel, which
+    changes nothing on disk but leaves `CurrentDisk`'s directory at `\\`.
+    """
+    ensure_disk_mode(bridge)
+    open_browser(bridge)
+    root(bridge)
+    close(bridge)
+
+
+def descend(path: str, name: str) -> str:
+    """The child path after entering directory `name` from `path`.
+
+    Pure string composition, deliberately never touching the device. The one
+    thing this must never do is ask the K2000 what the resulting path is: its
+    40-column header truncates a path that does not fit and marks the cut with
+    a leading `..` — `\\-BAESSE\\-SLAP\\` came back as `..\\-SLAP\\` — which is
+    the device's own ellipsis, not a real parent reference. The caller already
+    knows the name it is entering, so building the path from that is both
+    cheaper and immune to the truncation.
+    """
+    base = path if path.endswith("\\") else path + "\\"
+    return base + name.strip() + "\\"
+
+
+def ascend(path: str) -> str:
+    """The parent of `path`. `ascend("\\")` stays at the root."""
+    parts = [p for p in path.split("\\") if p]
+    return "\\" + "\\".join(parts[:-1]) + "\\" if parts[:-1] else "\\"
+
+
 def current_path(bridge) -> str:
-    """The `Dir:` path from the header, as a K2000 path."""
+    """The `Dir:` path from the header — for a HUMAN to read, never for a caller
+    to store.
+
+    **The K2000 truncates a path that does not fit its 40-column display**, and
+    marks the truncation with a leading `..` — its own ellipsis convention, not a
+    literal parent-directory reference. `\\-BAESSE\\-SLAP\\` was measured coming
+    back as `..\\-SLAP\\`. Storing that verbatim put a macro entry into the live
+    table pointing at a path that does not exist, which the K2000 does not
+    validate at write time — it surfaced only when the entry was loaded.
+
+    A caller that knows which directory it entered, by name, at each step should
+    build the path from that instead of reading it back off the screen — see
+    `DiskBrowserScreen` in k2kremote/app.py, which does exactly this.
+    """
     head = _rows(bridge)[0]
     if "Dir:" not in head:
         return "\\"

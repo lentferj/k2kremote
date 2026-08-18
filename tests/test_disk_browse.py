@@ -184,3 +184,90 @@ def test_counts_reads_the_instruments_own_totals():
 def test_counts_survives_a_screen_without_them():
     bridge = _PanelBridge([DISKPAGE])
     assert disk_browse.counts(bridge) == (None, None)
+
+
+# --- path composition (the truncated-header bug) -----------------------------
+
+def test_descend_composes_from_the_name_alone():
+    """`\\-BAESSE\\-SLAP\\` measured coming back from the K2000's own header as
+    `..\\-SLAP\\` -- the device's ellipsis for a path too long for its 40-column
+    display, not a literal parent reference. descend() must never reproduce
+    that: it builds the child path from the name it was given, never from
+    anything the device rendered."""
+    assert disk_browse.descend("\\-BAESSE\\", "-SLAP") == "\\-BAESSE\\-SLAP\\"
+
+
+def test_descend_handles_a_path_missing_its_trailing_backslash():
+    assert disk_browse.descend("\\-BAESSE", "-SLAP") == "\\-BAESSE\\-SLAP\\"
+
+
+def test_descend_strips_the_padding_the_panel_puts_on_a_name():
+    """Directory names arrive padded to the display column width."""
+    assert disk_browse.descend("\\", "-BAESSE     ") == "\\-BAESSE\\"
+
+
+def test_descend_from_the_root():
+    assert disk_browse.descend("\\", "-BAESSE") == "\\-BAESSE\\"
+
+
+def test_ascend_pops_one_level():
+    assert disk_browse.ascend("\\-BAESSE\\-SLAP\\") == "\\-BAESSE\\"
+
+
+def test_ascend_from_one_level_reaches_the_root():
+    assert disk_browse.ascend("\\-BAESSE\\") == "\\"
+
+
+def test_ascend_at_the_root_stays_at_the_root():
+    assert disk_browse.ascend("\\") == "\\"
+
+
+def test_descend_then_ascend_round_trips():
+    down = disk_browse.descend(disk_browse.descend("\\", "-BAESSE"), "-SLAP")
+    assert down == "\\-BAESSE\\-SLAP\\"
+    assert disk_browse.ascend(down) == "\\-BAESSE\\"
+    assert disk_browse.ascend(disk_browse.ascend(down)) == "\\"
+
+
+def test_current_path_documents_the_truncation_rather_than_hiding_it():
+    """Kept for humans reading the screen, not for composing a path -- and its
+    own docstring has to say so, since it is exactly the function that produced
+    the bug."""
+    doc = disk_browse.current_path.__doc__ or ""
+    assert "truncat" in doc.lower()
+
+
+def test_the_screen_never_reads_the_composed_path_back_off_the_device():
+    """The regression test for the bug itself: DiskBrowserScreen must build
+    every path it uses from `descend`/`ascend`, and must never call
+    `current_path` to find out where it is after moving."""
+    import inspect
+    from k2kremote import app as app_module
+
+    source = inspect.getsource(app_module.DiskBrowserScreen)
+    assert "current_path" not in source
+
+
+# --- disk_page_path / reset_to_root ------------------------------------------
+
+def test_disk_page_path_reads_the_disk_pages_own_row():
+    bridge = _PanelBridge([DISKPAGE])
+    assert disk_browse.disk_page_path(bridge) == "\\"
+
+
+def test_disk_page_path_reads_a_non_root_directory():
+    page = list(DISKPAGE)
+    page[1] = "Path = \\-BAESSE\\-SLAP\\"
+    bridge = _PanelBridge([page])
+    assert disk_browse.disk_page_path(bridge) == "\\-BAESSE\\-SLAP\\"
+
+
+def test_reset_to_root_only_ever_presses_root_and_cancel():
+    """No OK, ever: this must be indistinguishable from a no-op on disk."""
+    from k2000.definitions import Button
+
+    root_browser = ["Dir:\\-BAESSE\\-SLAP\\  Sel:0/6  Index:1", "", "", "", "",
+                    "", "Total: 1K", "        Root  Parent  Open   OK   Cancel"]
+    bridge = _PanelBridge([DISKPAGE, root_browser, DISKPAGE])
+    disk_browse.reset_to_root(bridge)
+    assert Button.SoftE not in bridge.presses, "OK must never be pressed"

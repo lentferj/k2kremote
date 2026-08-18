@@ -268,3 +268,76 @@ async def test_both_screens_say_they_are_experimental():
         await pilot.pause(); await pilot.pause()
         warn2 = str(app2.screen.query_one("#browsewarn", Static).render())
         assert "EXPERIMENTAL" in warn2 and "LCD" in warn2
+
+
+
+
+# --- save destination: show it, and two ways to change it -------------------
+
+async def test_opening_save_shows_the_destination():
+    """The bug this exists for: a save silently landed in \\-BAESSE\\-SLAP\\
+    because nothing showed where it would go before it went there."""
+    app = Harness(op_result="\\-BAESSE\\-SLAP\\")
+    async with app.run_test() as pilot:
+        screen = await _open(app)
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause(); await pilot.pause()
+        assert screen._save_name.display
+        assert "\\-BAESSE\\-SLAP\\" in screen._status.render().__str__()
+
+
+async def test_save_to_root_and_pick_directory_are_inert_without_the_prompt_open():
+    app = Harness()
+    async with app.run_test() as pilot:
+        await _open(app)
+        await pilot.pause(); await pilot.pause()
+        before = app.paused_for.copy()
+        await pilot.press("ctrl+d")
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        assert app.paused_for == before, "neither must touch the device unasked"
+
+
+async def test_save_to_root_updates_the_shown_destination():
+    app = Harness(op_result="\\")
+    async with app.run_test() as pilot:
+        screen = await _open(app)
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause(); await pilot.pause()
+        app.op_result = "\\"          # what reset_to_root + disk_page_path give
+        await pilot.press("ctrl+d")
+        await pilot.pause(); await pilot.pause()
+        assert "\\" in screen._status.render().__str__()
+        assert screen._save_name.display, "still on the name field afterwards"
+
+
+async def test_use_directory_dismisses_with_the_current_path():
+    app = Harness()
+    async with app.run_test() as pilot:
+        screen = DiskBrowserScreen(app, directory_mode=True)
+        screen._path = "\\-BAESSE\\-SLAP\\"
+        app.push_screen(screen, lambda path: results.append(path))
+        results = []
+        await pilot.pause(); await pilot.pause()
+        await pilot.press("u")
+        await pilot.pause(); await pilot.pause()
+        assert results == ["\\-BAESSE\\-SLAP\\"]
+
+
+async def test_directory_mode_refuses_to_open_a_file():
+    """Enter on a file in directory-pick mode must not behave as if a file had
+    been chosen -- there is no macro entry here to point at one."""
+    from k2kremote.disk_browse import Item
+
+    app = Harness(op_result=("\\", [Item("BOOT     .MAC", False, ".5K")]))
+    async with app.run_test() as pilot:
+        screen = DiskBrowserScreen(app, directory_mode=True)
+        app.push_screen(screen)
+        await pilot.pause(); await pilot.pause()
+        assert not screen._items[0].is_dir
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, DiskBrowserScreen), "must not have dismissed"
+        assert "u to use" in screen._hint.render().__str__()

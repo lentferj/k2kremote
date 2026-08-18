@@ -198,11 +198,8 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
     drive = current_disk(bridge)
     if drive is None:
         raise SaveRefused("could not read CurrentDisk from the device")
-    where = ""
-    for row in _rows(bridge):
-        if row.strip().startswith("Path ="):
-            where = row.split("=", 1)[1].strip()
-            break
+    from k2kremote.disk_browse import disk_page_path
+    where = disk_page_path(bridge)
     if drive != expect_drive:
         raise SaveRefused(
             f"CurrentDisk is {drive!r}, not {expect_drive!r} — refusing to save. "

@@ -713,6 +713,7 @@ class DiskBrowserScreen(ModalScreen):
         ("up", "cursor(-1)", "Up"),
         ("down", "cursor(1)", "Down"),
         ("r", "to_root", "Root"),
+        ("u", "use_directory", "Use this directory"),
     ]
 
     CSS = """
@@ -725,9 +726,14 @@ class DiskBrowserScreen(ModalScreen):
     #browsehint { color: $text-muted; }
     """
 
-    def __init__(self, app_ref):
+    def __init__(self, app_ref, *, directory_mode: bool = False):
         super().__init__()
         self._app = app_ref
+        #: When True, this is being used to pick a DESTINATION directory (for a
+        #: save) rather than a FILE (for a macro entry). `u` -- "use this
+        #: directory" -- works either way; directory_mode only changes what
+        #: Enter on a file does, since picking a file makes no sense here.
+        self._directory_mode = directory_mode
         self._items = []
         self._path = "\\"
         self._index = 0
@@ -758,7 +764,16 @@ class DiskBrowserScreen(ModalScreen):
     def _open_and_list(bridge):
         from k2kremote import disk_browse
         disk_browse.open_browser(bridge)
-        return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+        # Force ROOT rather than trusting wherever the device was last left, and
+        # then track the path ourselves from here on -- never by reading it back
+        # off the screen. The K2000's header truncates a path that does not fit
+        # its 40-column display, rendering "\-BAESSE\-SLAP\" as "..\-SLAP\".
+        # That is the device's own ellipsis convention, not a literal parent
+        # reference, and reading it back verbatim stored a macro entry pointing
+        # at a path that does not exist. Nothing about this needs the device's
+        # rendering: every directory this browser enters, it entered by name.
+        disk_browse.root(bridge)
+        return "\\", disk_browse.listing(bridge)
 
     def _run(self, op) -> None:
         self._busy = True
@@ -786,39 +801,64 @@ class DiskBrowserScreen(ModalScreen):
             self._index = max(0, min(len(self._items) - 1, self._index + delta))
             self._redraw()
 
+    def action_use_directory(self) -> None:
+        """Pick the CURRENT directory as the destination, without opening it
+        further or picking any file inside it."""
+        if self._busy:
+            return
+        chosen_dir = self._path
+        self._app.master_apply("disk browse", self._close_op,
+                               lambda r, e: self._leave(chosen_dir))
+
     def action_choose(self) -> None:
         if self._busy or not self._items:
             return
         item = self._items[self._index]
-        if item.is_dir:
-            name = item.name
-            self._hint.update(f"opening {name} ...")
-
-            index, total = self._index, len(self._items)
-            names = [i.name for i in self._items]
-
-            def op(bridge, name=name, index=index, total=total, names=names):
-                from k2kremote import disk_browse
-                disk_browse.enter(bridge, index, total, name, names)
-                return disk_browse.current_path(bridge), disk_browse.listing(bridge)
-
-            self._run(op)
+        if not item.is_dir:
+            if self._directory_mode:
+                # This browser is only choosing a DIRECTORY -- opening a file
+                # makes no sense here, so say what `u` is for instead.
+                self._hint.update("this picks a DIRECTORY — press u to use "
+                                  f"{self._path}, or open a folder")
+                return
+            # A file: hand back the full path and leave the browser cleanly.
+            path = self._path if self._path.endswith("\\") else self._path + "\\"
+            chosen = path + item.filename
+            self._app.master_apply("disk browse", self._close_op,
+                                   lambda r, e: self._leave(chosen))
             return
-        # A file: hand back the full path and leave the browser cleanly.
-        path = self._path if self._path.endswith("\\") else self._path + "\\"
-        chosen = path + item.filename
-        self._app.master_apply("disk browse", self._close_op,
-                               lambda r, e: self._leave(chosen))
+
+        # A directory: descend into it.
+        name = item.name
+        self._hint.update(f"opening {name} ...")
+
+        index, total = self._index, len(self._items)
+        names = [i.name for i in self._items]
+        # Compose the new path from what we already know -- the name of the
+        # directory just entered -- rather than from the device's display.
+        from k2kremote.disk_browse import descend
+        new_path = descend(self._path, name)
+
+        def op(bridge, name=name, index=index, total=total, names=names,
+              new_path=new_path):
+            from k2kremote import disk_browse
+            disk_browse.enter(bridge, index, total, name, names)
+            return new_path, disk_browse.listing(bridge)
+
+        self._run(op)
 
     def action_up(self) -> None:
         if self._busy:
             return
         self._hint.update("going up ...")
+        # Pop the last component from our OWN tracked path, not the device's.
+        from k2kremote.disk_browse import ascend
+        parent_path = ascend(self._path)
 
-        def op(bridge):
+        def op(bridge, parent_path=parent_path):
             from k2kremote import disk_browse
             disk_browse.parent(bridge)
-            return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+            return parent_path, disk_browse.listing(bridge)
 
         self._run(op)
 
@@ -830,7 +870,7 @@ class DiskBrowserScreen(ModalScreen):
         def op(bridge):
             from k2kremote import disk_browse
             disk_browse.root(bridge)
-            return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+            return "\\", disk_browse.listing(bridge)
 
         self._run(op)
 
@@ -863,8 +903,13 @@ class DiskBrowserScreen(ModalScreen):
                 lines.append(f"{mark} {item.name}{kind}   {item.size}")
             self._list.update("\n".join(lines))
         self._ensure_visible()
-        self._hint.update("enter open/pick · backspace parent · r root · "
-                          "esc cancel   (never loads anything)")
+        if self._directory_mode:
+            self._hint.update(f"target: {self._path}   enter open folder · u "
+                              f"USE THIS DIRECTORY · backspace parent · r root "
+                              f"· esc cancel")
+        else:
+            self._hint.update("enter open/pick · backspace parent · r root · "
+                              "esc cancel   (never loads anything)")
 
     def _ensure_visible(self) -> None:
         """Keep the cursor on screen — a directory is easily taller than the box.
@@ -929,6 +974,13 @@ class MacroScreen(ModalScreen):
         ("down", "cursor(1)", "Down"),
         ("p", "push", "Push to K2000"),
         ("s", "save_disk", "Save to disk"),
+        Binding("ctrl+d", "save_to_root", "Save destination: root",
+               priority=True),
+        # Reuses Ctrl+g, which the main app binds to "Save PNG" -- harmless,
+        # since Textual resolves bindings against the active screen first, and
+        # this screen shadows the app's binding for as long as it is on top.
+        Binding("ctrl+g", "pick_save_directory", "Pick save directory",
+               priority=True),
         # Deliberately NOT Enter: Enter accepted the filename, and confirming an
         # overwrite with the same key one keystroke later is how a double-tap
         # destroys a file. A different finger, a different decision.
@@ -990,6 +1042,9 @@ class MacroScreen(ModalScreen):
         self._save_overwrites: Optional[str] = None
         #: Name accepted and waiting on the separate overwrite keystroke.
         self._pending_save: Optional[str] = None
+        #: Where the save will land, as last reported by the instrument. Purely
+        #: informational -- macro_save re-checks the drive itself before writing.
+        self._where: Optional[str] = None
         self._list = Static("", id="macrolist")
         self._status = Static("", id="macrostatus")
         self._hint = Static("", id="macrohint")
@@ -1127,8 +1182,62 @@ class MacroScreen(ModalScreen):
         self._show_input(self._save_name)
         self._save_overwrites = None
         self._pending_save = None
-        self._status.update("file name (up to 8 chars, no extension) — or Ctrl+t "
-                            "to pick a file to save OVER; Enter saves, Esc cancels")
+        self._status.update("reading the current directory ...")
+
+        def op(bridge):
+            from k2kremote.disk_browse import disk_page_path
+            return disk_page_path(bridge)
+
+        self.app.master_apply("disk browse", op, self._show_save_destination)
+
+    def _show_save_destination(self, where, error) -> None:
+        # Purely informational -- macro_save re-derives it fresh at write time,
+        # and refuses if the drive is not what it expects regardless of what
+        # this shows. But NOT showing it is how a save landed in
+        # \-BAESSE\-SLAP\ without anyone choosing that: the destination is
+        # wherever the last browse left the instrument, invisible until you look.
+        self._where = where if not error else None
+        dest = where if not error else "(could not read — will be re-checked)"
+        self._status.update(
+            f"will save into: {dest}   Ctrl+d root · Ctrl+g browse · Ctrl+t "
+            f"overwrite existing · type a name (up to 8 chars); Enter saves")
+
+    def action_save_to_root(self) -> None:
+        """Reset the save destination to the root, without touching any file.
+
+        For exactly the case that had no answer before: typing "\\BOOT" was
+        refused (see macro_save's own docstring on why), and there was nothing
+        else to press. This opens the Load browser, presses Root, and closes it
+        again -- no OK, nothing on disk changes -- which is the only way to move
+        where a save lands, since the protocol has no message for it.
+        """
+        if not self._save_name.display:
+            return
+        self._status.update("moving to the root directory ...")
+
+        def op(bridge):
+            from k2kremote.disk_browse import reset_to_root, disk_page_path
+            reset_to_root(bridge)
+            return disk_page_path(bridge)
+
+        self.app.master_apply("disk browse", op, self._show_save_destination)
+
+    def action_pick_save_directory(self) -> None:
+        """Browse to the directory the save should land in."""
+        if not self._save_name.display:
+            return
+
+        def chosen(path):
+            if not path:
+                self._status.update("directory unchanged")
+                return
+            self._where = path
+            self._status.update(
+                f"will save into: {path}   Ctrl+d root · Ctrl+g browse · "
+                f"type a name; Enter saves")
+
+        self.app.push_screen(DiskBrowserScreen(self.app, directory_mode=True),
+                             chosen)
 
     def action_confirm_write(self) -> None:
         """Commit whatever write is armed: a save over a file, or a push.
