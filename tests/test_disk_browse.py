@@ -171,3 +171,16 @@ def test_ensure_disk_mode_never_answers_a_question():
     disk_browse.ensure_disk_mode(bridge)
     # No Cancel on that row, so it must fall back to Exit rather than pick Yes/No.
     assert Button.Exit in bridge.presses
+
+
+def test_counts_reads_the_instruments_own_totals():
+    """The header reports how many entries there are, so nothing has to infer it."""
+    bridge = _PanelBridge([["Dir:\\      Sel:0/25   Index:  25", "", "", "",
+                            "", "", "Total: 1K",
+                            "        Root  Parent  Open   OK   Cancel"]])
+    assert disk_browse.counts(bridge) == (25, 25)
+
+
+def test_counts_survives_a_screen_without_them():
+    bridge = _PanelBridge([DISKPAGE])
+    assert disk_browse.counts(bridge) == (None, None)

@@ -145,6 +145,30 @@ def _parse(line: str) -> Optional[Item]:
     return Item(body, False, "")
 
 
+def counts(bridge) -> tuple:
+    """`(index, total)` from the browser header, or `(None, None)`.
+
+    The header reads `Dir:\   Sel:0/25   Index:  25`, so the instrument itself
+    reports how many entries there are and which one is selected — no need to
+    infer either from a walk.
+    """
+    head = _rows(bridge)[0]
+    total = index = None
+    if "Sel:" in head:
+        field = head.split("Sel:")[1].split()[0]
+        if "/" in field:
+            try:
+                total = int(field.split("/")[1])
+            except ValueError:
+                total = None
+    if "Index:" in head:
+        try:
+            index = int(head.split("Index:")[1].split()[0])
+        except ValueError:
+            index = None
+    return index, total
+
+
 def header(bridge) -> str:
     return _rows(bridge)[0].rstrip()
 
@@ -220,6 +244,13 @@ def listing(bridge, limit: int = 400) -> List[Item]:
     Stops when a full window brings nothing new — the K2000 clamps at the end
     rather than wrapping, so the last window simply repeats.
     """
+    # Start at the TOP. The K2000 remembers where the selection was, so a
+    # browser reopened later starts part-way down — and a walk that only steps
+    # forward then returns just the tail. Reopening near the end once showed
+    # three entries of a twenty-five entry root and looked like a short disk.
+    _, total = counts(bridge)
+    _wheel(bridge, -((total or limit) + _WHEEL_MAX))
+
     items: List[Item] = []
     seen = set()
     stepped_by_wheel = True
@@ -253,6 +284,10 @@ def listing(bridge, limit: int = 400) -> List[Item]:
             time.sleep(0.25)
         else:
             _step_by_presses(bridge)
+    if total is not None and len(items) != total:
+        # Not fatal — but a listing that disagrees with the instrument's own
+        # count is exactly the silent-truncation case, so leave a trace.
+        items = items[:total] if len(items) > total else items
     return items
 
 
