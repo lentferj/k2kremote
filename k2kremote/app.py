@@ -45,6 +45,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Container, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
@@ -872,6 +873,9 @@ class MacroScreen(ModalScreen):
         ("a", "add", "Add entry"),
         ("e", "edit_path", "Edit path"),
         ("f", "pick_file", "Pick file"),
+        # Also reachable WHILE the path field has focus, where a plain letter is
+        # just text. priority=True so it beats the Input's own handling.
+        Binding("ctrl+f", "pick_file", "Pick file", priority=True),
         ("delete", "remove", "Delete entry"),
         ("up", "cursor(-1)", "Up"),
         ("down", "cursor(1)", "Down"),
@@ -914,7 +918,8 @@ class MacroScreen(ModalScreen):
         # no longer focusable, focus landed on this hidden Input and every
         # keystroke went into it. Pressing `a` typed an "a" nobody could see
         # instead of adding an entry.
-        self._path = Input(placeholder="\\DIR\\FILE.KRZ", id="macropath")
+        self._path = Input(placeholder="\\DIR\\FILE.KRZ  (or Ctrl+f to browse)",
+                           id="macropath")
         self._path.display = False      # shown only while editing a path
         self._path.can_focus = False
         self._save_name = Input(placeholder="file name (no extension)",
@@ -1152,13 +1157,22 @@ class MacroScreen(ModalScreen):
             return
         self._path.value = entries[self._index].full_path   # a property, not a call
         self._show_input(self._path)
-        self._status.update("enter the full path; Enter accepts, Esc cancels")
+        self._status.update("type the full path — or Ctrl+f to browse the "
+                            "K2000's disk; Enter accepts, Esc cancels")
 
     def action_pick_file(self) -> None:
-        """Choose this entry's file from the instrument's own disk."""
+        """Choose this entry's file from the instrument's own disk.
+
+        Works from the list and from inside the path editor — typing a path and
+        browsing for one are two ways at the same field, and being three
+        keystrokes into a path is exactly when you realise you do not remember
+        the rest of it.
+        """
         entries = self._table.entries if self._table else []
         if not entries:
             return
+        if self._path.display:          # abandon the half-typed path
+            self._close_path()
 
         def chosen(path):
             if not path:
