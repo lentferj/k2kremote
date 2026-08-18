@@ -235,21 +235,56 @@ def _step_by_presses(bridge) -> None:
     time.sleep(0.25)
 
 
-def select(bridge, name: str, limit: int = 200) -> bool:
-    """Put the selection on `name`, from wherever it is. True when found."""
-    for _ in range(limit):
-        current = _parse(_rows(bridge)[_SEL_ROW])
-        if current is not None and current.name == name:
-            return True
-        bridge.press_button(Button.CursorDown)
-        time.sleep(0.32)
-    return False
+#: One PANEL wheel message carries a delta of -64..+63 (byte 3 is 64 + clicks),
+#: so a longer move is chunked — still far cheaper than one press per step.
+_WHEEL_MAX = 63
 
 
-def enter(bridge, name: str) -> str:
-    """Descend into directory `name`. Never presses OK."""
-    if not select(bridge, name):
-        raise BrowseError(f"{name!r} is not in this directory")
+def _wheel(bridge, clicks: int) -> None:
+    """Turn the wheel by `clicks`, in as few messages as the protocol allows."""
+    while clicks:
+        step = max(-_WHEEL_MAX, min(_WHEEL_MAX, clicks))
+        bridge.alpha_wheel(step)
+        clicks -= step
+        time.sleep(0.25)
+
+
+def selected_name(bridge) -> Optional[str]:
+    """What the instrument currently shows as selected, or None."""
+    item = _parse(_rows(bridge)[_SEL_ROW])
+    return None if item is None else item.name
+
+
+def select_index(bridge, index: int, total: int) -> Optional[str]:
+    """Put the selection on entry `index`, from wherever it happens to be.
+
+    Goes to the TOP first and counts down, rather than searching from where the
+    cursor stands. `listing()` leaves the cursor clamped at the **last** entry,
+    and the K2000 clamps rather than wrapping — so a search that only stepped
+    downward could never reach anything above it, and opening any directory but
+    the last one silently did nothing.
+
+    Returns the name the device reports as selected, for the caller to verify.
+    """
+    _wheel(bridge, -(total + _WHEEL_MAX))     # clamp at the top
+    if index:
+        _wheel(bridge, index)
+    return selected_name(bridge)
+
+
+def enter(bridge, index: int, total: int, expect: str) -> str:
+    """Descend into the directory at `index`. Never presses OK.
+
+    The selection is verified against what the instrument reports before anything
+    is pressed: `Open` on the wrong row opens the wrong directory, and on a file
+    row it does nothing useful — neither is worth guessing at.
+    """
+    got = select_index(bridge, index, total)
+    if got != expect:
+        raise BrowseError(
+            f"expected {expect!r} to be selected but the K2000 shows {got!r} — "
+            f"not pressing Open"
+        )
     _press(bridge, "Open", settle=1.5)
     return header(bridge)
 
