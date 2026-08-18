@@ -71,6 +71,18 @@ class SaveUnverified(Exception):
     """The flow ran but the result could not be confirmed."""
 
 
+class SaveNeedsOverwrite(Exception):
+    """The name is taken. Nothing was written; the K2000 was answered No.
+
+    Carries the stem so the caller can offer the overwrite without making the
+    user retype it.
+    """
+
+    def __init__(self, stem: str):
+        super().__init__(f"{stem}.MAC already exists on the K2000's disk")
+        self.stem = stem
+
+
 def _rows(bridge, tries: int = 5) -> List[str]:
     """The screen, retrying a short/absent reply.
 
@@ -148,11 +160,22 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
     all matters: the prompt blocks the save, so leaving it unanswered hangs until
     the timeout with the question still on screen.
     """
-    stem = filename.strip().upper()
-    if not stem or "." in stem or len(stem) > 8:
+    # A save name is a FILENAME STEM, not a path. Strip the separators a person
+    # naturally types -- "\BOOT" is an obvious way to mean BOOT -- and refuse
+    # anything still carrying one. Left in, the backslash is not typeable on the
+    # K2000's pad, so it was silently mapped to the nearest character that is and
+    # "\BOOT" arrived as "BBOOT".
+    stem = filename.strip().strip("\\/").upper()
+    if not stem or len(stem) > 8:
         raise SaveRefused(
-            f"{filename!r} is not a FAT 8.3 stem: give up to 8 characters and no "
+            f"{filename!r} is not a FAT 8.3 stem: give 1 to 8 characters and no "
             f"extension (the K2000 adds .MAC itself)"
+        )
+    if "." in stem or "\\" in stem or "/" in stem:
+        raise SaveRefused(
+            f"{filename!r} is not a plain file name: no directories and no "
+            f"extension — the macro is saved into the current directory as "
+            f"{stem.split('.')[0].split(chr(92))[-1]}.MAC"
         )
     if not text_entry.is_supported(stem):
         raise SaveRefused(f"{stem!r} contains characters the K2000 cannot type")
@@ -237,10 +260,10 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
             bridge.press_button(_SOFT[i])
             time.sleep(2.0)
             if not overwrite:
-                raise SaveRefused(
-                    f"{stem}.MAC already exists and overwrite was not requested — "
-                    f"answered No, nothing was written"
-                )
+                # The instrument told us the name is taken -- which is how we
+                # find out, since nothing here lists the directory first. Say so
+                # in a way the caller can act on rather than as a flat failure.
+                raise SaveNeedsOverwrite(stem)
             continue
         if "DiskMode" in rows[0]:
             return rows[0].rstrip()

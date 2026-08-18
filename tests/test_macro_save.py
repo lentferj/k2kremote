@@ -45,10 +45,9 @@ DISK = ["DiskMode    Samples:1349K   Memory:414K", "Path = \\", "", "", "", "",
 
 def test_refuses_a_name_that_is_not_an_8_3_stem():
     bridge = FakeBridge(DISK)
-    for bad in ("TOOLONGNAME", "HAS.EXT", "", "   "):
-        with pytest.raises(SaveRefused) as exc:
+    for bad in ("TOOLONGNAME", "HAS.EXT", "", "   ", "DIR\\BOOT"):
+        with pytest.raises(SaveRefused):
             macro_save.save_macro(bridge, bad)
-        assert "8.3" in str(exc.value) or "cannot type" in str(exc.value)
     assert bridge.presses == [], "nothing may be pressed before the name is sane"
 
 
@@ -130,3 +129,21 @@ def test_yes_and_no_are_distinguished_on_the_replace_prompt():
 def test_the_replace_prompt_row_is_recognised_by_its_text():
     """Matched on "eplace existing" so the leading capital cannot matter."""
     assert "eplace existing" in " ".join(REPLACE)
+
+
+def test_a_leading_separator_is_stripped_rather_than_typed():
+    """`\\BOOT` is an obvious way to mean BOOT, and the backslash is not on the
+    K2000's pad — left in, it was mapped to the nearest typeable character and
+    the field came out as "BBOOT"."""
+    bridge = FakeBridge(DISK, drive="Floppy")      # fails at the drive check
+    with pytest.raises(SaveRefused) as exc:
+        macro_save.save_macro(bridge, "\\BOOT")
+    # got past the name check to the drive check, so the name was accepted
+    assert "CurrentDisk" in str(exc.value)
+
+
+def test_a_name_with_an_inner_separator_is_refused():
+    bridge = FakeBridge(DISK)
+    with pytest.raises(SaveRefused) as exc:
+        macro_save.save_macro(bridge, "DIR\\BOOT")
+    assert "no directories" in str(exc.value)

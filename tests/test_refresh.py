@@ -616,7 +616,11 @@ def test_device_op_reports_errors_without_killing_the_worker():
         assert done.wait(timeout=2.0)
         result, error = results[0]
         assert result is None
-        assert "device said no" in error
+        # device_op delivers the EXCEPTION, not a string of it, so callers can
+        # act on typed failures ("that file already exists" is a question, not a
+        # dead end). str() of it still reads the same for display.
+        assert isinstance(error, RuntimeError)
+        assert "device said no" in str(error)
         assert worker.is_alive()
     finally:
         worker.stop()

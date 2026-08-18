@@ -1153,6 +1153,19 @@ class MacroScreen(ModalScreen):
         # its Disk page, so the instrument is idle whether it worked or not.
         self.app.resume_mirror()
         if error:
+            stem = getattr(error, "stem", None)
+            if stem:
+                # The instrument answered "Replace existing file?" and we said
+                # No. That is not a failure, it is the overwrite question -- and
+                # it arrives the same way whether the name was typed or picked,
+                # so it arms the same confirm rather than making the user guess.
+                self._pending_save = stem
+                self._save_overwrites = f"{stem}.MAC"
+                self._refresh_hint()
+                self._status.update(
+                    f"{stem}.MAC ALREADY EXISTS — nothing was written. "
+                    f"Press w to overwrite it, Esc to cancel")
+                return
             self._status.update(f"NOT saved: {error}")
             return
         self._status.update(f"saved — {result}")
@@ -1619,7 +1632,7 @@ class MasterFunctionScreen(ModalScreen):
                 self.dismiss()
             else:
                 self._reset_hint()
-                self._set_current(f"failed: {error}")
+                self._set_current(f"failed: {type(error).__name__}: {error}")
 
         self.app.master_apply(summary, thunk, done)
 

@@ -640,7 +640,12 @@ class RefreshWorker(threading.Thread):
             try:
                 on_result(fn(self._bridge), None)
             except Exception as exc:
-                on_result(None, f"{type(exc).__name__}: {exc}")
+                # The EXCEPTION, not a string of it. Some failures carry
+                # information the caller can act on -- "that file already
+                # exists" is the overwrite question, not a dead end -- and
+                # stringifying here threw that away. Consumers that only want
+                # text still get it: f"{exc}" reads the same.
+                on_result(None, exc)
             return
         if kind == "rename":
             from k2000.definitions import ObjectType
