@@ -6,7 +6,8 @@ from attrs import define, field
 import numpy as np
 
 from k2000.definitions import ObjectType, Button, ButtonEventType, EncodingFormat, WriteMode
-from k2000.encoding import encode, decode
+from k2000.encoding import (encode, decode, decode_data_field,
+                           encode_data_field)
 from k2000.utils import grouper
 
 
@@ -172,10 +173,10 @@ class Load(SysexMessage):
     data: bytes
 
     def _encode_body(self):
-        if self.form == EncodingFormat.Nibblized:
-            encoded_data = encode[4](self.data, int(math.ceil(len(self.data) * 8 / 4)))
-        else:
-            encoded_data = encode[7](self.data, int(math.ceil(len(self.data) * 8 / 7)))
+        # LEFT-aligned with trailing zero pad; see encode_data_field(). The old
+        # encode[n] path right-aligned the payload and shifted every group.
+        bits_per_byte = 4 if self.form == EncodingFormat.Nibblized else 7
+        encoded_data = encode_data_field(self.data, bits_per_byte)
 
         checksum = sum(encoded_data) & 0b1111111
         return (
@@ -204,12 +205,10 @@ class Load(SysexMessage):
                 f" match encoded checksum (0x{encoded_checksum:02X})!"
             )
 
-        if form == EncodingFormat.Nibblized:
-            # Decode in "nibblized" format.
-            data_bytes = decode[4](data[11:-1])[-size:]
-        else:
-            # Decode in "bitstream" (7-bit) format.
-            data_bytes = decode[7](data[11:-1])[-size:]
+        # The data field is LEFT-aligned with trailing zero pad, unlike the
+        # numeric fields above -- see decode_data_field().
+        bits_per_byte = 4 if form == EncodingFormat.Nibblized else 7
+        data_bytes = decode_data_field(data[11:-1], bits_per_byte, size)
 
         return cls(_type, idno, offset, form, data_bytes)
 
@@ -487,10 +486,10 @@ class Write(SysexMessage):
     data: bytes
 
     def _encode_body(self):
-        if self.form == EncodingFormat.Nibblized:
-            encoded_data = encode[4](self.data, int(math.ceil(len(self.data) * 8 / 4)))
-        else:
-            encoded_data = encode[7](self.data, int(math.ceil(len(self.data) * 8 / 7)))
+        # LEFT-aligned with trailing zero pad; see encode_data_field(). The old
+        # encode[n] path right-aligned the payload and shifted every group.
+        bits_per_byte = 4 if self.form == EncodingFormat.Nibblized else 7
+        encoded_data = encode_data_field(self.data, bits_per_byte)
 
         checksum = sum(encoded_data, 0) & 0b1111111
         return (
@@ -523,10 +522,9 @@ class Write(SysexMessage):
                 f" match encoded checksum (0x{encoded_checksum:02X})!"
             )
 
-        if form == EncodingFormat.Nibblized:
-            data_bytes = decode[4](data[end_of_name + 2 : -1])[-size:]
-        else:
-            data_bytes = decode[7](data[end_of_name + 2 : -1])[-size:]
+        # Left-aligned data field; see decode_data_field().
+        bits_per_byte = 4 if form == EncodingFormat.Nibblized else 7
+        data_bytes = decode_data_field(data[end_of_name + 2 : -1], bits_per_byte, size)
 
         return cls(_type, idno, mode, name, form, data_bytes)
 

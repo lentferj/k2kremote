@@ -188,6 +188,30 @@ def _find_name_field(rows: List[str]) -> Tuple[int, int]:
     return 3, 16  # observed default (Program rename dialog)
 
 
+def home_cursor(bridge, width: int = 16, *, settle: float = 0.28) -> None:
+    """Drive the name cursor to offset 0, so ``start_col=0`` is actually true.
+
+    ``type_name`` verifies each character at ``name_col + start_col + col``, so a
+    caller that does not know the cursor's real offset garbles the name: the letter
+    lands at one column while the check reads another, the correction loop never
+    matches, and every character is left on its group's *first* letter. Typing
+    ``TEST`` into a field whose cursor sat one place right produced ``SDSS`` —
+    S, D, S, S being the first letters of the groups for T, E, S, T.
+
+    ``CursorLeft`` **clamps** at the field start rather than wrapping, so pressing
+    it ``width`` times is both sufficient and idempotent, and needs no knowledge of
+    where the cursor actually was. That matters because the K2000 does not report
+    the name cursor over MIDI at all (RESOLUTION_NOTES §6): it cannot be read, only
+    driven to a known place.
+
+    Call this before :func:`type_name` on any dialog you did not just open — in
+    particular after ``Delete`` presses, which move it.
+    """
+    for _ in range(max(1, width)):
+        bridge.press_button(Button.CursorLeft)
+        time.sleep(settle)
+
+
 def type_name(bridge, target: str, *, settle: float = 0.55,
               name_row: Optional[int] = None, name_col: Optional[int] = None,
               start_col: int = 0, max_passes: int = 12) -> None:

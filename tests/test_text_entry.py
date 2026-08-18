@@ -151,3 +151,50 @@ def test_type_name_starts_at_cursor_offset():
 def test_type_name_finds_field_by_name_label():
     assert te._find_name_field(["", "Program Name:   Foo"]) == (1, 16)
     assert te._find_name_field(["no label here"]) == (3, 16)  # fallback
+
+
+# --- cursor homing -----------------------------------------------------------
+
+class _CursorRecorder:
+    """Records presses; enough bridge surface for `home_cursor`."""
+
+    def __init__(self):
+        self.presses = []
+
+    def press_button(self, button):
+        self.presses.append(button)
+
+
+def test_home_cursor_presses_cursor_left_field_width_times():
+    """`CursorLeft` clamps at the field start, so pressing it `width` times gets
+    to offset 0 from anywhere and is idempotent. That is the whole point: the
+    K2000 does not report the name cursor over MIDI, so it can only be driven to
+    a known place, never read."""
+    from k2000.definitions import Button
+    from k2kremote.text_entry import home_cursor
+
+    bridge = _CursorRecorder()
+    home_cursor(bridge, width=16, settle=0)
+    assert bridge.presses == [Button.CursorLeft] * 16
+
+
+def test_home_cursor_always_presses_at_least_once():
+    """A zero or negative width must not silently do nothing — the caller asked
+    for the cursor to be homed."""
+    from k2000.definitions import Button
+    from k2kremote.text_entry import home_cursor
+
+    for width in (0, -3):
+        bridge = _CursorRecorder()
+        home_cursor(bridge, width=width, settle=0)
+        assert bridge.presses == [Button.CursorLeft]
+
+
+def test_home_cursor_needs_no_screen_reads():
+    """It must work on a dialog whose field position is unknown, so it cannot
+    depend on parsing the screen."""
+    from k2kremote.text_entry import home_cursor
+
+    bridge = _CursorRecorder()          # no get_screen_text at all
+    home_cursor(bridge, width=4, settle=0)
+    assert len(bridge.presses) == 4

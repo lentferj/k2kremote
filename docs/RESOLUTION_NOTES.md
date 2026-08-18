@@ -1494,3 +1494,75 @@ widened version was never checked.** Two lines of the message table refuted it.
 
 Anything driving the editor should use `goto_field` and assert the name the device
 reports, not count keypresses.
+
+---
+
+## 22. The `data` field is left-aligned — both encoder and decoder were wrong
+
+Found 2026-08-18 by reading the K2 SysEx spec (K2vx Musician's Guide **ch. 30**,
+"Data Formats"), which is on this machine alongside the algorithm chapter:
+`~/Seafile/Bibliothek/Handbücher/…/Synthesizer/K2000/30 SysEx.pdf`. **Read it
+before reverse-engineering anything about the protocol.**
+
+### The bug
+
+The spec uses **two different bit alignments** and the vendored library implemented
+only one:
+
+* **numeric fields** (`type`, `idno`, `size`, `offs`) are *right* justified —
+  "The significant bits are right justified in a field";
+* the **`data` field** is *left* aligned — built "starting from the left, slicing
+  off groups of 7 bits", with "the trailing bits … set to zero".
+
+`decode_n` / `encode_n` pad at the **head**, which is correct for the first and
+wrong for the second. It is invisible in nibble form, where 2 bytes per data byte
+always lands on a multiple of 8 — but 722 data bytes in bit-stream form is 5776
+bits carried in 826 seven-bit bytes, i.e. 5782, so two zero bits are inserted at
+the front and **every byte is shifted by two**.
+
+### Why it mattered more on the way out
+
+`client.write` transmits in **bit-stream** form. So writing *any* object — a
+program, a keymap, a macro table — would have sent a mis-packed payload into the
+object database. The read side merely produced bytes that would not reconcile with
+the same object read from a disk image; the write side would have corrupted it.
+
+Fixed with `encode_data_field()` / `decode_data_field()`, used by `Load` and
+`Write`. Validated three ways:
+
+1. against the manual's own worked example (`4F D8 01 29`, given in both forms);
+2. **against the instrument** — re-encoding what the K2000 sent reproduces its own
+   payload byte-for-byte, 1628 bytes nibblized and 931 bit-stream, checksums
+   matching;
+3. both forms of one 722-byte object now decode identically, as the spec requires.
+
+`form` selects packing, never content, so **identical output is the correct
+result** — a difference between the two forms can only ever be a bug here.
+
+### A second fault it exposed: two copies of `k2000`
+
+`k2000` was **editable-installed from a sibling checkout** (`~/git-repos/k2000`)
+while this repo also *vendors* a tracked copy in `k2000/`. Which one you imported
+depended on the working directory: from the repo root the vendored copy shadowed
+the install, so `pytest` and the probes used it — while the installed console
+scripts, run from anywhere else, used the sibling. A fix applied here appeared to
+have no effect there.
+
+`pyproject.toml` already lists `k2000` among this project's packages, so the
+sibling install was redundant as well as shadowing. Removed with
+`pip uninstall k2000`. **If a fix to `k2000/` seems not to take effect, check
+`k2000.__file__` from the directory the failing command actually runs in.**
+
+### `text_entry.home_cursor()`
+
+Added alongside, because the same session showed how a name gets garbled: the
+K2000 **does not report the name cursor over MIDI at all**, so `type_name` takes
+the offset from its caller (`start_col`). A caller that guesses writes each letter
+one column away from where it verifies it, the correction loop never matches, and
+every character is left on its group's *first* letter — typing `TEST` produced
+`SDSS`.
+
+`home_cursor` drives the cursor to offset 0 with `CursorLeft`, which **clamps** at
+the field start, so it is idempotent and needs no screen read. It is **additive**:
+nothing calls it yet. The app threads `NameCursor`'s tracked position and is
+unaffected; this is for callers that did not open the dialog themselves.
