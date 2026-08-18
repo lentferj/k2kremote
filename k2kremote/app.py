@@ -787,7 +787,7 @@ class DiskBrowserScreen(ModalScreen):
         path = self._path if self._path.endswith("\\") else self._path + "\\"
         chosen = path + item.filename
         self._app.master_apply("disk browse", self._close_op,
-                               lambda r, e: self.dismiss(chosen))
+                               lambda r, e: self._leave(chosen))
 
     def action_up(self) -> None:
         if self._busy:
@@ -813,6 +813,11 @@ class DiskBrowserScreen(ModalScreen):
 
         self._run(op)
 
+    def _leave(self, result) -> None:
+        """Hand back and stop holding the wire."""
+        self._app.resume_mirror()
+        self.dismiss(result)
+
     @staticmethod
     def _close_op(bridge):
         """Leave the instrument's browser via Cancel, never OK."""
@@ -821,7 +826,7 @@ class DiskBrowserScreen(ModalScreen):
 
     def action_close(self) -> None:
         self._app.master_apply("disk browse", self._close_op,
-                               lambda r, e: self.dismiss(None))
+                               lambda r, e: self._leave(None))
 
     # -- view ---------------------------------------------------------------
 
@@ -969,6 +974,7 @@ class MacroScreen(ModalScreen):
     def _loaded(self, data, error) -> None:
         if error:
             self._status.update(f"could not read it: {error}")
+            self.app.resume_mirror()
             return
         try:
             from k2kmaced.macfile import MacroTable
@@ -981,6 +987,10 @@ class MacroScreen(ModalScreen):
         self._index = min(self._index, max(0, len(self._table.entries) - 1))
         self._dirty = False
         self._armed = False
+        # The read is done and the wire is free again. Pausing for the seconds an
+        # op runs is right; leaving PAUSED blinking over an idle machine for as
+        # long as this screen happens to be open is not.
+        self.app.resume_mirror()
         self._status.update(f"{len(self._table.entries)} entries, as the "
                             f"instrument has them")
         self._redraw()
@@ -1020,13 +1030,16 @@ class MacroScreen(ModalScreen):
     def _pushed(self, result, error, backup) -> None:
         if error:
             # push() verifies by reading the object back, so a failure here means
-            # the live table may be neither the old one nor the new one.
+            # the live table may be neither the old one nor the new one. Do NOT
+            # resume: the mirror repainting over that message is the last thing
+            # wanted, and the instrument's state is exactly what needs looking at.
             self._status.update(f"NOT written: {error}")
             return
         self._dirty = False
         self._status.update(f"written and verified by read-back; previous table "
                             f"saved to {backup}")
         self._redraw()
+        self.app.resume_mirror()
 
     def action_save_disk(self) -> None:
         """Make the K2000 write the live macro table to its own disk.
@@ -1065,6 +1078,9 @@ class MacroScreen(ModalScreen):
         self.app.master_apply("macro save", op, self._saved)
 
     def _saved(self, result, error) -> None:
+        # Resume either way: save_macro only returns once the K2000 is back on
+        # its Disk page, so the instrument is idle whether it worked or not.
+        self.app.resume_mirror()
         if error:
             self._status.update(f"NOT saved: {error}")
             return
@@ -1184,6 +1200,7 @@ class MacroScreen(ModalScreen):
             entry.filename = filename
             self._touch()
             self._status.update(f"pointed at {path}")
+            self.app.resume_mirror()
 
         self.app.push_screen(DiskBrowserScreen(self.app), chosen)
 
