@@ -773,10 +773,11 @@ class DiskBrowserScreen(ModalScreen):
             self._hint.update(f"opening {name} ...")
 
             index, total = self._index, len(self._items)
+            names = [i.name for i in self._items]
 
-            def op(bridge, name=name, index=index, total=total):
+            def op(bridge, name=name, index=index, total=total, names=names):
                 from k2kremote import disk_browse
-                disk_browse.enter(bridge, index, total, name)
+                disk_browse.enter(bridge, index, total, name, names)
                 return disk_browse.current_path(bridge), disk_browse.listing(bridge)
 
             self._run(op)

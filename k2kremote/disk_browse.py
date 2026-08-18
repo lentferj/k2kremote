@@ -255,31 +255,54 @@ def selected_name(bridge) -> Optional[str]:
     return None if item is None else item.name
 
 
-def select_index(bridge, index: int, total: int) -> Optional[str]:
-    """Put the selection on entry `index`, from wherever it happens to be.
+def select_index(bridge, index: int, total: int,
+                 names: Optional[List[str]] = None,
+                 attempts: int = 6) -> Optional[str]:
+    """Put the selection on entry `index`, checking the device as it goes.
 
-    Goes to the TOP first and counts down, rather than searching from where the
-    cursor stands. `listing()` leaves the cursor clamped at the **last** entry,
-    and the K2000 clamps rather than wrapping — so a search that only stepped
-    downward could never reach anything above it, and opening any directory but
-    the last one silently did nothing.
+    **Closed loop, deliberately.** Counting clicks from a clamped top is open
+    loop, and open loop drifted on real hardware: entries landed several rows
+    short, consistently, so `Open` was then refused and no directory would open.
+    Rather than assume every click lands, this reads back what the instrument
+    says is selected, works out the remaining distance, and turns the wheel
+    again — which converges whatever the reason a click goes missing.
 
-    Returns the name the device reports as selected, for the caller to verify.
+    `names` is the listing in order, used to locate the *current* selection so
+    the correction can be computed. Without it this can only clamp and count,
+    which is the behaviour that failed.
     """
-    _wheel(bridge, -(total + _WHEEL_MAX))     # clamp at the top
+    if names:
+        for _ in range(attempts):
+            here = selected_name(bridge)
+            if here == names[index]:
+                return here
+            if here in names:
+                delta = index - names.index(here)
+            else:
+                # Not a name we know: get to a known end and work from there.
+                _wheel(bridge, -(total + _WHEEL_MAX))
+                delta = index
+            if not delta:
+                return here
+            _wheel(bridge, delta)
+        return selected_name(bridge)
+
+    # No listing to correct against: clamp to the top and count down.
+    _wheel(bridge, -(total + _WHEEL_MAX))
     if index:
         _wheel(bridge, index)
     return selected_name(bridge)
 
 
-def enter(bridge, index: int, total: int, expect: str) -> str:
+def enter(bridge, index: int, total: int, expect: str,
+          names: Optional[List[str]] = None) -> str:
     """Descend into the directory at `index`. Never presses OK.
 
     The selection is verified against what the instrument reports before anything
     is pressed: `Open` on the wrong row opens the wrong directory, and on a file
     row it does nothing useful — neither is worth guessing at.
     """
-    got = select_index(bridge, index, total)
+    got = select_index(bridge, index, total, names)
     if got != expect:
         raise BrowseError(
             f"expected {expect!r} to be selected but the K2000 shows {got!r} — "
