@@ -17,13 +17,87 @@ for the `BOOT.MAC` startup macro that decides what your K2000 loads at power-on.
 The macro editor needs no MIDI and no running instrument, because editing
 `BOOT.MAC` means the K2000 is switched **off** with its disk in your computer.
 
-> **Author:** Jan Lentfer &lt;jan.lentfer@web.de&gt;, with AI support
+### Part of a family
+
+Five projects for keeping vintage samplers usable, sharing conventions and, where
+it matters, findings:
+
+| | |
+|---|---|
+| [**k2kremote**](https://github.com/lentferj/k2kremote) | *this one* — a terminal remote and LCD mirror for the Kurzweil K2000 / K2000R |
+| [**mpc2emu**](https://github.com/lentferj/mpc2emu) | converts sample libraries between formats, mapping filters, envelopes and LFOs onto each target's own engine |
+| [**eosed**](https://github.com/lentferj/eosed) | editor and explorer for the E-mu **EOS** family (E4, E4XT, E4XT Ultra, E6400) over SysEx |
+| [**s3ked**](https://github.com/lentferj/s3ked) | editor for the **Akai S1000 / S3000** family over SysEx |
+| [**VinSamLib**](https://github.com/lentferj/VinSamLib) | librarian and bank builder for E-mu E4B, EIII/ESI-32 and Kurzweil KRZ content |
+
+They are separate programs, not one suite — but the reverse engineering crosses
+over. The K2000 protocol notes this project depends on live in mpc2emu, and
+several findings here came from a question one of the others was asking.
+
+> **Author:** Jan Lentfer, with AI support
 > (Anthropic Claude) — see [AI assistance](#ai-assistance--human-authorship).  
 > **Legal:** [DISCLAIMER.md](DISCLAIMER.md) · [LICENSE](LICENSE)
 
 <p align="center">
   <img src="docs/img/mirror-image.png" alt="k2kremote mirroring the Kurzweil K2000 LCD, pixel-perfect in colour" width="80%">
 </p>
+
+---
+
+## Supporting this project
+
+If k2kremote saved you an evening — put the K2000's display on your screen instead
+of squinting at a 240 × 64 LCD, renamed an object without dialling letters on the
+alphanumeric pad, or let you edit `BOOT.MAC` without a hex editor — you might
+consider supporting its development.
+
+Best of all, if it means your K2000 is **switched on and in use more often**,
+because driving it no longer means leaning over the front panel: that is what
+these projects are for. If you would like to help keep that going, it runs
+through GitHub Sponsors at
+**[github.com/sponsors/lentferj](https://github.com/sponsors/lentferj)**.
+
+### What it costs to make
+
+The reverse engineering behind this is not desk work. Every protocol finding here
+was measured on a **real K2000R** — the SysEx flood floor, the device-id quirk,
+the naming model, the macro table's layout, the undocumented `0x12`/`0x13` memory
+query. None of it could have been guessed from documentation, because most of it
+is not in any.
+
+The machine is here because its author is a K2000 enthusiast himself, but what
+the project really costs is **dozens, maybe even hundreds of hours of personal
+time** — plus interfaces, media, and AI assistance, which is a paid service used
+heavily.
+
+It also costs the instrument something: this kind of work means driving a
+thirty-year-old machine hard, and it has been locked up and recovered more than
+once in the process.
+
+### Why "support" and not "donation"
+
+Because in Germany these are not `Spenden` in the tax sense, and saying otherwise
+would mislead in both directions: the money is **taxable income** for the author,
+it is **not tax-deductible** for you, and **no donation receipt can be issued**.
+A German reader who assumed deductibility would be the one actually harmed by
+vaguer wording, so it is said plainly rather than dressed up.
+
+Everything goes through GitHub Sponsors, which means bank and tax details stay
+with GitHub and Stripe and are never handed to the person paying.
+
+### Money is not the only currency
+
+None of this is expected, and other things help as much:
+
+- **Bug reports**, especially with the screen or the SysEx that produced them.
+- **Confirmations from hardware that is not on this bench.** Everything here was
+  verified on **one K2000R**, on one OS version. Whether a K2000 without the R,
+  a K2vx, or an older OS behaves the same is genuinely unknown — several notes in
+  `docs/RESOLUTION_NOTES.md` are careful to say "on this unit" for exactly that
+  reason. A "works here too" or a "no, mine does X" is worth a great deal.
+- **Corrections to the RE notes.** Wrong turns are recorded alongside the
+  findings; if one of them is wrong in a way that is still costing someone time,
+  saying so improves the record.
 
 ---
 

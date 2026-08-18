@@ -26,7 +26,7 @@ after a reset or an unexpected change.
 ## AI Assistance & Human Authorship
 
 In the interest of transparency: k2kremote was created by its **human author,
-Jan Lentfer (<jan.lentfer@web.de>)**, working together with Anthropic's
+Jan Lentfer**, working together with Anthropic's
 **Claude**, an AI coding assistant.
 
 **The ideas and the direction are human.** The concept of the tool, the project
