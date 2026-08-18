@@ -206,7 +206,12 @@ LEGEND_GROUPS: Tuple[Tuple[str, ...], ...] = (
      "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both"),
     ("F1-F6 soft", "F7 Edit", "F8 Exit", "F9 name", "F10 view", "F11 master",
      "F12 png"),
-    ("Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename"),
+    # The F-key row above mirrors the K2000's OWN panel — "F8 Exit" is the
+    # instrument's Exit button, not a way out of this program. So the app's own
+    # quit belongs here, spelled out: without it the only visible "Exit" is the
+    # one that does something else entirely.
+    ("Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
+     "Ctrl+k macro", "Ctrl+c quit"),
 )
 LEGEND_BLOCKS: Tuple[str, ...] = tuple(b for g in LEGEND_GROUPS for b in g)
 LEGEND = " · ".join(LEGEND_BLOCKS)

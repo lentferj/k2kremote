@@ -45,7 +45,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Container
+from textual.containers import Container, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Input, Select, Static
@@ -677,6 +677,598 @@ _MASTER_FUNCTIONS = [
 ]
 
 
+class DiskBrowserScreen(ModalScreen):
+    """Pick a file off the K2000's OWN disk, by driving its Load browser.
+
+    The online counterpart to the offline editor's picker, and not a better one:
+    a disk image is byte-exact, complete and instant, while this costs a keypress
+    and a screen read per entry. What it offers is *freshness* — it reflects the
+    disk that is in the machine now, which an image only does while it remains a
+    copy of that same disk.
+
+    **It never presses `OK`** — on the Load page that loads the file, which is
+    slow and, into a populated bank, destructive. Only descend, ascend and
+    cancel. See :mod:`k2kremote.disk_browse`.
+
+    Listing a directory costs one keypress and one screen read per entry, so a
+    full directory takes a few seconds and the screen says so while it works.
+    """
+
+    BINDINGS = [
+        ("escape", "close", "Cancel"),
+        ("enter", "choose", "Open / pick"),
+        ("backspace", "up", "Parent"),
+        ("up", "cursor(-1)", "Up"),
+        ("down", "cursor(1)", "Down"),
+        ("r", "to_root", "Root"),
+    ]
+
+    CSS = """
+    DiskBrowserScreen { align: center middle; }
+    #browsebox { width: 74; max-height: 90%; padding: 1 2; border: round $accent;
+                 background: $surface; }
+    #browsescroll { height: 1fr; min-height: 3; }
+    #browsetitle { text-style: bold; }
+    #browsehint { color: $text-muted; }
+    """
+
+    def __init__(self, app_ref):
+        super().__init__()
+        self._app = app_ref
+        self._items = []
+        self._path = "\\"
+        self._index = 0
+        self._busy = True
+        self._scroll = VerticalScroll(id="browsescroll")
+        self._scroll.can_focus = False      # same reason as MacroScreen
+        self._list = Static("", id="browselist")
+        self._title = Static("K2000 disk", id="browsetitle")
+        self._hint = Static("", id="browsehint")
+
+    def compose(self) -> ComposeResult:
+        with Container(id="browsebox"):
+            yield self._title
+            with self._scroll:
+                yield self._list
+            yield self._hint
+
+    def on_mount(self) -> None:
+        self._hint.update("opening the disk browser on the instrument ...")
+        self._run(lambda b: self._open_and_list(b))
+
+    # -- device work --------------------------------------------------------
+
+    @staticmethod
+    def _open_and_list(bridge):
+        from k2kremote import disk_browse
+        disk_browse.open_browser(bridge)
+        return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+
+    def _run(self, op) -> None:
+        self._busy = True
+        self._app.master_apply("disk browse", op, self._done)
+
+    def _done(self, result, error) -> None:
+        self._busy = False
+        if error:
+            self._hint.update(f"browser failed: {error}")
+            return
+        self._path, self._items = result
+        self._index = 0
+        self._redraw()
+
+    # -- navigation ---------------------------------------------------------
+
+    def action_cursor(self, delta: int) -> None:
+        if self._items:
+            self._index = max(0, min(len(self._items) - 1, self._index + delta))
+            self._redraw()
+
+    def action_choose(self) -> None:
+        if self._busy or not self._items:
+            return
+        item = self._items[self._index]
+        if item.is_dir:
+            name = item.name
+            self._hint.update(f"opening {name} ...")
+
+            def op(bridge, name=name):
+                from k2kremote import disk_browse
+                disk_browse.enter(bridge, name)
+                return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+
+            self._run(op)
+            return
+        # A file: hand back the full path and leave the browser cleanly.
+        path = self._path if self._path.endswith("\\") else self._path + "\\"
+        chosen = path + item.filename
+        self._app.master_apply("disk browse", self._close_op,
+                               lambda r, e: self.dismiss(chosen))
+
+    def action_up(self) -> None:
+        if self._busy:
+            return
+        self._hint.update("going up ...")
+
+        def op(bridge):
+            from k2kremote import disk_browse
+            disk_browse.parent(bridge)
+            return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+
+        self._run(op)
+
+    def action_to_root(self) -> None:
+        if self._busy:
+            return
+        self._hint.update("going to the root ...")
+
+        def op(bridge):
+            from k2kremote import disk_browse
+            disk_browse.root(bridge)
+            return disk_browse.current_path(bridge), disk_browse.listing(bridge)
+
+        self._run(op)
+
+    @staticmethod
+    def _close_op(bridge):
+        """Leave the instrument's browser via Cancel, never OK."""
+        from k2kremote import disk_browse
+        disk_browse.close(bridge)
+
+    def action_close(self) -> None:
+        self._app.master_apply("disk browse", self._close_op,
+                               lambda r, e: self.dismiss(None))
+
+    # -- view ---------------------------------------------------------------
+
+    def _redraw(self) -> None:
+        self._title.update(f"K2000 disk — {self._path}")
+        if not self._items:
+            self._list.update("  (empty)")
+        else:
+            lines = []
+            for i, item in enumerate(self._items):
+                mark = ">" if i == self._index else " "
+                kind = "/" if item.is_dir else " "
+                lines.append(f"{mark} {item.name}{kind}   {item.size}")
+            self._list.update("\n".join(lines))
+        self._hint.update("enter open/pick · backspace parent · r root · "
+                          "esc cancel   (never loads anything)")
+
+
+class MacroScreen(ModalScreen):
+    """The RUNNING instrument's macro table — view, reorder, and push it back.
+
+    The macro list the K2000 replays at power-on lives in battery-backed RAM as
+    object type 100, id 35. This reads it, lets you rearrange it, and writes it
+    back — all over SysEx, with the instrument switched on and its disk in place.
+
+    That is the whole point of it being here rather than in `k2kmaced`. The macro
+    editor is deliberately offline and opens no MIDI port, because editing a
+    `BOOT.MAC` on a card means the K2000 is switched **off**. This screen answers
+    the opposite case: the machine is running, so the card is unreachable, but the
+    table is one SysEx away.
+
+    **Nothing here touches a disk.** A push replaces the RAM object only; the
+    K2000 saves it itself, from its own Disk pages, and can save under any
+    filename — so a working `BOOT.MAC` is never at risk from this screen.
+
+    Editing paths and filenames stays in `k2kmaced`, which has a file picker and a
+    disk image to validate against. This screen does the things that only make
+    sense against a live machine.
+    """
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("r", "reload", "Reload"),
+        ("b", "bank(1)", "Bank +"),
+        ("B", "bank(-1)", "Bank -"),
+        ("m", "mode", "Mode"),
+        ("ctrl+up", "shift(-1)", "Move up"),
+        ("ctrl+down", "shift(1)", "Move down"),
+        ("a", "add", "Add entry"),
+        ("e", "edit_path", "Edit path"),
+        ("f", "pick_file", "Pick file"),
+        ("delete", "remove", "Delete entry"),
+        ("up", "cursor(-1)", "Up"),
+        ("down", "cursor(1)", "Down"),
+        ("p", "push", "Push to K2000"),
+        ("s", "save_disk", "Save to disk"),
+    ]
+
+    CSS = """
+    MacroScreen { align: center middle; }
+    /* A macro can hold far more entries than fit a small window -- 19 is
+       ordinary and each is one line -- so the box is bounded and the list
+       scrolls inside it. Without this the entries ran past the bottom edge,
+       taking the status and hint lines with them. */
+    #macrobox { width: 82; max-height: 90%; padding: 1 2; border: round $warning;
+                background: $surface; }
+    #macroscroll { height: 1fr; min-height: 3; }
+    #macrotitle { text-style: bold; }
+    #macrohint { color: $text-muted; }
+    #macrostatus { color: $warning; }
+    """
+
+    def __init__(self, worker):
+        super().__init__()
+        self._worker = worker
+        self._table = None          # k2kmaced.macfile.MacroTable
+        self._index = 0
+        self._dirty = False
+        self._armed = False
+        # Held from compose(): querying children in on_mount is a race this
+        # project has already lost once, on one CI platform only.
+        self._scroll = VerticalScroll(id="macroscroll")
+        # A VerticalScroll takes focus and eats up/down to scroll ITSELF, so the
+        # screen's cursor bindings never fire: the view moved while the ">" sat
+        # on entry 0 and scrolled out of sight. This screen drives the scrolling
+        # itself, from the cursor, so the container must not compete for keys.
+        self._scroll.can_focus = False
+        # Hidden inputs must also be UNFOCUSABLE, not merely invisible. Textual
+        # focuses the first focusable widget on mount, and `display = False` does
+        # not take a widget out of the focus chain — so with the scroll container
+        # no longer focusable, focus landed on this hidden Input and every
+        # keystroke went into it. Pressing `a` typed an "a" nobody could see
+        # instead of adding an entry.
+        self._path = Input(placeholder="\\DIR\\FILE.KRZ", id="macropath")
+        self._path.display = False      # shown only while editing a path
+        self._path.can_focus = False
+        self._save_name = Input(placeholder="file name (no extension)",
+                                id="macrosave")
+        self._save_name.display = False
+        self._save_name.can_focus = False
+        self._list = Static("", id="macrolist")
+        self._status = Static("", id="macrostatus")
+        self._hint = Static("", id="macrohint")
+
+    def compose(self) -> ComposeResult:
+        with Container(id="macrobox"):
+            yield Static("Macro table on the running K2000 (type 100, id 35)",
+                         id="macrotitle")
+            with self._scroll:
+                yield self._list
+            yield self._path
+            yield self._save_name
+            yield self._status
+            yield self._hint
+
+    def on_mount(self) -> None:
+        self._refresh_hint()
+        self.set_focus(None)            # keys belong to the screen's bindings
+        self.action_reload()
+
+    def _show_input(self, widget) -> None:
+        widget.can_focus = True
+        widget.display = True
+        widget.focus()
+
+    def _hide_input(self, widget) -> None:
+        widget.display = False
+        widget.can_focus = False
+        self.set_focus(None)
+
+    # -- device -------------------------------------------------------------
+
+    def action_reload(self) -> None:
+        self._status.update("reading the live macro table ...")
+
+        def done(data, error):
+            self.app.call_from_thread(self._loaded, data, error)
+
+        self._worker.device_op(lambda b: b.read_macro_table(), done)
+
+    def _loaded(self, data, error) -> None:
+        if error:
+            self._status.update(f"could not read it: {error}")
+            return
+        try:
+            from k2kmaced.macfile import MacroTable
+            self._table = MacroTable.parse(data)
+        except Exception as exc:                      # noqa: BLE001
+            # A wrong id returns a plausible-looking object rather than an error,
+            # so say which object was asked for instead of blaming the parser.
+            self._status.update(f"type 100 id 35 did not parse as a macro: {exc}")
+            return
+        self._index = min(self._index, max(0, len(self._table.entries) - 1))
+        self._dirty = False
+        self._armed = False
+        self._status.update(f"{len(self._table.entries)} entries, as the "
+                            f"instrument has them")
+        self._redraw()
+
+    def action_push(self) -> None:
+        if self._table is None:
+            return
+        if not self._dirty:
+            self._status.update("nothing changed — reorder or re-bank first")
+            return
+        if not self._armed:
+            self._armed = True
+            self._refresh_hint()
+            self._status.update("ARMED — press p again to write it to the K2000")
+            return
+
+        self._armed = False
+        self._refresh_hint()
+        self._status.update("writing ...")
+        table = self._table
+        backup = os.path.join(os.path.expanduser("~"),
+                              ".k2kremote-macro-backup.bin")
+
+        def op(bridge):
+            from k2kmaced import online
+            return online.push(bridge, table, backup_path=backup)
+
+        # Through master_apply, not device_op: replacing an object rewrites the
+        # object database, and the heartbeat's GETGRAPHICS during a destructive
+        # object op is what locks this instrument up (RESOLUTION_NOTES §9). It
+        # pauses the mirror, marshals the callback to the UI thread, and leaves
+        # the mirror paused until `p`.
+        self.app.master_apply(
+            "macro push", op,
+            lambda r, e: self._pushed(r, e, backup))
+
+    def _pushed(self, result, error, backup) -> None:
+        if error:
+            # push() verifies by reading the object back, so a failure here means
+            # the live table may be neither the old one nor the new one.
+            self._status.update(f"NOT written: {error}")
+            return
+        self._dirty = False
+        self._status.update(f"written and verified by read-back; previous table "
+                            f"saved to {backup}")
+        self._redraw()
+
+    def action_save_disk(self) -> None:
+        """Make the K2000 write the live macro table to its own disk.
+
+        The only step here that touches a disk, so it is the only one that
+        arms twice and asks for a filename. Everything else is RAM and a power
+        cycle undoes it.
+
+        Deliberately saves under a name YOU type rather than over `BOOT.MAC`:
+        the safe order is save as something new, try it with Disk -> Load, and
+        promote it once it works.
+        """
+        if self._table is None:
+            return
+        if self._dirty:
+            self._status.update("push the changes to the K2000 first (p) — the "
+                                "instrument saves what is in ITS memory, not "
+                                "what is on this screen")
+            return
+        self._save_name.value = ""
+        self._show_input(self._save_name)
+        self._status.update("file name (up to 8 chars, no extension); "
+                            "Enter saves, Esc cancels")
+
+    def _do_save(self, stem: str) -> None:
+        self._status.update(f"saving as {stem}.MAC — the K2000 goes quiet while "
+                            f"it writes")
+
+        def op(bridge):
+            from k2kremote import macro_save
+            return macro_save.save_macro(bridge, stem)
+
+        # Through master_apply: a disk write is exactly the kind of destructive
+        # operation the heartbeat must not interrupt (RESOLUTION_NOTES §9), and
+        # the panel navigation must not race the mirror's own reads.
+        self.app.master_apply("macro save", op, self._saved)
+
+    def _saved(self, result, error) -> None:
+        if error:
+            self._status.update(f"NOT saved: {error}")
+            return
+        self._status.update(f"saved — {result}")
+
+    # -- editing ------------------------------------------------------------
+
+    def _entries(self):
+        return self._table.entries if self._table else []
+
+    def action_cursor(self, delta: int) -> None:
+        if self._entries():
+            self._index = max(0, min(len(self._entries()) - 1,
+                                     self._index + delta))
+            self._redraw()
+
+    def action_bank(self, delta: int) -> None:
+        entries = self._entries()
+        if not entries:
+            return
+        entry = entries[self._index]
+        banks = [0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 0xFFFF]
+        try:
+            i = banks.index(entry.bank)
+        except ValueError:
+            i = 0
+        entry.bank = banks[(i + delta) % len(banks)]
+        self._touch()
+
+    def action_mode(self) -> None:
+        entries = self._entries()
+        if not entries:
+            return
+        entry = entries[self._index]
+        entry.mode = (entry.mode + 1) % 5      # Append/Merge/Fill/Overwrite/OvFill
+        self._touch()
+
+    def action_shift(self, delta: int) -> None:
+        entries = self._entries()
+        target = self._index + delta
+        if not entries or not (0 <= target < len(entries)):
+            return
+        entries[self._index], entries[target] = entries[target], entries[self._index]
+        self._index = target
+        self._touch()
+
+    def action_add(self) -> None:
+        """Insert an entry after the cursor, inheriting its neighbour's settings.
+
+        Drive, bank and mode are copied from the entry you were on, because a new
+        load step almost always belongs with the one next to it. The path starts
+        as a placeholder and the editor opens straight away — an entry naming
+        NEW.KRZ is a "Not Found" at boot, so it should never be left that way by
+        accident.
+        """
+        if self._table is None:
+            return
+        from k2kmaced.macfile import MacroEntry
+
+        entries = self._table.entries
+        template = entries[self._index] if entries else None
+        entries.insert(self._index + 1 if entries else 0, MacroEntry(
+            drive=template.drive if template else 1,
+            bank=template.bank if template else 0,
+            mode=template.mode if template else 2,      # Fill
+            path="\\",
+            filename="NEW.KRZ",
+        ))
+        self._index = self._index + 1 if len(entries) > 1 else 0
+        self._touch()
+        self.action_edit_path()
+
+    def action_remove(self) -> None:
+        if self._table is None or not self._table.entries:
+            return
+        del self._table.entries[self._index]
+        self._index = max(0, min(self._index, len(self._table.entries) - 1))
+        self._touch()
+
+    def action_edit_path(self) -> None:
+        """Type a full `\\DIR\\FILE.KRZ` for the current entry.
+
+        Typed here on the host keyboard rather than dialled on the K2000: the
+        instrument's own name entry is a three-letter-group pad with no cursor
+        readback, and there is no reason to go near it when the path never has to
+        touch the device to be composed.
+        """
+        entries = self._table.entries if self._table else []
+        if not entries:
+            return
+        self._path.value = entries[self._index].full_path   # a property, not a call
+        self._show_input(self._path)
+        self._status.update("enter the full path; Enter accepts, Esc cancels")
+
+    def action_pick_file(self) -> None:
+        """Choose this entry's file from the instrument's own disk."""
+        entries = self._table.entries if self._table else []
+        if not entries:
+            return
+
+        def chosen(path):
+            if not path:
+                self._status.update("nothing picked")
+                return
+            entry = entries[self._index]
+            directory, _, filename = path.rpartition("\\")
+            entry.path = (directory or "") + "\\"
+            entry.filename = filename
+            self._touch()
+            self._status.update(f"pointed at {path}")
+
+        self.app.push_screen(DiskBrowserScreen(self.app), chosen)
+
+    def on_input_submitted(self, event) -> None:
+        if event.input is self._save_name:
+            stem = event.value.strip()
+            self._hide_input(self._save_name)
+            if stem:
+                self._do_save(stem)
+            else:
+                self._status.update("no name given; nothing was saved")
+            return
+        if event.input is not self._path:
+            return
+        entries = self._table.entries if self._table else []
+        try:
+            if not entries:
+                raise ValueError("there is no entry to repoint")
+            cleaned = event.value.strip().replace("/", "\\")
+            if not cleaned:
+                raise ValueError("the path is empty")
+            if not cleaned.startswith("\\"):
+                cleaned = "\\" + cleaned
+            directory, _, filename = cleaned.rpartition("\\")
+            if not filename:
+                raise ValueError("the path has no file name")
+            if len(filename.encode("latin-1", errors="replace")) > 15:
+                raise ValueError(f"{filename!r} is longer than the 15-character "
+                                 f"field")
+            entry = entries[self._index]
+            entry.path = (directory or "") + "\\"
+            entry.filename = filename
+        except ValueError as exc:
+            self._status.update(str(exc))
+            return
+        self._close_path()
+        self._touch()
+
+    def _close_path(self) -> None:
+        self._hide_input(self._path)
+
+    def _touch(self) -> None:
+        self._dirty = True
+        self._armed = False
+        self._refresh_hint()
+        self._redraw()
+
+    # -- view ---------------------------------------------------------------
+
+    def _redraw(self) -> None:
+        entries = self._entries()
+        if not entries:
+            self._list.update("  (no entries)")
+            return
+        lines = []
+        for i, entry in enumerate(entries):
+            mark = ">" if i == self._index else " "
+            lines.append(f"{mark}{i:>3}  {entry.display().rstrip()}")
+        self._list.update("\n".join(lines))
+        self._ensure_visible()
+
+    def _ensure_visible(self) -> None:
+        """Scroll only when the cursor has actually left the window.
+
+        Scrolling on every redraw makes the list jump under the eye even when
+        nothing moved; never scrolling leaves the cursor invisible on a long
+        macro. So: move the minimum, and only when needed."""
+        try:
+            height = self._scroll.scrollable_content_region.height
+            top = int(self._scroll.scroll_offset.y)
+        except Exception:                                   # noqa: BLE001
+            return                                          # not mounted yet
+        if height <= 0:
+            return
+        if self._index < top:
+            self._scroll.scroll_to(y=self._index, animate=False)
+        elif self._index >= top + height:
+            self._scroll.scroll_to(y=self._index - height + 1, animate=False)
+
+    def _refresh_hint(self) -> None:
+        state = "CHANGED" if self._dirty else "unchanged"
+        arm = "  [ARMED]" if self._armed else ""
+        self._hint.update(
+            f"{state}{arm}   a add · f pick · e path · del remove · b/B bank · m mode · "
+            f"ctrl+up/down move · r reload · p push · s save to disk · "
+            f"esc close")
+
+    def action_close(self) -> None:
+        # Esc closes the path editor first: losing a half-typed path is annoying,
+        # losing the whole screen with unpushed edits in it is worse.
+        if self._save_name.display:
+            self._hide_input(self._save_name)
+            self._status.update("save cancelled")
+            return
+        if self._path.display:
+            self._close_path()
+            self._status.update("path unchanged")
+            return
+        self.app.resume_mirror()
+        self.dismiss(None)
+
+
 class MasterFunctionScreen(ModalScreen):
     """Standalone Master object-utility tool — fires one SysEx, bypassing the LCD.
 
@@ -914,6 +1506,10 @@ class K2KRemoteApp(App):
         ("ctrl+v", "toggle_text", "View mode"),
         ("ctrl+u", "master_functions", "Master functions"),
         ("ctrl+g", "screenshot", "Save PNG (grab)"),
+        # Ctrl+k, not an F-key: every F-key is already the K2000's own panel —
+        # F7 Edit, F8 Exit, F9 name, F10 view, F11 master, F12 png — and F1-F6
+        # are the soft keys. Binding the macro table to F8 shadowed Exit.
+        ("ctrl+k", "macro_table", "Macro table"),
     ]
 
     def __init__(self, bridge=None, *, demo: bool = False, model: str = "K2000R",
@@ -1234,6 +1830,18 @@ class K2KRemoteApp(App):
             obj_type, idno, name, lambda n, e: self.call_from_thread(on_result, n, e))
 
     # -- standalone Master object-utility tool (delete/move/delete-bank SysEx) -
+    def action_macro_table(self) -> None:
+        """Open the live macro table — the online macro editor.
+
+        Distinct from `k2kmaced`, which edits `BOOT.MAC` offline with the
+        instrument switched off and its card in the computer. This edits what a
+        *running* machine holds in RAM, which is unreachable that way.
+        """
+        if self._worker is None:
+            self._set_status(" macro table needs a connected device")
+            return
+        self.push_screen(MacroScreen(self._worker))
+
     def action_master_functions(self) -> None:
         """Open the Master functions tool (delete / move / delete-bank via SysEx)."""
         self.push_screen(MasterFunctionScreen())
@@ -1248,11 +1856,31 @@ class K2KRemoteApp(App):
         if self._worker is None:
             on_result(None, "no device connected")
             return
-        self._pause_reason = "master op"
+        # The caller's own words, not a fixed label: the title bar reads
+        # "PAUSED · macro save" rather than "master op" for something that is
+        # not a Master utility at all.
+        self._pause_reason = summary or "device op"
         self._worker.set_paused(True)
         self.query_one("#titlebar", Static).update(self._titlebar_text())
         self._worker.device_op(
             thunk, lambda r, e: self.call_from_thread(on_result, r, e))
+
+    def resume_mirror(self) -> None:
+        """Lift an op-pause and repaint, once a screen that took the wire closes.
+
+        `master_apply` leaves the mirror paused on purpose for the destructive
+        Master utilities: the K2000 may still be chewing, and the user decides
+        when to look again. Browsing a directory or reading the macro table is
+        not that — it borrows the wire for a few seconds and gives it back — so
+        those screens call this on the way out rather than leaving a PAUSED
+        banner blinking over a machine that is perfectly idle.
+        """
+        if self._worker is None:
+            return
+        self._pause_reason = "manual"
+        self._worker.set_paused(False)
+        self._worker.force_refresh()
+        self.query_one("#titlebar", Static).update(self._titlebar_text())
 
     def action_refresh(self) -> None:
         """Force an immediate full screen refresh (works even while paused)."""

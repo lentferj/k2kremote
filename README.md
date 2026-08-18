@@ -243,10 +243,19 @@ Being exact, because the dangerous parts are not where people expect:
   disk — not because the editor touches them, but because the next thing you do
   does.
 
-> Nothing here goes over MIDI. Reading the **live** Macro Table over SysEx, and
-> sending a macro to a running instrument, are not implemented and their
-> groundwork is unverified against hardware — see [`TODO.md`](TODO.md). Today the
-> route onto the machine is the disk.
+> **Entries that point outside the image must be typed by hand — carefully.**
+> The file picker (`f`) lists what is *in the image you opened*, and `check`
+> validates against that same image. A macro entry can name any drive, though —
+> the floppy, a second SCSI disk, a disk you have no image of — and for those
+> there is nothing to browse and nothing to verify against. Such an entry is
+> accepted as typed, so a typo becomes a "Not Found" at boot rather than an error
+> here. Get the path from the instrument's own Disk pages if you can, and treat
+> anything off-image as unchecked.
+>
+> Nothing in `k2kmaced` goes over MIDI. Reading the **live** Macro Table and
+> pushing one back *are* implemented, and hardware-verified — but they live in
+> `k2kremote` (`Ctrl+k`), which is the program that has the instrument
+> connected. See [`TODO.md`](TODO.md).
 
 `k2kmacli` scripts the same operations from a shell — `list`, `check`,
 `edit --rebank/--move`, `install`. See `k2kmacli --help`.
