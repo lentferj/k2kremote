@@ -881,6 +881,7 @@ class MacroScreen(ModalScreen):
         # Also reachable WHILE the path field has focus, where a plain letter is
         # just text. priority=True so it beats the Input's own handling.
         Binding("ctrl+f", "pick_file", "Pick file", priority=True),
+        Binding("ctrl+t", "pick_target", "Pick target file", priority=True),
         ("delete", "remove", "Delete entry"),
         ("up", "cursor(-1)", "Up"),
         ("down", "cursor(1)", "Down"),
@@ -927,10 +928,15 @@ class MacroScreen(ModalScreen):
                            id="macropath")
         self._path.display = False      # shown only while editing a path
         self._path.can_focus = False
-        self._save_name = Input(placeholder="file name (no extension)",
-                                id="macrosave")
+        self._save_name = Input(
+            placeholder="file name, no extension  (or Ctrl+t to pick one to "
+                        "overwrite)", id="macrosave")
         self._save_name.display = False
         self._save_name.can_focus = False
+        #: Set when the save name was picked from the browser, i.e. names a file
+        #: that already exists. Saving then OVERWRITES it, so it is confirmed
+        #: separately rather than going through on the same Enter as a new name.
+        self._save_overwrites: Optional[str] = None
         self._list = Static("", id="macrolist")
         self._status = Static("", id="macrostatus")
         self._hint = Static("", id="macrohint")
@@ -1061,8 +1067,9 @@ class MacroScreen(ModalScreen):
             return
         self._save_name.value = ""
         self._show_input(self._save_name)
-        self._status.update("file name (up to 8 chars, no extension); "
-                            "Enter saves, Esc cancels")
+        self._save_overwrites = None
+        self._status.update("file name (up to 8 chars, no extension) — or Ctrl+t "
+                            "to pick a file to save OVER; Enter saves, Esc cancels")
 
     def _do_save(self, stem: str) -> None:
         self._status.update(f"saving as {stem}.MAC — the K2000 goes quiet while "
@@ -1204,14 +1211,49 @@ class MacroScreen(ModalScreen):
 
         self.app.push_screen(DiskBrowserScreen(self.app), chosen)
 
+    def action_pick_target(self) -> None:
+        """Pick an EXISTING file to save over, instead of typing a new name.
+
+        Only meaningful while the save prompt is open. Note that browsing also
+        moves the instrument's current directory, and the save follows it — so
+        the file you pick determines both the name and where it lands.
+        """
+        if not self._save_name.display:
+            self._status.update("Ctrl+t picks a file to save over — press s first")
+            return
+
+        def chosen(path):
+            if not path:
+                self._status.update("nothing picked")
+                return
+            filename = path.rpartition("\\")[2]
+            stem = filename.rpartition(".")[0] or filename
+            self._save_name.value = stem
+            self._save_overwrites = path
+            self._show_input(self._save_name)
+            self._status.update(f"WILL OVERWRITE {path} — Enter to confirm, "
+                                f"Esc to cancel")
+
+        self.app.push_screen(DiskBrowserScreen(self.app), chosen)
+
     def on_input_submitted(self, event) -> None:
         if event.input is self._save_name:
             stem = event.value.strip()
-            self._hide_input(self._save_name)
-            if stem:
-                self._do_save(stem)
-            else:
+            if not stem:
+                self._hide_input(self._save_name)
                 self._status.update("no name given; nothing was saved")
+                return
+            if self._save_overwrites:
+                # A name picked from the browser names a file that is already
+                # there. Overwriting it is a real choice and gets its own
+                # keystroke, rather than riding along on the one that accepted
+                # the name.
+                target, self._save_overwrites = self._save_overwrites, None
+                self._status.update(f"press Enter again to OVERWRITE {target}, "
+                                    f"or Esc to back out")
+                return
+            self._hide_input(self._save_name)
+            self._do_save(stem)
             return
         if event.input is not self._path:
             return
@@ -1293,6 +1335,7 @@ class MacroScreen(ModalScreen):
         # losing the whole screen with unpushed edits in it is worse.
         if self._save_name.display:
             self._hide_input(self._save_name)
+            self._save_overwrites = None
             self._status.update("save cancelled")
             return
         if self._path.display:
