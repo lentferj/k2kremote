@@ -35,6 +35,9 @@ k2kremote = "k2kremote.app:main"
 # and the mirror can essentially never run usefully at the same time.
 k2kmaced = "k2kmaced.app:main"
 k2kmacli = "k2kmaced.cli:main"
+# The inspector is passive by default and safe to leave running next to nothing
+# else — but it still opens the port, so it counts as "driving the instrument".
+k2kmon = "k2kremote.monitor:main"
 
 [tool.setuptools]
 # "k2000" is the vendored psobot/k2000 library (MIT); shipped so the app runs

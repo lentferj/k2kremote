@@ -461,6 +461,44 @@ python -m k2kremote.app                  # reuses the saved port/rig
 Selection precedence: an explicit `--port` / `--rig auto` overrides the config
 file, which overrides the first-bidirectional-port fallback.
 
+### `k2kmon` — the SysEx inspector
+
+A third program, for when the mirror misbehaves and you want to see the wire
+rather than reason about it. **`watch` sends nothing at all** — it opens the port
+and narrates what arrives, which matters here because the instrument's SysEx
+floor is ~120 ms and sustained traffic at 100 ms stalls it. A tool that chatters
+while you are diagnosing becomes part of what you are diagnosing.
+
+```bash
+k2kmon types                  # the message table — read this before guessing
+k2kmon watch                  # decode everything inbound, timestamped
+k2kmon watch --panel          # front-panel events only
+k2kmon learn                  # press buttons; it names each one
+k2kmon ask paramname          # what does the K2000 say is selected?
+k2kmon read Program 201       # dump an object (the fast path — see below)
+k2kmon compare Program 201    # read it BOTH ways and diff the encodings
+```
+
+Two of these repay knowing about before you need them:
+
+**`read` is roughly twenty times faster than the panel.** Reading a program's
+filter page by driving the editor costs about ten seconds and gives you one page
+of one layer; `Read` returns the entire object, every layer, in about half a
+second. A hundred programs is fifty seconds against a quarter of an hour.
+
+**`compare` is a decoder self-check.** `form` selects only how the data is packed
+for transmission — 4 bits per MIDI byte or 7 — so both forms carry the same object
+and **must** decode identically. It is a command because ours did *not* for a
+while: a left-aligned bit stream was being front-padded like a right-justified
+numeric field, so every byte came out shifted by two bits, and the difference was
+briefly mistaken for a property of the protocol. `k2kmon read` names the encoding
+in its header so any recurrence stays visible after the fact.
+
+`learn` is the one that pays for the tool. With `XMIT Bttns` on, the panel
+reports what a human actually pressed — a better authority than counting your own
+keypresses, which is how this project ended up with a soft-key cycle one short
+and a cursor two fields away from where it thought it was.
+
 ---
 
 ## Command-line options
@@ -610,6 +648,7 @@ alternate:
 | `k2kmaced/cli.py` | `k2kmacli` — list / check / edit / build macros, from a file or from inside an image. |
 | `k2kmaced/app.py` | `k2kmaced` — the standalone macro editor (TUI only): reorder entries, cycle drive / bank / load mode, browse the image for an entry's file, flag files the image no longer has, and install the result back into the image behind a write gate. |
 | `k2kmaced/mpc2emu_link.py` | Optional bridge to a sibling mpc2emu checkout, used to look inside the `.KRZ` banks a macro references. |
+| `k2kremote/monitor.py` | `k2kmon` — the SysEx inspector: decode the wire passively, name panel presses, send one request at a time, dump objects. |
 
 See [DESIGN.md](DESIGN.md) for the architecture and [TODO.md](TODO.md) for open
 items.
