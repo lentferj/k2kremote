@@ -66,6 +66,9 @@ real K2000R. Full account in [DISCLAIMER.md](DISCLAIMER.md).
 - **Event-driven refresh** (never polls), throttled output, and automatic
   pausing around heavy disk operations to protect the K2000's CPU.
 - **PNG screenshots** of the LCD (`F12`) and a **MIDI panic** (`Alt+x`).
+- **Edits the macro table on the *running* instrument** — [`Ctrl+k`](#the-online-macro-editor-ctrlk)
+  reads the K2000's live load list over SysEx, reorders and repoints it, pushes it
+  back with a read-back check, and can make the instrument save it to its own disk.
 - **Edits your startup macro offline** — [`k2kmaced`](#k2kmaced--the-macro-editor)
   reads `BOOT.MAC` straight out of a K2000 disk image, lets you reorder the load
   steps and repoint them by browsing the disk, and can write the result back into
@@ -136,6 +139,44 @@ Characters beyond the K2000's 16-character display field are shown in **orange**
 > open in its editor (the editor's own buffer wins there). For a Program, the tool
 > re-selects the id afterwards so the panel and the mirror repaint with the new
 > name.
+
+---
+
+## The online macro editor (`Ctrl+k`)
+
+The macro list the K2000 replays at power-on lives in battery-backed RAM. `Ctrl+k`
+reads it off the **running** instrument, edits it, and writes it back — with the
+machine switched on and its disk still in it.
+
+```
+a  add entry      f  pick file from the K2000's disk     b/B  bank
+e  edit path      del  remove entry                      m    mode
+ctrl+↑/↓ move     r  reload from the instrument
+p  push to the K2000        s  save to the K2000's disk
+```
+
+`p` arms on the first press and writes on the second, then **verifies by reading
+the object back** — a `DACK` says the message was accepted, not that the bytes are
+right. The previous table is saved to `~/.k2kremote-macro-backup.bin` first.
+Nothing here touches a disk until you press `s`.
+
+> **`f` is slow — about 0.6 s per directory entry.** A 25-entry directory takes
+> ~16 seconds, and that is after the obvious savings: it reads the instrument's
+> six-line window in one go and steps with a single alpha-wheel message instead of
+> four keypresses. The floor is the ~120 ms SysEx gap this instrument needs, paid
+> on every message, and there is no bulk "list a directory" command in the
+> protocol — the only way to read a listing is to walk it on the panel.
+>
+> So pick the tool by what you are doing:
+>
+> | | best when |
+> |---|---|
+> | [`k2kmaced`](#k2kmaced--the-macro-editor) (offline) | you are **browsing a lot** — an image is read instantly and completely, and you can see the whole disk at once |
+> | `Ctrl+k` (online) | you already **know the paths and can type them** (`a` then `e`), or you need the table that is in the machine *now* |
+>
+> Typing a path costs nothing over MIDI, so the online editor is the faster of the
+> two whenever browsing is not what you need. Use `f` for the occasional lookup,
+> not to explore.
 
 ---
 
@@ -657,6 +698,8 @@ alternate:
 | `k2kmaced/cli.py` | `k2kmacli` — list / check / edit / build macros, from a file or from inside an image. |
 | `k2kmaced/app.py` | `k2kmaced` — the standalone macro editor (TUI only): reorder entries, cycle drive / bank / load mode, browse the image for an entry's file, flag files the image no longer has, and install the result back into the image behind a write gate. |
 | `k2kmaced/mpc2emu_link.py` | Optional bridge to a sibling mpc2emu checkout, used to look inside the `.KRZ` banks a macro references. |
+| `k2kremote/disk_browse.py` | Reads the K2000's own disk directory by driving its Load browser — never presses OK, so it can only look. |
+| `k2kremote/macro_save.py` | Makes the instrument save its macro table to disk, checking the drive and the typed filename first. |
 | `k2kremote/monitor.py` | `k2kmon` — the SysEx inspector: decode the wire passively, name panel presses, send one request at a time, dump objects. |
 
 See [DESIGN.md](DESIGN.md) for the architecture and [TODO.md](TODO.md) for open
