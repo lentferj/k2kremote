@@ -94,3 +94,39 @@ def test_soft_index_is_used_rather_than_a_fixed_position():
     page3 = "<more  Rename  Move   Util  NewDir more>"
     assert macro_save._soft_index(page1, "Macro") != macro_save._soft_index(page3, "Util") or True
     assert macro_save._soft_index(page3, "Macro") is None
+
+
+class ReplayBridge(FakeBridge):
+    """Serves a sequence of screens, one per screen read."""
+
+    def __init__(self, screens, drive="SCSI 0"):
+        super().__init__(screens[0], drive)
+        self._queue = list(screens)
+
+    def get_screen_text(self):
+        rows = self._queue[0]
+        if len(self._queue) > 1:
+            self._queue.pop(0)
+        return "\n".join(rows)
+
+
+REPLACE = ["", "", "", "Replace existing file BOOT.MAC?", "", "", "",
+           "                             Yes    No "]
+
+
+def test_yes_and_no_are_distinguished_on_the_replace_prompt():
+    """The K2000 guards overwrites itself with `Replace existing file X.MAC?`.
+
+    Picking the wrong soft key there replaces a file nobody asked to replace, and
+    the two labels sit next to each other -- so the zone maths is worth pinning
+    down rather than trusting."""
+    from k2kremote import macro_save as ms
+
+    assert ms._soft_index(REPLACE[7], "No") == 5
+    assert ms._soft_index(REPLACE[7], "Yes") == 4
+    assert ms._soft_index(REPLACE[7], "Maybe") is None
+
+
+def test_the_replace_prompt_row_is_recognised_by_its_text():
+    """Matched on "eplace existing" so the leading capital cannot matter."""
+    assert "eplace existing" in " ".join(REPLACE)

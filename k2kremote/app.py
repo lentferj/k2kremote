@@ -914,6 +914,10 @@ class MacroScreen(ModalScreen):
         ("down", "cursor(1)", "Down"),
         ("p", "push", "Push to K2000"),
         ("s", "save_disk", "Save to disk"),
+        # Deliberately NOT Enter: Enter accepted the filename, and confirming an
+        # overwrite with the same key one keystroke later is how a double-tap
+        # destroys a file. A different finger, a different decision.
+        ("w", "confirm_overwrite", "Confirm overwrite"),
     ]
 
     CSS = """
@@ -964,6 +968,8 @@ class MacroScreen(ModalScreen):
         #: that already exists. Saving then OVERWRITES it, so it is confirmed
         #: separately rather than going through on the same Enter as a new name.
         self._save_overwrites: Optional[str] = None
+        #: Name accepted and waiting on the separate overwrite keystroke.
+        self._pending_save: Optional[str] = None
         self._list = Static("", id="macrolist")
         self._status = Static("", id="macrostatus")
         self._hint = Static("", id="macrohint")
@@ -1095,16 +1101,25 @@ class MacroScreen(ModalScreen):
         self._save_name.value = ""
         self._show_input(self._save_name)
         self._save_overwrites = None
+        self._pending_save = None
         self._status.update("file name (up to 8 chars, no extension) — or Ctrl+t "
                             "to pick a file to save OVER; Enter saves, Esc cancels")
 
-    def _do_save(self, stem: str) -> None:
+    def action_confirm_overwrite(self) -> None:
+        """Go ahead with a save that will replace an existing file."""
+        if not self._pending_save:
+            return
+        stem, self._pending_save = self._pending_save, None
+        self._save_overwrites = None
+        self._do_save(stem, overwrite=True)
+
+    def _do_save(self, stem: str, *, overwrite: bool = False) -> None:
         self._status.update(f"saving as {stem}.MAC — the K2000 goes quiet while "
                             f"it writes")
 
-        def op(bridge):
+        def op(bridge, overwrite=overwrite):
             from k2kremote import macro_save
-            return macro_save.save_macro(bridge, stem)
+            return macro_save.save_macro(bridge, stem, overwrite=overwrite)
 
         # Through master_apply: a disk write is exactly the kind of destructive
         # operation the heartbeat must not interrupt (RESOLUTION_NOTES §9), and
@@ -1272,12 +1287,14 @@ class MacroScreen(ModalScreen):
                 return
             if self._save_overwrites:
                 # A name picked from the browser names a file that is already
-                # there. Overwriting it is a real choice and gets its own
-                # keystroke, rather than riding along on the one that accepted
-                # the name.
-                target, self._save_overwrites = self._save_overwrites, None
-                self._status.update(f"press Enter again to OVERWRITE {target}, "
-                                    f"or Esc to back out")
+                # there. Confirming that is a separate decision and takes a
+                # DIFFERENT key — Enter has just been pressed to accept the
+                # name, and a second Enter is one twitch away.
+                self._hide_input(self._save_name)
+                self._pending_save = stem
+                self._status.update(
+                    f"{self._save_overwrites} EXISTS — press w to overwrite it, "
+                    f"Esc to cancel")
                 return
             self._hide_input(self._save_name)
             self._do_save(stem)
@@ -1355,7 +1372,8 @@ class MacroScreen(ModalScreen):
         self._hint.update(
             f"{state}{arm}   a add · f pick · e path · del remove · b/B bank · m mode · "
             f"ctrl+up/down move · r reload · p push · s save to disk · "
-            f"esc close")
+            f"esc close" + ("   [w = CONFIRM OVERWRITE]" if self._pending_save
+                            else ""))
 
     def action_close(self) -> None:
         # Esc closes the path editor first: losing a half-typed path is annoying,
@@ -1363,11 +1381,17 @@ class MacroScreen(ModalScreen):
         if self._save_name.display:
             self._hide_input(self._save_name)
             self._save_overwrites = None
+            self._pending_save = None
             self._status.update("save cancelled")
             return
         if self._path.display:
             self._close_path()
             self._status.update("path unchanged")
+            return
+        if self._pending_save:
+            self._pending_save = None
+            self._save_overwrites = None
+            self._status.update("overwrite cancelled; nothing was saved")
             return
         self.app.resume_mirror()
         self.dismiss(None)

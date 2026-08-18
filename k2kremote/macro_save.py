@@ -133,13 +133,20 @@ def current_disk(bridge) -> Optional[str]:
 
 
 def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
-               name_width: int = 12) -> str:
+               name_width: int = 12, overwrite: bool = False) -> str:
     """Save the live macro table to `filename` on the current disk.
 
     Returns the final screen's first row. Raises :class:`SaveRefused` before
     anything is written when the state is not what the caller expects.
 
     `filename` is the 8.3 stem without the extension — the K2000 appends `.MAC`.
+
+    **The K2000 guards overwrites itself.** If the name is taken it asks
+    `Replace existing file X.MAC?` — a genuine safety net nobody here had to
+    build. This answers **No** unless `overwrite=True`, and raises rather than
+    replacing a file the caller did not say it meant to replace. Answering it at
+    all matters: the prompt blocks the save, so leaving it unanswered hangs until
+    the timeout with the question still on screen.
     """
     stem = filename.strip().upper()
     if not stem or "." in stem or len(stem) > 8:
@@ -210,15 +217,32 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
         )
     _press_labelled(bridge, "OK", settle=2.5)
 
-    # 5. The device goes silent while it writes; that is normal.
+    # 5. The instrument's own overwrite guard, then the write. It goes silent
+    #    while writing, which is normal.
     deadline = time.monotonic() + WRITE_TIMEOUT
     while time.monotonic() < deadline:
         try:
-            first = bridge.get_screen_text().split("\n")[0]
+            rows = bridge.get_screen_text().split("\n")
         except Exception:                                   # noqa: BLE001
             time.sleep(1.5)
             continue
-        if "DiskMode" in first:
-            return first.rstrip()
+        text = " ".join(rows)
+        if "eplace existing" in text:
+            answer = "Yes" if overwrite else "No"
+            i = _soft_index(rows[7], answer)
+            if i is None:
+                raise SaveUnverified(
+                    f"the K2000 asks {rows[3].strip()!r} but offers no {answer!r}"
+                )
+            bridge.press_button(_SOFT[i])
+            time.sleep(2.0)
+            if not overwrite:
+                raise SaveRefused(
+                    f"{stem}.MAC already exists and overwrite was not requested — "
+                    f"answered No, nothing was written"
+                )
+            continue
+        if "DiskMode" in rows[0]:
+            return rows[0].rstrip()
         time.sleep(1.0)
     raise SaveUnverified("the K2000 did not return to Disk mode after the write")
