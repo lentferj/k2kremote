@@ -66,9 +66,10 @@ real K2000R. Full account in [DISCLAIMER.md](DISCLAIMER.md).
 - **Event-driven refresh** (never polls), throttled output, and automatic
   pausing around heavy disk operations to protect the K2000's CPU.
 - **PNG screenshots** of the LCD (`F12`) and a **MIDI panic** (`Alt+x`).
-- **Edits the macro table on the *running* instrument** — [`Ctrl+k`](#the-online-macro-editor-ctrlk)
-  reads the K2000's live load list over SysEx, reorders and repoints it, pushes it
-  back with a read-back check, and can make the instrument save it to its own disk.
+- **Edits the macro table on the *running* instrument** (⚠️ **experimental, slow**)
+  — [`Ctrl+k`](#the-online-macro-editor-ctrlk--experimental-and-slow) reads the
+  K2000's live load list over SysEx, reorders and repoints it, pushes it back with
+  a read-back check, and can make the instrument save it to its own disk.
 - **Edits your startup macro offline** — [`k2kmaced`](#k2kmaced--the-macro-editor)
   reads `BOOT.MAC` straight out of a K2000 disk image, lets you reorder the load
   steps and repoint them by browsing the disk, and can write the result back into
@@ -142,7 +143,20 @@ Characters beyond the K2000's 16-character display field are shown in **orange**
 
 ---
 
-## The online macro editor (`Ctrl+k`)
+## The online macro editor (`Ctrl+k`) — experimental and slow
+
+> **Experimental.** Newer than the rest of this project and much less exercised.
+> It drives the K2000's own panel for anything the SysEx protocol cannot express
+> — browsing a directory, saving a file — and panel automation is inherently
+> fragile: a dialog left open somewhere else, a cursor that did not start where
+> it was expected, a soft key that means something different on another label
+> page. Several such faults were found and fixed in its first sitting, and there
+> is no reason to think that is all of them. **Keep a current image backup**, and
+> prefer [`k2kmaced`](#k2kmaced--the-macro-editor) when the instrument can simply
+> be switched off.
+>
+> **Slow.** Browsing costs about 0.6 s per directory entry (see below). Editing
+> and pushing are fast; looking around is not.
 
 The macro list the K2000 replays at power-on lives in battery-backed RAM. `Ctrl+k`
 reads it off the **running** instrument, edits it, and writes it back — with the
@@ -295,8 +309,9 @@ Being exact, because the dangerous parts are not where people expect:
 >
 > Nothing in `k2kmaced` goes over MIDI. Reading the **live** Macro Table and
 > pushing one back *are* implemented, and hardware-verified — but they live in
-> `k2kremote` (`Ctrl+k`), which is the program that has the instrument
-> connected. See [`TODO.md`](TODO.md).
+> `k2kremote` (`Ctrl+k`), which is the program that has the instrument connected,
+> and they are **experimental**. This program is the settled one: it works on a
+> file you can back up, with the machine switched off. See [`TODO.md`](TODO.md).
 
 `k2kmacli` scripts the same operations from a shell — `list`, `check`,
 `edit --rebank/--move`, `install`. See `k2kmacli --help`.
