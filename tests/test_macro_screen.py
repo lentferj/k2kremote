@@ -173,3 +173,25 @@ async def test_a_read_failure_reports_and_does_not_strand_the_mirror():
         await pilot.pause(); await pilot.pause()
         assert screen._table is None
         assert app.resumed >= 1, "a failed read must still resume the mirror"
+
+
+async def test_browser_list_follows_the_cursor_off_screen():
+    """The macro list scrolled to keep the cursor visible; the browser did not,
+    so walking past the bottom of a long directory lost the ">" entirely."""
+    from k2kremote.disk_browse import Item
+
+    app = Harness(op_result=("\\", [Item(f"DIR{i:02d}", True, "")
+                                    for i in range(40)]))
+    async with app.run_test() as pilot:
+        app.push_screen(DiskBrowserScreen(app))
+        await pilot.pause(); await pilot.pause()
+        screen = app.screen
+        assert len(screen._items) == 40
+        for _ in range(30):
+            await pilot.press("down")
+        await pilot.pause()
+        assert screen._index == 30
+        height = screen._scroll.scrollable_content_region.height
+        top = int(screen._scroll.scroll_offset.y)
+        assert top <= screen._index < top + height, (
+            f"cursor {screen._index} outside the visible window {top}..{top+height}")

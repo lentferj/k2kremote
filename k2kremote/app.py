@@ -847,8 +847,29 @@ class DiskBrowserScreen(ModalScreen):
                 kind = "/" if item.is_dir else " "
                 lines.append(f"{mark} {item.name}{kind}   {item.size}")
             self._list.update("\n".join(lines))
+        self._ensure_visible()
         self._hint.update("enter open/pick · backspace parent · r root · "
                           "esc cancel   (never loads anything)")
+
+    def _ensure_visible(self) -> None:
+        """Keep the cursor on screen — a directory is easily taller than the box.
+
+        Same rule as the macro list: move only when the cursor has actually left
+        the window, and then by the minimum. Scrolling on every redraw makes the
+        list jump under the eye; never scrolling loses the cursor entirely, which
+        is what happened here.
+        """
+        try:
+            height = self._scroll.scrollable_content_region.height
+            top = int(self._scroll.scroll_offset.y)
+        except Exception:                                   # noqa: BLE001
+            return                                          # not mounted yet
+        if height <= 0:
+            return
+        if self._index < top:
+            self._scroll.scroll_to(y=self._index, animate=False)
+        elif self._index >= top + height:
+            self._scroll.scroll_to(y=self._index - height + 1, animate=False)
 
 
 class MacroScreen(ModalScreen):
