@@ -160,22 +160,29 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
     all matters: the prompt blocks the save, so leaving it unanswered hangs until
     the timeout with the question still on screen.
     """
-    # A save name is a FILENAME STEM, not a path. Strip the separators a person
-    # naturally types -- "\BOOT" is an obvious way to mean BOOT -- and refuse
-    # anything still carrying one. Left in, the backslash is not typeable on the
-    # K2000's pad, so it was silently mapped to the nearest character that is and
-    # "\BOOT" arrived as "BBOOT".
-    stem = filename.strip().strip("\\/").upper()
+    # A save name is a FILENAME STEM, and the macro lands in whatever directory
+    # the instrument is currently in. So a typed path is REFUSED rather than
+    # trimmed: "\BOOT" plainly means "BOOT.MAC in the root", and quietly
+    # dropping the backslash would save it whereever the current directory
+    # happened to be -- which browsing moves. Silently writing a file somewhere
+    # other than where the name said is worse than not writing it.
+    stem = filename.strip().upper()
+    if stem.startswith("\\") or stem.startswith("/") or "\\" in stem or "/" in stem:
+        raise SaveRefused(
+            f"{filename!r} names a directory. This saves into the directory the "
+            f"K2000 is already in, so give a bare name like {stem.strip(chr(92) + '/').split(chr(92))[-1] or 'BOOT'!r} "
+            f"— and browse to the directory you want first, since that is what "
+            f"sets it."
+        )
     if not stem or len(stem) > 8:
         raise SaveRefused(
             f"{filename!r} is not a FAT 8.3 stem: give 1 to 8 characters and no "
             f"extension (the K2000 adds .MAC itself)"
         )
-    if "." in stem or "\\" in stem or "/" in stem:
+    if "." in stem:
         raise SaveRefused(
-            f"{filename!r} is not a plain file name: no directories and no "
-            f"extension — the macro is saved into the current directory as "
-            f"{stem.split('.')[0].split(chr(92))[-1]}.MAC"
+            f"{filename!r} carries an extension; the K2000 adds .MAC itself — "
+            f"give {stem.split('.')[0]!r}"
         )
     if not text_entry.is_supported(stem):
         raise SaveRefused(f"{stem!r} contains characters the K2000 cannot type")
@@ -191,6 +198,11 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
     drive = current_disk(bridge)
     if drive is None:
         raise SaveRefused("could not read CurrentDisk from the device")
+    where = ""
+    for row in _rows(bridge):
+        if row.strip().startswith("Path ="):
+            where = row.split("=", 1)[1].strip()
+            break
     if drive != expect_drive:
         raise SaveRefused(
             f"CurrentDisk is {drive!r}, not {expect_drive!r} — refusing to save. "
@@ -266,6 +278,8 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
                 raise SaveNeedsOverwrite(stem)
             continue
         if "DiskMode" in rows[0]:
-            return rows[0].rstrip()
+            # Say where it went. The directory is whatever the instrument was
+            # already in, which is not visible from the name alone.
+            return f"{stem}.MAC in {where or 'the current directory'}"
         time.sleep(1.0)
     raise SaveUnverified("the K2000 did not return to Disk mode after the write")

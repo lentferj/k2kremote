@@ -244,6 +244,28 @@ Implementation notes for whoever builds it:
   first — worth saying in whatever UI offers this, so a backup does not look
   unusable at the moment someone needs it.
 
+## Online save: honour a typed path, or show the target directory
+
+**Status:** open, raised 2026-08-18. `k2kremote`'s macro save takes a bare 8.3
+stem and writes into **whatever directory the instrument is currently in**. A
+typed path is refused rather than trimmed — `\BOOT` plainly means "BOOT.MAC in
+the root", and silently dropping the backslash would save it wherever the current
+directory happened to be, which browsing moves.
+
+Refusing is honest but unhelpful. Two ways to do better, in order of effort:
+
+1. **Show the destination.** The Disk page carries `Path = \…`, so the save
+   prompt could read it and say "will write `BOOT.MAC` into `\-EPIANOS\`" before
+   anything is typed. Cheap, and removes the surprise without new panel driving.
+2. **Honour the path.** `\BOOT` would navigate to the root first. The pieces
+   exist — `disk_browse.root()` / `enter()` set the current directory as a side
+   effect, and the save's own directory prompt has a `Change` soft key that has
+   not been mapped. Needs the same closed-loop verification as everything else
+   here: assert the directory *before* committing, never infer it.
+
+Until then the save reports where the file landed rather than only its name, so
+a surprise is at least visible afterwards.
+
 ## Name entry — cursor homing added; alpha dialling is NOT the general answer
 
 **Status:** the immediate bug is **fixed and verified on hardware** (2026-08-18).

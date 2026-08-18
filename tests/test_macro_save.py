@@ -131,19 +131,31 @@ def test_the_replace_prompt_row_is_recognised_by_its_text():
     assert "eplace existing" in " ".join(REPLACE)
 
 
-def test_a_leading_separator_is_stripped_rather_than_typed():
-    """`\\BOOT` is an obvious way to mean BOOT, and the backslash is not on the
-    K2000's pad — left in, it was mapped to the nearest typeable character and
-    the field came out as "BBOOT"."""
-    bridge = FakeBridge(DISK, drive="Floppy")      # fails at the drive check
-    with pytest.raises(SaveRefused) as exc:
-        macro_save.save_macro(bridge, "\\BOOT")
-    # got past the name check to the drive check, so the name was accepted
-    assert "CurrentDisk" in str(exc.value)
+def test_a_typed_path_is_refused_rather_than_trimmed():
+    """`\\BOOT` plainly means "BOOT.MAC in the root".
+
+    But the macro lands in whatever directory the instrument is already in, and
+    browsing moves that — so dropping the backslash would save the file somewhere
+    other than where the name said. Refusing is the honest answer; the earlier
+    behaviour typed the backslash onto a pad that has no backslash, and the field
+    came out as "BBOOT"."""
+    bridge = FakeBridge(DISK)
+    for path in ("\\BOOT", "/BOOT", "DIR\\BOOT", "\\DIR\\BOOT"):
+        with pytest.raises(SaveRefused) as exc:
+            macro_save.save_macro(bridge, path)
+        assert "names a directory" in str(exc.value)
+    assert bridge.presses == [], "nothing may be pressed for a refused name"
 
 
-def test_a_name_with_an_inner_separator_is_refused():
+def test_the_refusal_suggests_the_bare_name():
     bridge = FakeBridge(DISK)
     with pytest.raises(SaveRefused) as exc:
-        macro_save.save_macro(bridge, "DIR\\BOOT")
-    assert "no directories" in str(exc.value)
+        macro_save.save_macro(bridge, "\\BOOT")
+    assert "'BOOT'" in str(exc.value)
+
+
+def test_an_extension_is_refused_with_the_stem_to_use():
+    bridge = FakeBridge(DISK)
+    with pytest.raises(SaveRefused) as exc:
+        macro_save.save_macro(bridge, "BOOT.MAC")
+    assert "adds .MAC itself" in str(exc.value) and "'BOOT'" in str(exc.value)
