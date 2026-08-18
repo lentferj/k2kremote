@@ -181,6 +181,57 @@ def _cmd_list(args) -> int:
     return 0
 
 
+def _open_bridge(args):
+    """Connect to the instrument. Imported lazily so the offline CLI never needs
+    python-rtmidi installed just to list a file."""
+    from k2kremote.midi_bridge import MidiBridge
+
+    if getattr(args, "port", None):
+        return MidiBridge.open(args.port)
+    if getattr(args, "rig", "auto") == "auto":
+        return MidiBridge.autodetect()
+    return MidiBridge.open_first()
+
+
+def _cmd_live(args) -> int:
+    """Show the macro table the running instrument holds in RAM. READ-ONLY."""
+    from k2kmaced import online
+
+    bridge = _open_bridge(args)
+    try:
+        table = online.read_live(bridge)
+        print(f"live macro table on {bridge.description}: "
+              f"{len(table)} entr{'y' if len(table) == 1 else 'ies'}")
+        for line in format_table(table):
+            print(line)
+    finally:
+        bridge.close()
+    return 0
+
+
+def _cmd_diff(args) -> int:
+    """Compare the live macro table against a .MAC file. READ-ONLY, both sides."""
+    from k2kmaced import online
+
+    pram, where = load_macro(args.source)
+    on_disk = pram.macro_table()
+
+    bridge = _open_bridge(args)
+    try:
+        live = online.read_live(bridge)
+    finally:
+        bridge.close()
+
+    rows = online.diff(list(live), list(on_disk))
+    print(f"   {'#':>2}  {'live (in RAM)':<34} {where}")
+    for row in rows:
+        print(row.format())
+    print()
+    print(online.summarise(rows))
+    # Non-zero on a difference, so this is usable as a check in a script.
+    return 0 if all(r.same for r in rows) else 1
+
+
 def _cmd_find(args) -> int:
     with DiskImage.open(args.image) as image:
         macros = image.find(".MAC")
@@ -259,6 +310,62 @@ def _cmd_install(args) -> int:
 
     replace_file_in_image(args.image, args.member, macro)
     print(f"wrote {len(macro)} bytes into {plan['path']} and verified it reads back")
+    return 0
+
+
+def _cmd_push(args) -> int:
+    """Replace the RUNNING K2000's macro table over MIDI. WRITES to the device.
+
+    Nothing on disk changes: the instrument saves its own `BOOT.MAC` afterwards,
+    from Disk -> Macro -> Save. So the failure mode is "the machine's boot macro
+    is now something else", which is recoverable, not "the card is corrupt".
+    """
+    import os
+    from k2kmaced import online
+
+    pram, where = load_macro(args.source)
+    wanted = pram.macro_table()
+
+    bridge = _open_bridge(args)
+    try:
+        live = online.read_live(bridge)
+        rows = online.diff(list(live), list(wanted))
+        print(f"   {'#':>2}  {'live now (in RAM)':<34} {where}")
+        for row in rows:
+            print(row.format())
+        print()
+        if all(r.same for r in rows):
+            print("already identical — nothing to write")
+            return 0
+        print(online.summarise(rows))
+        print("\nThis replaces the macro table in the K2000's battery-backed RAM.")
+        print("It does NOT touch the disk. To keep it, save it on the instrument")
+        print("from Disk -> Save -> Macro -- and you can save it under a NEW name")
+        print("rather than over BOOT.MAC, then try it with Disk -> Load before")
+        print("making it the startup macro. Nothing has to overwrite BOOT.MAC.")
+
+        if not args.yes:
+            # Typed, not y/n: the same reasoning as `install`. A reflex keypress
+            # should not be able to change what the instrument boots into.
+            try:
+                answer = input('type "write" to continue (anything else aborts): ')
+            except EOFError:
+                answer = ""
+            if answer.strip() != "write":
+                print("aborted; nothing was sent")
+                return 1
+
+        backup = args.backup or os.path.join(
+            os.path.expanduser("~"), ".k2kremote-macro-backup.bin")
+        after = online.push(bridge, wanted, backup_path=backup)
+        print(f"wrote {len(wanted)} entries; previous table saved to {backup}")
+        print("read back and verified byte-identical to what was sent:")
+        for line in format_table(after):
+            print(line)
+        print("\nThe DISK is unchanged. To keep this, save it on the instrument;"
+              "\nsaving under a new name lets you test it with Disk -> Load first.")
+    finally:
+        bridge.close()
     return 0
 
 
@@ -370,6 +477,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
     p.set_defaults(func=_cmd_list)
 
+    p = sub.add_parser("live", help="show the RUNNING K2000's macro table (read-only)")
+    p.add_argument("--port", help="exact MIDI port name")
+    p.add_argument("--rig", choices=("standard", "auto"), default="auto")
+    p.set_defaults(func=_cmd_live)
+
+    p = sub.add_parser(
+        "diff", help="compare the live macro table against a .MAC (read-only)")
+    p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
+    p.add_argument("--port", help="exact MIDI port name")
+    p.add_argument("--rig", choices=("standard", "auto"), default="auto")
+    p.set_defaults(func=_cmd_diff)
+
     p = sub.add_parser("find", help="list the .MAC files in a disk image")
     p.add_argument("image")
     p.set_defaults(func=_cmd_find)
@@ -390,6 +509,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="skip the typed confirmation (for scripts; you own the "
                         "backup either way)")
     p.set_defaults(func=_cmd_install)
+
+    p = sub.add_parser(
+        "push", help="WRITES: replace the running K2000's macro table over MIDI")
+    p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
+    p.add_argument("--port", help="exact MIDI port name")
+    p.add_argument("--rig", choices=("standard", "auto"), default="auto")
+    p.add_argument("--backup", help="where to save the current table first")
+    p.add_argument("--yes", action="store_true",
+                   help="skip the typed confirmation")
+    p.set_defaults(func=_cmd_push)
 
     p = sub.add_parser("check", help="verify a macro's files exist on an image")
     p.add_argument("source")

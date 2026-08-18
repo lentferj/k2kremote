@@ -737,17 +737,43 @@ class MidiBridge:
         """Dump the live Macro Table's object data — DUMP (0x00), a pure read.
 
         The macro list the K2000 is recording into lives in battery-backed RAM as
-        object type 100, id 35 (``Table  35  Macro`` in the Save-Object list). The
-        bytes come back in the K2000's **RAM** layout, which for programs and
-        keymaps is known to differ from the ``.KRZ``/``.MAC`` disk layout
-        (mpc2emu, ``docs/k2000r_midi_comms.md`` §4). Whether the Macro Table's two
-        layouts coincide is **unverified** — feed the result to
-        :func:`k2kmaced.macfile.MacroTable.parse` and expect it to raise if they
-        do not. See ``docs/RESOLUTION_NOTES.md`` §MACLIVE for the probe.
+        object type 100, id 35 (``Table  35  Macro`` in the Save-Object list).
 
-        Raises if Macro mode is Off, because then no Macro Table object exists.
+        **The RAM layout and the disk layout are identical** — verified on
+        hardware 2026-08-17: the 814-byte RAM object is byte-for-byte the ``.MAC``
+        file's object block at offset 48, and
+        :func:`k2kmaced.macfile.MacroTable.parse` round-trips it unchanged. So the
+        offline parser reads this directly. (Programs and keymaps *do* differ
+        between the two layouts — mpc2emu, ``docs/k2000r_midi_comms.md`` §4 — which
+        is why this was worth checking rather than assuming either way.)
+
+        **Type 100 is the Table type and holds unrelated objects**, so the id
+        matters more than usual: id 16 is ``Master`` (524 bytes) and other ids
+        return further tables. All of them come back looking like a plausible
+        object, so a wrong id yields data rather than an error.
+
+        Works regardless of the Macro page's ``Func:MACRO`` setting: this was read
+        successfully with it showing ``[ Off ]``, so Off disables *recording*, not
+        the object's existence. Use :func:`k2kmaced.online.read_live` for the
+        parsed table with the error messages that distinguish these cases.
         """
         return self.client.dump(ObjectType.MacroTable, MACRO_TABLE_ID).data
+
+    def write_macro_table(self, data: bytes, name: str = "Macro"):
+        """Replace the live Macro Table object — WRITE (0x09). **This writes.**
+
+        `WRITE` deletes whatever object sits at the same type/id and puts this one
+        there, so it replaces the macro list wholesale. It does *not* touch the
+        disk: the K2000 saves `BOOT.MAC` itself, from Disk → `Macro`, when you ask
+        it to.
+
+        The caller is expected to read the object back and compare — see
+        :func:`k2kmaced.online.push`, which does that and refuses to report
+        success otherwise. A `DNAK` reply is returned rather than raised, because
+        its code says *why* (1 = the object is open for editing, 5 = RAM full),
+        and that is worth surfacing verbatim.
+        """
+        return self.client.write(ObjectType.MacroTable, MACRO_TABLE_ID, name, data)
 
     # DELBANK's "all object types" selector: the protocol's type field = 0. No
     # ObjectType enum member has value 0, so a tiny stand-in supplies `.value`
