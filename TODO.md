@@ -694,3 +694,22 @@ change.
 The lesson worth keeping: these went two months stale because they were shot by
 hand and nothing tied them to the code. Three of the five are now regenerable by
 one command from a checked-in frame, which is why they were the ones fixed first.
+
+## ALLTEXT can confidently report blank on a populated field
+
+**Status:** open, not root-caused. Blocked on: reproducing it — it appeared
+once, mid-session, correlated with (not demonstrated to be caused by) a Gotek
+disk-image reload, and was not retested afterward.
+
+`get_screen_text()` (ALLTEXT, `0x15`) returned the `ProgramMode` header and the
+soft-key row correctly, but the `<id> <name>` field between them came back as
+spaces while the physical LCD showed `Program 300 CUT 000` — confirmed by a
+human at the panel. Everything else on the same screen read fine, both before
+and after, so this is not "ALLTEXT is broken", it is one field silently wrong.
+
+Nothing in the shipped app was affected this time only because the code paths
+in use (`select_program`'s button presses, `confirm_selection`'s `0x16`/`0x17`
+read) don't touch ALLTEXT — but `refresh.py`'s live mirror, the disk browser,
+and the macro editor all *do* depend on it, and none of them currently
+cross-check against a second read path. A wrong-but-well-formed screen read is
+worse than a crash: nothing about it announces itself. See RESOLUTION_NOTES §29.

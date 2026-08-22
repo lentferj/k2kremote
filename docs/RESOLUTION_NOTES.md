@@ -2337,3 +2337,49 @@ during this session: the first capture attempt hit the lift gate immediately,
 on the very silence this section is about, and refused to write a bad take
 under a real filename. That refusal is what turned "captures failed silently"
 into "captures failed loudly, with a diagnosis to follow."
+
+## 29. ALLTEXT confidently reports blank on a populated field (2026-08-22)
+
+While gating a recapture on mpc2emu's corrected `CUTCAL_01` bank (see §28's
+sibling capture work), `probes/p36_filter_fields.py`'s panel-navigation helpers
+(`select_program`, `algorithm_of`, `rows()` — all built on `get_screen_text()` /
+ALLTEXT, `0x15`) suddenly returned an unreadable screen: the `ProgramMode`
+header showed, and the soft-key row showed, but the field between them that
+normally carries `<id> <name>` came back as **spaces**, and digit presses that
+should have echoed into a program-number field did nothing visible at all.
+
+This looked exactly like a stuck panel or a failed disk load, and — per the
+project's standing rule about not blind-pressing buttons on real hardware
+without a working feedback loop — work stopped rather than guessing further
+(the stale-edit-session mutation in §28 is what that rule exists to prevent).
+Jan was asked to look at the actual LCD. **It read `Program 300 CUT 000` —
+correct, populated, unremarkable.** ALLTEXT was reporting blank for a field the
+device was actively displaying.
+
+The defect is narrower than "ALLTEXT is broken": the soft-key row (row 7) and
+the rest of the header text around the gap were reading correctly throughout,
+both before and after this happened — only the specific `<id> <name>` field
+inside the `ProgramMode` header came back empty. The capture pipeline itself
+was unaffected, because `probes/p41_pmvol124_capture.py`'s `select_program()`
+(digit button presses, no screen read) and `confirm_selection()` (`0x16`/`0x17`,
+"what is currently selected") never touch ALLTEXT at all — that is why the
+actual CUTCAL recapture and its panel-verified `Coarse:` cross-check
+(both `0x16`/`0x17`-based) worked cleanly through the same session where the
+ALLTEXT read was silently wrong.
+
+**Not root-caused.** Open questions: what triggers it (something about the
+Gotek/disk-reload sequence was the only thing that had just happened, but that
+is a correlation, not a demonstrated cause); whether it is transient (did not
+retest after the fact, since the working `0x16`/`0x17` path was sufficient to
+finish the task); and whether any other ALLTEXT-dependent code path in this
+project — `refresh.py`'s mirror, the disk browser, the macro editor's on-screen
+state — can hit the same blank-field failure silently, since none of them
+currently cross-check against a second read path the way this session
+accidentally did. Tracked in TODO.md; no probe written yet.
+
+The shape of the catch is the same one running through the whole CUTCAL
+session (§28's sibling capture and the filter-uniformity misdiagnosis this
+afternoon): a reader that returns a confident, well-formed answer disagreeing
+with the device is not "known-broken", it is *worse* — it looks exactly like
+data until something outside the read path (a human at the panel, a second
+SysEx query) contradicts it.
