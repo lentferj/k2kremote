@@ -42,6 +42,15 @@ image — use :meth:`DiskImage.open` as a context manager so it is cleaned up.
 Note that the K2000's own SCSI format is described in the manual as "close to
 DOS, but not DOS"; a volume the K2000 formatted itself may differ from a
 PC-formatted one.  Both images this was developed against are plain FAT16.
+
+**The OEM string (``self.oem``) is read and kept, but never checked.**
+:meth:`DiskImage.__init__` only validates the structural boot-sector fields
+(bytes/sector, sectors/cluster, FAT count, FAT size, root-entry count) — so
+this opens any FAT16-structured volume regardless of what its OEM field says,
+``KMSI`` included.  Worth knowing before assuming "not plain FAT16" from the
+OEM string alone and reaching for a manual disk browse instead (mpc2emu did
+exactly that against a real K2000 hard-disk image on 2026-08-22, before
+finding this class opened it directly).
 """
 
 from __future__ import annotations
