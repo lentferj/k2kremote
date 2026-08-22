@@ -2377,9 +2377,144 @@ state — can hit the same blank-field failure silently, since none of them
 currently cross-check against a second read path the way this session
 accidentally did. Tracked in TODO.md; no probe written yet.
 
+**Update, same evening:** recurred with no disk reload anywhere nearby —
+during the ENV2/LFO1 depth work below, a plain `select_program()` (digit
+presses + Enter) on an already-loaded program produced the identical blank
+`ProgramMode` field, confirmed via `0x16` that the selection had genuinely
+worked (`'305*CUT 050'`) while `rows()` still showed nothing. So the earlier
+"correlated with the Gotek reload" framing was too narrow — correlation with
+*that one instance* was real, but the trigger is broader than disk activity.
+Still not root-caused.
+
 The shape of the catch is the same one running through the whole CUTCAL
 session (§28's sibling capture and the filter-uniformity misdiagnosis this
 afternoon): a reader that returns a confident, well-formed answer disagreeing
 with the device is not "known-broken", it is *worse* — it looks exactly like
 data until something outside the read path (a human at the panel, a second
 SysEx query) contradicts it.
+
+## 30. Two more unverified `krz_writer` constants, measured on hardware (2026-08-22)
+
+mpc2emu's converter carried two more self-flagged `approx` byte-to-real-unit
+mappings — `hob_f1[6]` (ENV2->FilFreq depth) and `cal[22]` (LFO1->Pitch
+depth) — never checked against a real K2000, same shape as the CUTCAL
+cutoff-byte bug in §28/29's sibling session. Both needed a program with a
+real modulation routing wired up; none existed, so this session built one:
+**program 250**, a ROM `Sawtooth` keymap (id 151) through algorithm 1's
+4-pole lowpass (base cutoff 1047Hz), `F1 FRQ` `Src1=ENV2` and `PITCH`
+`Src1=LFO1` both wired at Depth 0. Built by editing ROM object **199**
+("Default Program", the K2000's own scratch template) and Save-As-ing to
+250 — 199 itself was never saved over.
+
+### The panel does not show a live envelope-modulated value
+
+Tested directly before trusting anything: held a note for the full 3s hold
+at max `ENV2->FilFreq` depth (10800ct = 9 octaves) and read `Coarse` on the
+filter page throughout SysEx `0x16`/`0x17` — never moved off the static
+1047Hz setting. So unlike CUTCAL's `Coarse`-is-the-parameter check, both
+depth measurements had to be audio-only (see the WAV analysis below) or
+correlated against the raw object bytes (see the tables below) — never
+against a live panel readout, because there isn't one.
+
+### The wheel accelerates non-linearly, and a naive step-size guess crashes
+
+First attempt at a closed-loop `Depth` setter clamped each wheel turn to
++/-8 clicks, on the assumption of ~2ct/click measured from a handful of
+isolated single clicks. Real behaviour: 63 clicks in *one* message went
+0->3500ct, and the *next* 63-click message (same direction, no pause) went
+3500->10400ct — not a fixed rate, and history-dependent. The +/-8 version
+oscillated and never converged on a target, hitting its iteration cap with
+nothing corrupted (parameters are freely re-editable) but nothing swept
+either. Fixed by dropping to **exactly one click per step**, always,
+verified against the actual screen/`0x16` value before deciding the next
+direction — slower, but every single-click sequence tested was linear with
+no drift, because the acceleration is a property of *turning fast*, not of
+*being told to turn far*.
+
+Separately confirmed (Jan's own observation, not derived): the *displayed*
+cents-per-click size is genuinely non-uniform and native to each parameter
+— 2ct/click near zero on `ENV2->FilFreq` Depth, growing to 5ct/click by the
+15th consecutive click, `ct = (byte-28)*100` exactly from byte 34 onward.
+This is the real mechanism; "wheel acceleration" in the paragraph above was
+this session's misreading of the same underlying curve as a *message-timing*
+artifact rather than the *field's own* per-step design.
+
+### A sawtooth's own 1/k spectral rolloff defeated the corner detector once, cleanly
+
+First pass at measuring `ENV2->FilFreq`'s corner shift reused CUTCAL's
+Welch-PSD + threshold detector unmodified. Result: an **identical** ~1046Hz
+corner at all seven tested depths from 0 to 4800ct — a monotonic parameter
+sweep producing a flat result, the exact signature (per mpc2emu, independently
+naming the same tell from `PITCH NONE AMP` and the 126Hz latch in §28/29)
+of "the measurement cannot move regardless of the parameter." Cause: a
+sawtooth's own spectral envelope falls ~1/k regardless of any filtering, so
+raw harmonic-4 magnitude was already below a flat threshold from source
+rolloff alone, identically at every depth. Fixed by multiplying each
+harmonic's magnitude by its index `k` before thresholding (flattens the
+passband so a crossing only trips on the filter's *own* rolloff). Analysis
+kept as a **separate pass** over already-captured WAVs from then on — once
+bitten twice, capture is now decoupled from analysis on principle, so a bad
+detector never requires re-touching the hardware to fix.
+
+### Filter depth: valid to ~2.25 octaves, then the source itself runs out
+
+Once corrected, `ENV2->FilFreq` depth measured cleanly from 0 to 2400ct
+(0 to 2.248 octaves, not a straight line: exact at 1200ct, under at 600ct,
+over above that — but each point sub-one-harmonic-bin at the low end, so
+only the 2400ct deviation is likely real). 3600ct and 4800ct both measured
+an *identical* 6537Hz "corner" — not the filter: raw harmonic data shows a
+>25x cliff between harmonic 24 (6275Hz) and 28 (7321Hz), flat near-noise-
+floor to 22kHz regardless of depth. The ROM `Sawtooth` sample is itself
+bandlimited around 7kHz (ordinary anti-aliasing for a wavetable played
+across octaves), so nothing above that is measurable with this source
+regardless of how far the filter opens.
+
+Byte<->cents for `hob_f1[6]`, correlated by diffing `DUMP` reads of program
+250 at known panel Depth values (RAM offset 215; **unverified against the
+on-disk `.KRZ` layout** — programs are known to differ between RAM and disk
+per §21/§25, and mpc2emu confirmed afterward that the offset didn't matter
+to them, since the byte<->cents *mapping* is a property of the parameter,
+not of where either side stores it): dense 0-49 (2100ct), sparse to 124
+(9600ct) fitting `ct = (byte-28)*100` exactly throughout, coarsening again
+for the last three bytes to the true ceiling — **byte 127 = 10800ct =
+exactly 9.000 octaves**, confirmed by single-clicking there directly rather
+than trusting an earlier big-jump-to-max test. That number is what let
+mpc2emu find their own bug: their writer's `round(amount*127)` assumed 127
+was cents-linear full scale, when the real curve is compressed near zero —
+subtle filter envelopes (`amount` 0.05-0.25) were written **3x-26x too
+shallow**, while `amount=1.0` was **1.75x too deep** against their own E4XT
+reference (5.14 octaves). Both directions wrong, from one wrong assumption
+about one byte's meaning.
+
+### Pitch depth: a different curve, audio-confirmed at both ends
+
+`LFO1->Pitch` Depth (RAM offset 199, same disk-offset caveat) mapped fully
+dense, byte 0 to its own ceiling at byte 123 = 7200ct = 6 octaves — a
+*different* law from the filter's: 1:1 (byte N = N cents) up to byte 20,
+not compressed the way `hob_f1[6]` is near zero. mpc2emu's writer maximum,
+byte 79, lands at exactly **1200ct = 1.000 octave**.
+
+Audio cross-check (autocorrelation pitch-tracking over a held note, LFO1's
+own 2Hz giving ~6 cycles across a 3s hold) confirmed the panel's Depth is a
+**+/- half-swing, not full peak-to-peak**: byte 79 measured 2404.7ct
+peak-to-peak against an expected 2400ct (2x1200), byte 41 (80ct) measured
+161.4ct against an expected 160ct — both within 0.5%, once a first pass's
+`fmax=500Hz` search-window clipping (caught because the reported peak
+landed *exactly* on the window's own boundary) was widened and re-run on
+the same already-captured WAV. Byte 4 (the value mpc2emu's *old* buggy
+writer actually wrote for a "half amount" request) measured 9.5ct
+peak-to-peak, but that number is **below the tracker's own resolution
+floor** — at ~262Hz, adjacent whole-sample lags in the autocorrelation are
+already ~9-10ct apart, so a true 4ct swing cannot be resolved by this
+method at all. A parabolic sub-lag interpolation attempt made the same
+measurement *worse* (25.5ct on the identical file) rather than better, and
+was reported as a failed refinement rather than presented as an improved
+number. What stands: byte 4's measured swing is ~17x smaller than byte 41's
+clearly-resolved one, consistent with (not proof of) mpc2emu's "no audible
+vibrato" characterisation of the old bug.
+
+mpc2emu independently confirmed the LFO1 full-scale question the same way:
+their own E4XT reference constant (`LFO_PITCH_FULL_CENTS = 1593`, ±16
+semitones) already carried a comment reading, verbatim, *"NOT the ±1 octave
+previously assumed"* — the disproof of their writer's own assumption was
+sitting in the same source file as the bug.
