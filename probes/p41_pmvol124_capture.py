@@ -172,10 +172,29 @@ def lift_over_preroll(channels, rate) -> tuple:
 
 
 def capture_one(bridge, out, rec, preset: int, name: str, note: int, take: int,
-                path: str) -> None:
+                path: str, *, gate_lift: bool = True,
+                must_be_audible: bool = False) -> float:
+    """Records one take. Returns peak level.
+
+    ``gate_lift=False`` still MEASURES and PRINTS the lift, but never refuses to
+    write the file over it -- for a calibration set where silence at some
+    presets is the expected, load-bearing measurement rather than a captured
+    fault. Gating there would remove exactly the data points a filter-cutoff
+    calibration exists to find (see the CUTCAL session, RESOLUTION_NOTES §28
+    onward): a 4-pole lowpass at 16 Hz on white noise IS silence, and that
+    silence is correct, not a dropped note.
+
+    ``must_be_audible=True`` keeps a narrower, EXPLICIT check regardless of
+    ``gate_lift``: this specific take is expected to be clearly audible (e.g.
+    a full-open cutoff), and if it reads as near-digital-silence that is a
+    real fault worth stopping for, not data. Raises rather than warns, because
+    silence where loud audio was expected is exactly the same failure mode
+    the ordinary lift gate exists to catch -- it just cannot be inferred from
+    a fixed threshold here, only from the caller's own knowledge of what this
+    particular preset should do.
+    """
     with_note = f"p{preset}_n{note}_t{take}"
     audio_task = rec.record(PREROLL)
-    t_on = time.monotonic()
     out.send_message([0x90 | CHANNEL, note, 100])
     held = rec.record(HOLD)
     out.send_message([0x80 | CHANNEL, note, 0])
@@ -185,16 +204,29 @@ def capture_one(bridge, out, rec, preset: int, name: str, note: int, take: int,
 
     ok, detail = lift_over_preroll(channels, rec.rate)
     peak = max(float(np.max(np.abs(c))) for c in channels)
-    if not ok:
+
+    if must_be_audible and peak < ABSOLUTE_MIN_PEAK:
+        raise GuardFailed(
+            f"{with_note}: expected clearly audible, peak {peak:.6f} is at the "
+            f"noise floor -- {detail}"
+        )
+    if gate_lift and not ok:
         raise GuardFailed(f"{with_note}: LIFT GATE FAILED -- {detail}")
 
     write_wav(path, channels, rec.rate)
-    print(f"   {with_note}  peak {peak:.4f}  {detail}  -> {os.path.basename(path)}",
-          flush=True)
+    flag = "" if ok else "  (below the usual lift threshold -- kept, not gated)"
+    print(f"   {with_note}  peak {peak:.4f}  {detail}{flag}  "
+          f"-> {os.path.basename(path)}", flush=True)
+    return peak
 
 
-def run(bridge, out, rec, presets, notes) -> dict:
-    """Returns {(preset, note): 'ok'|'no-map'|error} for the caller's summary."""
+def run(bridge, out, rec, presets, notes, *, gate_lift: bool = True,
+       audible_ids=frozenset(), takes: int = 3) -> dict:
+    """Returns {(preset, note): 'ok'|'no-map'|error} for the caller's summary.
+
+    ``audible_ids`` marks presets that must never come back silent regardless
+    of ``gate_lift`` -- see capture_one's docstring.
+    """
     from k2000.definitions import ObjectType
     status = {}
     for preset in presets:
@@ -211,10 +243,12 @@ def run(bridge, out, rec, presets, notes) -> dict:
 
         for note in notes:
             note_ok = True
-            for take in range(1, 4):
+            for take in range(1, takes + 1):
                 path = os.path.join(OUT_DIR, f"k2k_p{preset}_n{note}_t{take}.wav")
                 try:
-                    capture_one(bridge, out, rec, preset, name, note, take, path)
+                    capture_one(bridge, out, rec, preset, name, note, take, path,
+                               gate_lift=gate_lift,
+                               must_be_audible=preset in audible_ids)
                 except GuardFailed as exc:
                     print(f"   !! {exc}", flush=True)
                     note_ok = False
@@ -233,6 +267,17 @@ def main():
     ap.add_argument("--presets", default="200-208",
                     help="e.g. 200-208 or 200,205")
     ap.add_argument("--notes", default="69", help="e.g. 69 or 69,57,79")
+    ap.add_argument("--no-gate", action="store_true",
+                    help="do not refuse silent takes -- for a calibration set "
+                        "where some presets are SUPPOSED to be silent (e.g. a "
+                        "filter fully closed on white noise). Level is still "
+                        "measured and printed either way.")
+    ap.add_argument("--audible", default="",
+                    help="preset ids that must NOT come back silent regardless "
+                        "of --no-gate, e.g. 308,309,310 -- raises if one does, "
+                        "since that is a real fault rather than an expected "
+                        "quiet preset")
+    ap.add_argument("--takes", type=int, default=3)
     args = ap.parse_args()
 
     def parse_ints(spec):
@@ -247,6 +292,7 @@ def main():
 
     presets = parse_ints(args.presets)
     notes = parse_ints(args.notes)
+    audible_ids = frozenset(parse_ints(args.audible)) if args.audible else frozenset()
     if args.check:
         presets, notes = presets[:1], notes[:1]
 
@@ -266,7 +312,9 @@ def main():
         out.open_port(MIDI_OUT_PORT)
         try:
             with Recorder() as rec:
-                status = run(bridge, out, rec, presets, notes)
+                status = run(bridge, out, rec, presets, notes,
+                            gate_lift=not args.no_gate,
+                            audible_ids=audible_ids, takes=args.takes)
         finally:
             out.close_port(); out.delete()
 
@@ -277,7 +325,8 @@ def main():
         if bad:
             print(f"\n{len(bad)} of {len(status)} FAILED a guard -- see above")
             return 1
-        print(f"\nall {len(status)} passed both guards")
+        gate_note = "" if not args.no_gate else " (lift gate off -- silence recorded, not refused)"
+        print(f"\nall {len(status)} captured cleanly{gate_note}")
         return 0
     finally:
         bridge.close()
