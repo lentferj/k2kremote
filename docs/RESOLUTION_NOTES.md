@@ -2221,3 +2221,119 @@ not for a caller expecting a machine-readable value — the panel truncates,
 abbreviates and flags things for legibility, and each of those has now cost a
 silent corruption once. A caller that can track its own state should, rather
 than asking the panel and trusting the answer is complete.
+
+---
+
+## 28. Silent notes: TRANSMIT vs RECEIVE channel, and a fault no SysEx could see (2026-08-19/22)
+
+For a cross-project A/B capture with mpc2emu (K2000 vs their KRZ→AKAI conversion
+of PMVOL124), the K2000 stopped making sound entirely — mid-session, after a
+routine power cycle to clear an orphaned-sample-RAM error. What follows is the
+chase, because every step eliminated a real possibility with a measurement, and
+that discipline is what kept a two-day gap from costing a wasted evening at
+either end.
+
+### `Channel:9` in the panel header is the TRANSMIT channel, not RECEIVE
+
+The single most useful fact to have written down. `ProgramMode`'s header, and
+the `MIDI` button's default page, both show `Channel:9` — and it is easy to
+assume that is "the channel this instrument listens on." **It is not.** Press
+`MIDI`: the page opens on `MIDIMode:TRANSMIT`. The receive settings are a
+separate soft key:
+
+```
+MIDIMode:RECEIVE
+BasicChannel:8    SysEx ID:0
+MIDI Mode:Multi   SCSI ID:6
+```
+
+`BasicChannel` reading `8` while notes are correctly received on channel 9
+looks like a mismatch and is not one: with `MIDI Mode: Multi`, `BasicChannel`
+does not govern local play at all. The operative setting is the **`CHANLS`**
+page — a full per-channel map, one row per MIDI channel, each with its own
+`Enable` / `Program` / `Volume` / `Pan` / output routing. Landing the cursor on
+channel 9's row and reading it back (device-confirmed, not assumed) is what
+actually answers "will a note-on on channel 9 be heard, and by which program":
+
+```
+Enable :On   Program:200*Med. RainStick 1   Volume:127   Pan:64   OutPair:Prog
+```
+
+So there are **three different "channel" readings on this instrument**, and
+only one of them is what a note-on needs: the panel header (transmit), `RECV`'s
+`BasicChannel` (a fallback, overridden in Multi mode), and `CHANLS`'s per-row
+`Enable`/`Program` (what actually matters). SysEx proves the wire and the
+device id; it says nothing about which of these three a note-on will be judged
+against, because SysEx carries its own device id and is channel-independent —
+a confirmed object selection proves the cable works and proves nothing about
+whether note-on will be heard.
+
+### The `A(FX)` vs `B(DRY)` output-routing test — a good hypothesis, correctly ruled out
+
+The program editor's `OUTPUT` page shows a `Pair` field per layer (`A(FX)`,
+`B(DRY)`, and others reachable by wheel). A program's output routed through the
+internal effects bus rather than a dry pair is a real, previously-unconsidered
+failure mode, and worth testing directly: enter the edit buffer, confirm the
+field via `0x16` before touching it, change it, play a note, measure, and —
+regardless of the result — **exit without saving** (`leave_editor`, which
+answers any save prompt with `No`) and re-read the field fresh to confirm it
+is unchanged. Both `A(FX)` and `B(DRY)` gave identical silence, which correctly
+ruled the internal FX bus out rather than leaving it as a live suspect.
+
+### The actual fault: an external unit, powered off, sitting in series
+
+None of the above was it. An external effects unit sits physically between the
+K2000's output and the audio interface's ADAT expander. It was off — probably
+since the power cycle that cleared the sample-RAM error. With it in series
+(not on a parallel send/return), it blocks **everything** leaving the K2000
+regardless of the K2000's own internal routing, which is exactly why the
+`A(FX)`/`B(DRY)` test showed no difference either way: both signals had to
+pass through the same dead box.
+
+**No SysEx read, no port scan, and no amount of panel navigation could have
+found this.** It is state that exists entirely outside the K2000's own object
+model — a box on a shelf with a switch. It was found by direct physical
+inspection, and by nothing else, after every softwareside hypothesis had been
+correctly exhausted.
+
+### The lesson worth generalising
+
+Every wrong hypothesis here was eliminated by a *measurement*, not by
+argument: the receive channel by reading `CHANLS` rather than trusting the
+panel header; the FX-bus routing by an edit-buffer test with before/after
+readback; the capture ports by scanning all twenty rather than assuming 17/18
+were still correct. None of those measurements cost a second pass, because
+each gave a clean yes/no rather than a plausible-sounding guess. The one thing
+that could not be reached this way was **what physically sits in the signal
+path** — a purely SysEx-and-panel picture of "K2000 → interface" has no slot
+for a third box in series, and that is worth remembering the next time
+something measures correctly at both ends and is still silent in the middle.
+
+### A stale edit session, caught by re-verifying rather than trusting a read
+
+A minor process note, folded into the FX investigation. A diagnostic script
+opened the `OUTPUT` page, printed it, and exited by closing the MIDI
+connection — **without** pressing `Exit` first. A later script then called
+`select_program()` (digit presses + Enter) while the device was silently still
+sitting in that abandoned edit session; the digits landed as direct-entry
+shortcuts into whatever field the stale cursor was on, and the next read came
+back showing an unrequested value (`D(DRY)` where `A(FX)` was expected — a
+field mutation nobody intended). Caught only because the practice throughout
+this project is to force back to a known state and re-read fresh before
+trusting anything, rather than act on the first answer. Left as unreported, it
+would have looked like discovered evidence of a routing fault the read had
+itself caused. **Always leave an editor via `Exit`, even when a script's job
+is "just read one page."**
+
+### `probes/p41_pmvol124_capture.py` — the two capture guards, now reusable
+
+Written for this session and worth keeping generally: `confirm_selection()`
+asks the device what is currently selected (`0x16`, `<id>*<name>`) before a
+group of takes rather than trusting the command that set it, and
+`lift_over_preroll()` requires each take's note region to sit measurably above
+that *same take's own* pre-roll silence — not an absolute threshold, and not
+"did it clip" (silence never clips). Both guards were exercised for real
+during this session: the first capture attempt hit the lift gate immediately,
+on the very silence this section is about, and refused to write a bad take
+under a real filename. That refusal is what turned "captures failed silently"
+into "captures failed loudly, with a diagnosis to follow."
