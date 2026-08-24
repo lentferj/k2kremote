@@ -414,6 +414,98 @@ def test_object_name_reads_dir():
     assert bridge.object_name(ObjectType.Program, 201) == "CMI VOICES"
 
 
+def test_read_object_bytes_sends_dump_with_offset_and_size():
+    from k2000.definitions import ObjectType
+    from k2000.messages import Dump, Load, SysexMessage
+
+    captured = {}
+
+    def fake_send_and_receive(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        captured["msg"] = decoded
+        captured["timeout"] = timeout
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
+                   b"\x2a\x03")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                        "stub", timeout=1.7)
+    result = bridge.read_object_bytes(ObjectType.Program, 906, 215, 2)
+
+    msg = captured["msg"]
+    assert isinstance(msg, Dump)
+    assert (msg.type, msg.idno, msg.offset, msg.size) == \
+        (ObjectType.Program, 906, 215, 2)
+    assert captured["timeout"] == 1.7   # the bridge's own configured timeout,
+                                        # not the vendored client.dump()'s
+                                        # hardcoded (and too-short) 1.0s
+    assert result == b"\x2a\x03"
+
+
+def test_patch_object_bytes_verifies_and_returns_on_match():
+    from k2000.definitions import ObjectType
+    from k2000.messages import DataAcknowledged, Load, SysexMessage
+
+    captured = {"sent": []}
+
+    def fake_send_and_receive(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        captured["sent"].append(decoded)
+        if isinstance(decoded, Load):
+            return DataAcknowledged(decoded.type, decoded.idno,
+                                    decoded.offset, len(decoded.data))
+        # the verifying read-back (a Dump) -- answer with what was written
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
+                   b"\x28")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                        "stub")
+    result = bridge.patch_object_bytes(ObjectType.Program, 906, 215, b"\x28")
+
+    load_msg, dump_msg = captured["sent"]
+    assert load_msg.data == b"\x28" and load_msg.offset == 215
+    assert dump_msg.offset == 215 and dump_msg.size == 1
+    assert result == b"\x28"
+
+
+def test_patch_object_bytes_raises_on_dnak_without_reading_back():
+    from k2000.definitions import ObjectType
+    from k2000.messages import DataNotAcknowledged, Load, SysexMessage
+    from k2kremote.midi_bridge import PatchUnverified
+
+    def fake_send_and_receive(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        assert isinstance(decoded, Load), "must not read back after a DNAK"
+        return DataNotAcknowledged(
+            decoded.type, decoded.idno, decoded.offset, len(decoded.data),
+            DataNotAcknowledged.ErrorCode.ObjectCurrentlyBeingEdited)
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                        "stub")
+
+    with pytest.raises(PatchUnverified, match="ObjectCurrentlyBeingEdited"):
+        bridge.patch_object_bytes(ObjectType.Program, 906, 215, b"\x28")
+
+
+def test_patch_object_bytes_raises_on_readback_mismatch():
+    from k2000.definitions import ObjectType
+    from k2000.messages import DataAcknowledged, Load, SysexMessage
+    from k2kremote.midi_bridge import PatchUnverified
+
+    def fake_send_and_receive(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        if isinstance(decoded, Load):
+            return DataAcknowledged(decoded.type, decoded.idno,
+                                    decoded.offset, len(decoded.data))
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
+                   b"\xff")  # wrong -- not what was written
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                        "stub")
+
+    with pytest.raises(PatchUnverified, match="UNKNOWN state"):
+        bridge.patch_object_bytes(ObjectType.Program, 906, 215, b"\x28")
+
+
 def test_reselect_program_types_digits_then_enter():
     from k2000.definitions import Button
 

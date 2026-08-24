@@ -2518,3 +2518,75 @@ their own E4XT reference constant (`LFO_PITCH_FULL_CENTS = 1593`, ±16
 semitones) already carried a comment reading, verbatim, *"NOT the ±1 octave
 previously assumed"* — the disproof of their writer's own assumption was
 sitting in the same source file as the bug.
+
+## 31. `patch_object_bytes` / `read_object_bytes` — DUMP/LOAD instead of the panel (2026-08-25)
+
+Direct motivation: `probes/p44_release_rate_test.py` (§30's AMPENV release-
+rate session, mpc2emu's rate-vs-duration question) spent an entire evening
+editing three AMPENV fields via cursor-ring navigation and closed-loop wheel
+turns — one field edit took anywhere from 20 seconds to several minutes
+depending on the field's own (nonlinear, per-field) step curve, and a single
+off-by-one in the cursor-ring offset silently drove the wrong field for nine
+minutes before anyone checked. Every value this project has ever set on the
+device (ENV2/LFO1 depth, filter cutoff, the whole AMPENV sweep) went through
+the panel, because nothing shorter existed.
+
+**The K2000 manual documents a shorter path that was never used.** Chapter
+30, "System Exclusive Protocol," describes `DUMP` (0x00) / `LOAD` (0x01) with
+explicit `offs`/`size` fields — a genuine **partial-object** read/write, not
+the whole-object replace `WRITE` (0x09) already used for the macro table.
+The manual says outright this is meant to "build a simple object librarian
+software program" — almost certainly what a commercial editor like MIDI
+Quest uses. The vendored `psobot/k2000` library already implements both
+messages correctly, checksum included (`k2000/messages.py`'s `Dump`/`Load`
+classes) — nobody had wired a convenience layer on top with this project's
+own verify-after-write discipline.
+
+Added `MidiBridge.read_object_bytes()` / `.patch_object_bytes()`
+(`k2kremote/midi_bridge.py`). The pairing mirrors `read_macro_table()`/
+`write_macro_table()`, but `patch_object_bytes` verifies internally rather
+than leaving that to the caller (unlike `write_macro_table`, whose caller —
+`k2kmaced.online.push` — does the read-back-and-compare itself): a DNAK is
+raised immediately, and a successful write is always followed by a read-back
+that must match exactly before the call returns, raising `PatchUnverified`
+otherwise. Built this way on purpose — a primitive meant to *replace* ad hoc
+verify-it-yourself RE code should not have a way to skip the check.
+
+**Two things only found by testing against real hardware, not the synthetic
+suite:**
+
+* `client.dump()`/`client.load()` (the vendored library's own convenience
+  methods) hardcode a 1.0 s timeout with no override. `read_object_bytes`/
+  `patch_object_bytes` go through `_send_and_receive` directly instead, using
+  the bridge's own configured timeout (1.5–2 s) for consistency with every
+  other call this project makes.
+* **DUMPing an object that doesn't exist gets no reply at all** — not a
+  DNAK, silence, regardless of timeout length. Found by accident: the first
+  live test targeted program 250 (the ENV2/LFO1 depth scratch program from
+  §30), not knowing a `Master -> Delete -> Everything` hours earlier had
+  wiped it and it was never reloaded. Both a 1.0 s and a 5.0 s timeout failed
+  identically against the missing object; the identical call against a
+  program confirmed present (via `object_name`/DIR, which *does* document a
+  "not found" reply — size 0, name null) answered normally. The manual
+  documents DUMP's reply only as "a LOAD message" and says nothing about a
+  missing object — this is a real protocol fact, not a timeout tuning
+  problem, and cost a false lead (an incorrect draft docstring claiming
+  1.0 s was "measured too tight," corrected before commit once the real
+  cause was found — the exact write-a-claim-then-verify-it pattern this
+  project has tried to hold to all night).
+
+Verified end-to-end on hardware against program 906 (`ObSt lowp kl.lay`,
+still resident from §30): read byte 215, then a true no-op patch (write back
+the same byte, verify), then confirmed via the panel's own AMPENV page that
+nothing had moved. 488 synthetic tests pass, four of them new
+(`tests/test_midi_bridge.py`), built on the same `_send_and_receive` round-
+trip-through-`SysexMessage.decode()` pattern already used for `rename()`/
+`delete_object()` rather than mocking `client.dump()`/`.load()` directly —
+proves the wire format, not just the call.
+
+**Not yet done:** no probe or app code has been migrated to use this instead
+of panel navigation. The next RE session that needs to sweep a known-offset
+field (ENV2/LFO1 depth on a *new* program, the AMPENV fields once §30's
+release-rate law is settled) is the first real user, and is where any gap
+between "the primitive works" and "the primitive is actually faster in
+practice" will show up.

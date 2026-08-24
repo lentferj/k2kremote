@@ -62,8 +62,8 @@ from typing import Callable, Iterable, List, Optional, Tuple
 import rtmidi  # noqa: E402
 
 from k2000.client import K2000Client  # noqa: E402
-from k2000.definitions import Button, ButtonEventType, ObjectType  # noqa: E402
-from k2000.messages import ButtonEvent, Change, Del, DelBank, Panel  # noqa: E402
+from k2000.definitions import Button, ButtonEventType, EncodingFormat, ObjectType  # noqa: E402
+from k2000.messages import ButtonEvent, Change, Del, DelBank, Dump, Load, Panel  # noqa: E402
 
 # The live Macro Table's object id. Defined here rather than imported from
 # k2kmaced: that is the *macro editor*, and the mirror must not depend on it —
@@ -71,6 +71,13 @@ from k2000.messages import ButtonEvent, Change, Del, DelBank, Panel  # noqa: E40
 # device's object database (type 100 "Table", id 35 — the `Table  35  Macro`
 # line in the Save-Object list), which is this module's own subject matter.
 MACRO_TABLE_ID = 35
+
+
+class PatchUnverified(Exception):
+    """A :meth:`MidiBridge.patch_object_bytes` write was rejected, or its
+    read-back does not match what was sent. The addressed bytes are in an
+    unknown state either way — see that method's docstring."""
+
 
 # --- defaults (RE'd values; see module docstring) ---------------------------
 # The RE'd hard floor is ~120 ms. We sit just above it.
@@ -774,6 +781,95 @@ class MidiBridge:
         and that is worth surfacing verbatim.
         """
         return self.client.write(ObjectType.MacroTable, MACRO_TABLE_ID, name, data)
+
+    # -- byte-offset field patching (DUMP/LOAD, not WRITE) --------------------
+    def read_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
+                          size: int, timeout: Optional[float] = None) -> bytes:
+        """`size` bytes at `offset` within an object — DUMP (0x00), a pure read.
+
+        The general-purpose sibling of :meth:`read_macro_table`: any object,
+        any byte range, not just the macro table. Pairs with
+        :meth:`patch_object_bytes` for the read-verify half of a patch, and is
+        useful on its own for the discovery step — DUMP-diffing a byte range
+        before and after a panel-driven edit is how every field offset this
+        project has named so far (ENV2→FilFreq depth at RAM offset 215,
+        LFO1→Pitch depth at offset 199 — RESOLUTION_NOTES §30) was found.
+
+        Goes through `_send_and_receive` directly rather than the vendored
+        `K2000Client.dump()` convenience method, which hardcodes a 1.0 s
+        timeout with no override — using the bridge's own configured
+        `timeout` (1.5-2 s, see the module docstring) instead, for
+        consistency with every other call this class makes.
+
+        **DUMP on an object that doesn't exist gets no reply at all**,
+        verified live on this K2000R (2026-08-25): querying a program id
+        that had been cleared hours earlier (by a `Master -> Delete ->
+        Everything`) timed out identically at both 1.0 s and 5.0 s, while
+        the exact same call against a program confirmed present (via
+        :meth:`object_name` / DIR, which *does* document a "not found"
+        reply — size 0, name null) answered normally. The manual documents
+        DUMP's reply only as "a LOAD message" and says nothing about a
+        missing object, so silence rather than a DNAK is a real protocol
+        fact worth having, not a timeout tuning problem — check the object
+        exists first if a DUMP might otherwise hang.
+        """
+        reply = self.client._send_and_receive(
+            Dump(obj_type, idno, offset, size, EncodingFormat.BitStream),
+            timeout or self.timeout)
+        return reply.data
+
+    def patch_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
+                           data: bytes) -> bytes:
+        """Patch `len(data)` bytes at `offset` in an EXISTING object — LOAD
+        (0x01) — then read the same range back and refuse to return unless it
+        matches exactly. **This writes.**
+
+        Built to replace the class of RE work this project has been doing by
+        hand all night: once a field's byte offset and encoding are known
+        (discovered by DUMP-diffing two panel-driven states — see
+        :meth:`read_object_bytes`), every *repeat* edit becomes one verified
+        SysEx round trip instead of minutes of cursor-ring navigation and
+        closed-loop wheel turns. The 2026-08-24 AMPENV release-rate session is
+        what this replaces: an off-by-one in cursor navigation there silently
+        drove the wrong field for nine minutes before anyone noticed, because
+        nothing checked *which* byte had actually changed. LOAD cannot have
+        that failure mode — it addresses the target byte(s) directly, and this
+        method never returns claiming success without reading them back.
+
+        Unlike :meth:`write_macro_table` (built on WRITE, 0x09), LOAD does not
+        delete and recreate the object — only the addressed bytes change, the
+        object's identity and every other byte are untouched. A DNAK is raised
+        immediately (unlike ``write_macro_table``, which returns it for the
+        caller to inspect) because there is no partial-write case worth
+        inspecting further here: either the bytes landed and read back
+        correctly, or the caller needs to stop and look at the device, not
+        keep going on a byte range in an unknown state. DNAK code 1 means the
+        object is open for editing (close it first); 3/4 mean the type/id/
+        offset don't exist; 5 means RAM is full.
+
+        Like :meth:`read_object_bytes`, goes through `_send_and_receive`
+        directly (both the write and the verifying read-back) rather than
+        the vendored client's `load()`/`dump()` convenience methods, whose
+        hardcoded 1.0 s timeout has no override — see that method's
+        docstring for what DUMPing a nonexistent object actually does.
+        """
+        reply = self.client._send_and_receive(
+            Load(obj_type, idno, offset, EncodingFormat.BitStream, data),
+            self.timeout)
+        code = getattr(getattr(reply, "code", None), "name", None)
+        if code is not None:
+            raise PatchUnverified(
+                f"K2000 rejected the write: DNAK {code} (type={obj_type}, "
+                f"id={idno}, offset={offset}, {len(data)} byte(s): {data.hex()})"
+            )
+        after = self.read_object_bytes(obj_type, idno, offset, len(data))
+        if after != data:
+            raise PatchUnverified(
+                f"wrote {data.hex()} to offset {offset} but read back "
+                f"{after.hex()} -- those bytes are now in an UNKNOWN state "
+                f"(type={obj_type}, id={idno})"
+            )
+        return after
 
     # DELBANK's "all object types" selector: the protocol's type field = 0. No
     # ObjectType enum member has value 0, so a tiny stand-in supplies `.value`
