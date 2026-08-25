@@ -217,6 +217,112 @@ def test_object_type_accepts_a_real_one():
     assert monitor._object_type("Program") is ObjectType.Program
 
 
+def test_patch_mode_is_reachable_from_the_cli():
+    out = _capture_help("patch")
+    assert "idno" in out and "type" in out and "offset" in out and "data" in out
+    assert "--yes" in out
+
+
+def test_read_mode_offers_offset_and_size():
+    out = _capture_help("read")
+    assert "--offset" in out and "--size" in out
+
+
+# -- patch_object: bridge interaction, no hardware -----------------------
+# Same layer test_midi_bridge.py's patch_object_bytes tests sit on: fake
+# `client._send_and_receive`, decode the outgoing wire bytes, and answer with
+# a real message class so the round trip is exercised, not just the call.
+
+def _fake_bridge_for_patch(*, dnak=None, before=b"\x67", after=None):
+    """`before` answers the pre-write Dump; `after` (default: whatever was
+    sent) answers both the write and its verifying read-back, so a genuine
+    mismatch can be simulated by passing a different `after`."""
+    from types import SimpleNamespace
+    from k2000.messages import DataAcknowledged, Load, SysexMessage
+    from k2kremote.midi_bridge import MidiBridge
+
+    seen_load = {"data": None}
+
+    def fake_send_and_receive(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        if isinstance(decoded, Load):
+            seen_load["data"] = decoded.data
+            if dnak is not None:
+                return dnak(decoded)
+            return DataAcknowledged(decoded.type, decoded.idno,
+                                    decoded.offset, len(decoded.data))
+        # a Dump: the pre-write read (before any Load has been seen) answers
+        # `before`; the post-write verification read (after a Load) answers
+        # `after`, or what was actually sent if `after` was not overridden.
+        data = before if seen_load["data"] is None else \
+            (after if after is not None else seen_load["data"])
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
+                   data)
+
+    return MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                      "stub")
+
+
+def test_patch_object_writes_after_typed_confirmation(monkeypatch, capsys):
+    bridge = _fake_bridge_for_patch(before=b"\x67")
+    monkeypatch.setattr("builtins.input", lambda prompt="": "write")
+
+    rc = monitor.patch_object(bridge, "Program", 906, 215, "28")
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "before: 67" in out
+    assert "after:  28" in out
+    assert "written and verified: 28" in out
+
+
+def test_patch_object_aborts_when_confirmation_does_not_match(monkeypatch, capsys):
+    bridge = _fake_bridge_for_patch()
+    monkeypatch.setattr("builtins.input", lambda prompt="": "nope")
+
+    rc = monitor.patch_object(bridge, "Program", 906, 215, "28")
+
+    assert rc == 1
+    assert "aborted; nothing was sent" in capsys.readouterr().out
+
+
+def test_patch_object_yes_skips_the_prompt(monkeypatch, capsys):
+    bridge = _fake_bridge_for_patch()
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt="": pytest.fail("must not prompt when --yes is set"))
+
+    rc = monitor.patch_object(bridge, "Program", 906, 215, "28", yes=True)
+
+    assert rc == 0
+    assert "written and verified: 28" in capsys.readouterr().out
+
+
+def test_patch_object_reports_dnak_without_writing(monkeypatch, capsys):
+    from k2000.messages import DataNotAcknowledged
+
+    def dnak(decoded):
+        return DataNotAcknowledged(
+            decoded.type, decoded.idno, decoded.offset, len(decoded.data),
+            DataNotAcknowledged.ErrorCode.ObjectCurrentlyBeingEdited)
+
+    bridge = _fake_bridge_for_patch(dnak=dnak)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "write")
+
+    rc = monitor.patch_object(bridge, "Program", 906, 215, "28")
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "NOT written" in out
+    assert "ObjectCurrentlyBeingEdited" in out
+
+
+def test_patch_object_rejects_bad_hex():
+    bridge = _fake_bridge_for_patch()
+    rc = monitor.patch_object(bridge, "Program", 906, 215, "not-hex", yes=True)
+    assert rc == 1
+
+
 def test_requests_are_all_real_message_classes():
     """`ask` offers a menu; every entry must name a class that exists, or the
     menu is a list of ways to fail at runtime."""

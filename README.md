@@ -622,15 +622,19 @@ k2kmon watch --panel          # front-panel events only
 k2kmon learn                  # press buttons; it names each one
 k2kmon ask paramname          # what does the K2000 say is selected?
 k2kmon read Program 201       # dump an object (the fast path — see below)
+k2kmon read Program 906 --offset 215 --size 1   # one known byte, via DUMP
 k2kmon compare Program 201    # read it BOTH ways and diff the encodings
+k2kmon patch Program 906 215 58   # write one byte at a known offset. WRITES.
 ```
 
-Two of these repay knowing about before you need them:
+Three of these repay knowing about before you need them:
 
 **`read` is roughly twenty times faster than the panel.** Reading a program's
 filter page by driving the editor costs about ten seconds and gives you one page
 of one layer; `Read` returns the entire object, every layer, in about half a
 second. A hundred programs is fifty seconds against a quarter of an hour.
+`--offset`/`--size` switch it to a partial read (`DUMP`) once a field's byte
+offset is already known, rather than pulling the whole object.
 
 **`compare` is a decoder self-check.** `form` selects only how the data is packed
 for transmission — 4 bits per MIDI byte or 7 — so both forms carry the same object
@@ -639,6 +643,15 @@ while: a left-aligned bit stream was being front-padded like a right-justified
 numeric field, so every byte came out shifted by two bits, and the difference was
 briefly mistaken for a property of the protocol. `k2kmon read` names the encoding
 in its header so any recurrence stays visible after the fact.
+
+**`patch` is the only mode that writes anything**, and it exists for the field
+edits `read`'s speed only lets you *watch* happen on the panel: once a byte's
+offset and meaning are known — DUMP-diffing two panel-driven states finds it,
+same technique `compare` itself grew out of — every repeat edit becomes one
+verified round trip instead of cursor-ring navigation and closed-loop wheel
+turns. It asks for a typed `write` confirmation (not `y`/`n` — a reflex
+keypress should not be able to change a live object) unless you pass `--yes`,
+and refuses to report success unless a read-back matches exactly what was sent.
 
 `learn` is the one that pays for the tool. With `XMIT Bttns` on, the panel
 reports what a human actually pressed — a better authority than counting your own

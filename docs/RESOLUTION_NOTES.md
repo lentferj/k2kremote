@@ -2584,9 +2584,24 @@ trip-through-`SysexMessage.decode()` pattern already used for `rename()`/
 `delete_object()` rather than mocking `client.dump()`/`.load()` directly —
 proves the wire format, not just the call.
 
-**Not yet done:** no probe or app code has been migrated to use this instead
-of panel navigation. The next RE session that needs to sweep a known-offset
-field (ENV2/LFO1 depth on a *new* program, the AMPENV fields once §30's
-release-rate law is settled) is the first real user, and is where any gap
-between "the primitive works" and "the primitive is actually faster in
-practice" will show up.
+**Update, same evening: now reachable from `k2kmon patch` / `k2kmon read
+--offset/--size`.** Investigated first whether it belonged as a new TUI
+screen in `k2kremote.app` (the user's original framing — integrate SysEx
+capability the way eosed did, in the opposite direction from how this
+project grew). It doesn't: `k2kmon` (`k2kremote/monitor.py`) already does
+`read`/`compare` for exactly this class of job — "roughly twenty times
+faster than the panel," per its own README section — and the project's own
+convention splits tools into separate binaries by mutual-exclusivity-with-
+the-mirror or hardware-safety character (see `pyproject.toml`'s comments on
+why `k2kmaced` and `k2kmon` are separate from `k2kremote`), not by feature
+size. A new modal screen would have duplicated a job an already-separate
+tool already owns — so `patch_object_bytes`/`read_object_bytes` were wired
+into `k2kmon` instead: `k2kmon patch <type> <idno> <offset> <hex>` (typed
+`write` confirmation unless `--yes`, mirroring `k2kmaced push`'s reasoning
+that a live-object write deserves the same weight as a live-macro-table
+write) and `k2kmon read <type> <idno> --offset N --size N` for a partial
+read via the same primitive. Verified end-to-end on hardware the same way
+as the primitive itself: `read --offset 215 --size 1` against program 906
+returned `58` (matching the value already confirmed via the Python API),
+and `patch ... 215 58` (a true no-op write-back) reported success and left
+the byte unchanged. 7 new tests, 495 total pass.

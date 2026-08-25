@@ -42,12 +42,22 @@ fault becomes part of the fault. Only ``ask`` transmits, one request at a time.
     k2kmon ask alltext           # send one request, show the decoded reply
     k2kmon ask paramname         # what does the K2000 say is selected?
     k2kmon read Program 206      # dump an object -- ~20x faster than the panel
+    k2kmon read Program 906 --offset 215 --size 1   # one known byte, via DUMP
     k2kmon compare Program 206   # read it BOTH ways and diff the encodings
+    k2kmon patch Program 906 215 58   # write one byte at a known offset. WRITES.
     k2kmon types                 # the message table, for reading before guessing
 
 ``read`` is worth knowing about before reaching for the editor: driving the panel
 for one filter page costs about ten seconds and yields one page of one layer,
 while ``Read`` returns the whole object, every layer, in about half a second.
+
+``patch`` is the only mode that writes anything, and it exists for the same
+reason ``read`` does: a field whose byte offset is already known (found by
+DUMP-diffing two panel-driven states once — see ``docs/RESOLUTION_NOTES.md``
+§30-§31) is a one-line command here instead of the cursor-ring navigation and
+closed-loop wheel turns that found the offset in the first place. It asks for
+a typed confirmation before sending, and refuses to report success unless the
+write reads back exactly what was sent (``MidiBridge.patch_object_bytes``).
 
 ``compare`` is a decoder self-check. ``form`` selects only the transmission
 packing — 4 bits per MIDI byte or 7 — so both forms carry the same object and
@@ -393,7 +403,8 @@ def _object_type(type_name: str):
                          f"{', '.join(t.name for t in ObjectType)}")
 
 
-def read_object(bridge, type_name: str, idno: int, encoding_name: str) -> int:
+def read_object(bridge, type_name: str, idno: int, encoding_name: str,
+                offset: Optional[int] = None, size: Optional[int] = None) -> int:
     """Dump one object's raw bytes off the device.
 
     This is the fast path, and it is worth knowing it exists before reaching for
@@ -406,7 +417,27 @@ def read_object(bridge, type_name: str, idno: int, encoding_name: str) -> int:
     that does not record it cannot be checked later — but note that the two forms
     are only different *packings* of the same bytes and must decode identically.
     See `compare`, which asserts exactly that.
+
+    `offset`/`size`, when given, switch to `DUMP` (0x00) via
+    `MidiBridge.read_object_bytes` instead of the whole-object `Read` (0x0A)
+    path above — the same byte-range primitive `patch` verifies its writes
+    against (`k2kremote/midi_bridge.py`), useful once a field's offset is
+    already known and the rest of the object is not wanted. `--encoding` is
+    ignored in this mode: `DUMP`/`LOAD` always use `BitStream` (see
+    `read_object_bytes`'s docstring).
     """
+    if offset is not None or size is not None:
+        try:
+            data = bridge.read_object_bytes(
+                _object_type(type_name), idno, offset or 0, size or 1)
+        except Exception as exc:
+            print(f"no object {type_name} {idno} at offset {offset or 0}: "
+                 f"{type(exc).__name__}: {exc}")
+            return 1
+        print(f"{type_name} {idno}  offset {offset or 0}  {len(data)} bytes")
+        print(hexdump(data, 64))
+        return 0
+
     from k2000.definitions import EncodingFormat
     encoding = getattr(EncodingFormat, encoding_name)
     try:
@@ -418,6 +449,90 @@ def read_object(bridge, type_name: str, idno: int, encoding_name: str) -> int:
     print(f"{type_name} {idno}  {getattr(reply, 'name', '')!r}  "
           f"{len(data)} bytes  {encoding.name}  ({ms:.0f} ms)")
     print(hexdump(data, 64))
+    return 0
+
+
+_PATCH_WARNING_LINES = [
+    "!!!   THIS WRITES A LIVE OBJECT ON THE K2000, RIGHT NOW   !!!",
+    "",
+    "patch_object_bytes reads the target bytes back and verifies them before",
+    "reporting success, but that only catches a WRONG write, not a write to",
+    "the WRONG place -- offset and size are yours to get right.",
+    "",
+    "Nothing on disk changes, and nothing beyond the bytes you named is",
+    "touched -- see MidiBridge.patch_object_bytes's own docstring for what",
+    "DNAK codes 1/3/4/5 mean if this refuses.",
+]
+
+
+def _boxed(lines) -> str:
+    """Frame ``lines`` in a box sized to fit them. Mirrors
+    `k2kmaced.cli._boxed` (same reasoning: a hand-typed border drifts out of
+    sync with hand-typed wording, and a warning is exactly the wrong place
+    for that to happen unnoticed)."""
+    width = max(len(line) for line in lines)
+    top = "+" + "-" * (width + 2) + "+"
+    body = [f"| {line.ljust(width)} |" for line in lines]
+    return "\n".join([top, *body, top])
+
+
+_PATCH_WARNING = _boxed(_PATCH_WARNING_LINES)
+
+
+def patch_object(bridge, type_name: str, idno: int, offset: int, hex_data: str,
+                 *, yes: bool = False) -> int:
+    """Write bytes at `offset` within an existing object, then verify. WRITES.
+
+    Thin CLI wrapper around `MidiBridge.patch_object_bytes`, which already
+    raises immediately on DNAK and refuses to report success unless a
+    read-back matches exactly (`k2kremote/midi_bridge.py`) — the correctness
+    guarantee lives there. What this adds is the two things a first write
+    path in an otherwise-passive tool needs on top of that: a typed
+    confirmation (not y/n — see `k2kmaced.cli._cmd_push`, the same reasoning
+    applies to a live object as to the live macro table) and a printed
+    before/after so a mistake is visible immediately rather than discovered
+    later reading the object back some other way.
+    """
+    try:
+        data = bytes.fromhex(hex_data)
+    except ValueError as exc:
+        print(f"not valid hex ({exc}): {hex_data!r}")
+        return 1
+    if not data:
+        print("no bytes to write")
+        return 1
+
+    obj_type = _object_type(type_name)
+    try:
+        before = bridge.read_object_bytes(obj_type, idno, offset, len(data))
+    except Exception as exc:
+        print(f"no object {type_name} {idno} at offset {offset}: "
+             f"{type(exc).__name__}: {exc}")
+        return 1
+
+    print(f"{type_name} {idno}  offset {offset}  {len(data)} byte(s)")
+    print(f"  before: {before.hex()}")
+    print(f"  after:  {data.hex()}")
+    print(_PATCH_WARNING)
+
+    if not yes:
+        # Typed, not y/n: the same reasoning as k2kmaced push/install. A
+        # reflex keypress should not be able to change device state.
+        try:
+            answer = input('type "write" to continue (anything else aborts): ')
+        except EOFError:
+            answer = ""
+        if answer.strip() != "write":
+            print("aborted; nothing was sent")
+            return 1
+
+    from k2kremote.midi_bridge import PatchUnverified
+    try:
+        after = bridge.patch_object_bytes(obj_type, idno, offset, data)
+    except PatchUnverified as exc:
+        print(f"NOT written: {exc}")
+        return 1
+    print(f"written and verified: {after.hex()}")
     return 0
 
 
@@ -449,10 +564,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--encoding", choices=("Nibblized", "BitStream"),
                    default="Nibblized",
                    help="wire format (they differ; the dump header records it)")
+    p.add_argument("--offset", type=int, default=None,
+                   help="byte offset -- switches to DUMP for a partial read")
+    p.add_argument("--size", type=int, default=None,
+                   help="bytes to read from --offset (default 1)")
 
     p = sub.add_parser("compare", help="read an object BOTH ways and diff them")
     p.add_argument("type", help="object type, e.g. Program")
     p.add_argument("idno", type=int)
+
+    p = sub.add_parser("patch", help="write bytes at an offset, then verify (WRITES)")
+    p.add_argument("type", help="object type, e.g. Program")
+    p.add_argument("idno", type=int)
+    p.add_argument("offset", type=int)
+    p.add_argument("data", help="hex bytes to write, e.g. 28 or 2803")
+    p.add_argument("--yes", action="store_true",
+                   help="skip the typed confirmation")
 
     sub.add_parser("types", help="the message table; read before guessing")
 
@@ -471,9 +598,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.mode == "learn":
             return learn(bridge, seconds=args.seconds)
         if args.mode == "read":
-            return read_object(bridge, args.type, args.idno, args.encoding)
+            return read_object(bridge, args.type, args.idno, args.encoding,
+                              offset=args.offset, size=args.size)
         if args.mode == "compare":
             return compare_encodings(bridge, args.type, args.idno)
+        if args.mode == "patch":
+            return patch_object(bridge, args.type, args.idno, args.offset,
+                               args.data, yes=args.yes)
         return ask(bridge, args.request)
     finally:
         bridge.close()
