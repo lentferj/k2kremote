@@ -105,8 +105,12 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
 
 
 def describe_field(obj_type: ObjectType, offset: int, raw: bytes) -> str:
-    """``"58"`` normally, ``"58 (ENV2->FilFreq Depth: 3000 cents)"`` when the
-    offset is in :data:`KNOWN_FIELDS` and its formula covers this byte."""
+    """``"28"`` normally, ``"28 (ENV2->FilFreq Depth: 1200 cents)"`` when the
+    offset is in :data:`KNOWN_FIELDS` and its formula covers this byte. Note
+    ``raw.hex()`` prints the byte in hex, not decimal -- byte ``0x58`` (88
+    decimal) is a different, larger cent value than a naive decimal-58
+    reading would give; this ambiguity is exactly what tripped up the
+    RESOLUTION_NOTES §32 hardware smoke test's own pre-test prediction."""
     hexed = raw.hex()
     field = KNOWN_FIELDS.get((obj_type, offset))
     if field is None:
