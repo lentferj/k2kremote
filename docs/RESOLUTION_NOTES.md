@@ -2667,8 +2667,21 @@ built-but-never-wired path here.
 13 new tests (`tests/test_k2kfields.py`, `tests/test_midi_bridge.py`'s
 `list_bank` tests, `tests/test_monitor_tui.py` against a synthetic
 `FakeK2000Bridge` and Textual's own `run_test()`/`Pilot` harness — no
-hardware touched), 513 total pass. Live hardware smoke test still pending
-(browse to program 906, confirm the field pane's decode matches the
-hardware-verified table, confirm the watch pane shows live traffic) — not
-yet run; recorded here as open rather than claiming a verification that
-has not happened.
+hardware touched), 513 total pass.
+
+**Live hardware smoke test, 2026-08-25: passed.** Driven the same way as the
+synthetic tests — `MonitorTuiApp` through `run_test()`/`Pilot`, headless, no
+TTY needed — but against a real `MidiBridge.autodetect()`. Browsed to bank 9
+(`901`-`910`, `906` present), selected `906`: the field pane showed offset
+199 (LFO1->Pitch Depth) as `00` -> `0 cents`, and offset 215 (ENV2->FilFreq
+Depth) as `58` -> `6000 cents`, matching §31's own recorded byte for that
+offset on that object exactly. (Predicted `3000 cents` beforehand from
+misreading §31's "returned 58" as decimal rather than the hex string
+`read`/`patch` actually print/accept — `0x58` = 88 decimal,
+`(88-28)*100 = 6000`, which is what came back. Own arithmetic error, not a
+decode or hardware finding — worth recording since this offset's byte
+`58` reads two different ways depending on which base you assume, and nothing
+in §31's prose said "hex" outright.) The watch pane opened against the real
+`midi_in` and read cleanly for a quiet 2 s window (0 lines — device idle,
+nothing unexpected; no traffic was deliberately generated to check this
+further).
