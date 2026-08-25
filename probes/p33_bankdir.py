@@ -22,6 +22,11 @@ Bank numbers are the K2000's 1-byte bank field (the hundreds digit): 3 is
 300-399. Note this is *not* the macro file's encoding, where the same bank is
 stored as 300 -- worth keeping straight when comparing a macro against what
 actually loaded.
+
+`list_bank()` itself now lives on `MidiBridge` (promoted 2026-08-25 for
+`k2kmon tui`'s object browser, same reasoning as `read_object_bytes`/
+`patch_object_bytes`) -- kept here as a thin re-export so this probe's own
+CLI usage above still works unchanged.
 """
 import sys
 import time
@@ -30,36 +35,15 @@ sys.path.insert(0, ".")
 
 from probes.hw import connect
 from k2000.definitions import ObjectType
-from k2000.messages import DirBank, EndOfBank, Info, SysexMessage
 
 
 def list_bank(bridge, bank: int, obj_type=ObjectType.Program, ram_only=True,
               quiet_for=2.0):
-    """Every object INFO the K2000 reports for one bank."""
-    client = bridge.client
-    while client.midi_in.get_message() is not None:
-        pass                                  # drain anything stale
-    client.midi_out.send_message(DirBank(obj_type, bank, ram_only).encode())
-
-    found, last_seen, done = [], time.monotonic(), False
-    while not done and time.monotonic() - last_seen < quiet_for:
-        message = client.midi_in.get_message()
-        if message is None:
-            time.sleep(0.005)
-            continue
-        data, _ = message
-        if not SysexMessage.has_valid_k2_headers(data):
-            continue
-        try:
-            decoded = SysexMessage.decode(data)
-        except Exception:
-            continue
-        last_seen = time.monotonic()
-        if isinstance(decoded, Info):
-            found.append(decoded)
-        elif isinstance(decoded, EndOfBank):
-            done = True
-    return found, done
+    """Every object INFO the K2000 reports for one bank. See
+    `MidiBridge.list_bank` -- this is that method, kept importable as a
+    plain function here for this probe's own CLI and any script already
+    importing it from this module."""
+    return bridge.list_bank(obj_type, bank, ram_only=ram_only, quiet_for=quiet_for)
 
 
 def main():

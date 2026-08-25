@@ -414,6 +414,107 @@ def test_object_name_reads_dir():
     assert bridge.object_name(ObjectType.Program, 201) == "CMI VOICES"
 
 
+class _QueuedMidiIn:
+    """Feeds pre-encoded raw messages back, gated behind a companion
+    `_RecordingMidiOut.send_message` having been called.
+
+    Matches the real port's timing, which `list_bank`'s own drain-before-send
+    step depends on: replies to THIS request only arrive after it is sent, so
+    a fake that returns them regardless of timing would let the pre-send
+    drain loop eat them before `list_bank` ever gets to the collection loop
+    -- every test using this fixture would silently see an empty result
+    without the gate, not just the one that means to test the drain.
+
+    `pre_send`: messages that ARE already sitting in the buffer before
+    `send_message` fires -- the stale backlog the drain step exists to
+    discard.
+    """
+
+    def __init__(self, messages, *, pre_send=()):
+        self._post = [(list(m.encode()), 0.0) for m in messages]
+        self._pre = [(list(m.encode()), 0.0) for m in pre_send]
+        self.sent = False
+
+    def get_message(self):
+        if not self.sent:
+            return self._pre.pop(0) if self._pre else None
+        return self._post.pop(0) if self._post else None
+
+
+class _RecordingMidiOut:
+    """Records outgoing SysEx and flips a paired `_QueuedMidiIn`'s gate."""
+
+    def __init__(self, midi_in=None):
+        self.sent = []
+        self._midi_in = midi_in
+
+    def send_message(self, data):
+        self.sent.append(data)
+        if self._midi_in is not None:
+            self._midi_in.sent = True
+
+
+def test_list_bank_collects_info_until_endofbank():
+    from k2000.definitions import ObjectType
+    from k2000.messages import DirBank, EndOfBank, Info, SysexMessage
+
+    replies = [
+        Info(ObjectType.Program, 300, 264, True, "CUT 000"),
+        Info(ObjectType.Program, 301, 264, True, "CUT 010"),
+        EndOfBank(ObjectType.Program, 3),
+    ]
+    midi_in = _QueuedMidiIn(replies)
+    midi_out = _RecordingMidiOut(midi_in)
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
+                        "stub")
+
+    found, done = bridge.list_bank(ObjectType.Program, 3)
+
+    assert done is True
+    assert [info.idno for info in found] == [300, 301]
+    assert [info.name for info in found] == ["CUT 000", "CUT 010"]
+
+    sent = SysexMessage.decode(bytes(midi_out.sent[0]))
+    assert isinstance(sent, DirBank)
+    assert sent.type is ObjectType.Program and sent.bank == 3
+
+
+def test_list_bank_reports_incomplete_without_endofbank():
+    from k2000.definitions import ObjectType
+    from k2000.messages import Info
+
+    replies = [Info(ObjectType.Program, 300, 264, True, "CUT 000")]
+    midi_in = _QueuedMidiIn(replies)
+    midi_out = _RecordingMidiOut(midi_in)
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
+                        "stub")
+
+    found, done = bridge.list_bank(ObjectType.Program, 3, quiet_for=0.05)
+
+    assert done is False          # no EndOfBank seen -- an unconfirmed listing
+    assert len(found) == 1
+
+
+def test_list_bank_drains_stale_messages_before_sending():
+    from k2000.definitions import ObjectType
+    from k2000.messages import EndOfBank, Info
+
+    midi_in = _QueuedMidiIn(
+        [Info(ObjectType.Program, 300, 264, True, "CUT 000"),
+         EndOfBank(ObjectType.Program, 3)],
+        pre_send=[Info(ObjectType.Program, 999, 1, True, "STALE")])
+    midi_out = _RecordingMidiOut(midi_in)
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
+                        "stub")
+
+    found, done = bridge.list_bank(ObjectType.Program, 3)
+
+    # the stale reply (buffered before the request was even sent) must not
+    # appear in the result -- it is drained, not collected.
+    assert [info.idno for info in found] == [300]
+    assert done is True
+
+
 def test_read_object_bytes_sends_dump_with_offset_and_size():
     from k2000.definitions import ObjectType
     from k2000.messages import Dump, Load, SysexMessage

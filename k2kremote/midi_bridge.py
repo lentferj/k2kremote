@@ -740,6 +740,56 @@ class MidiBridge:
         """Current name of an object (DIR → INFO) — the rename tool's preview."""
         return self.client.dir(obj_type, idno).name
 
+    def list_bank(self, obj_type: ObjectType, bank: int, *, ram_only: bool = True,
+                  quiet_for: float = 2.0) -> Tuple[List["Info"], bool]:
+        """Every object INFO the K2000 reports for one bank — DIRBANK (0x0C).
+
+        Promoted from `probes/p33_bankdir.py`'s `list_bank()` (same reasoning
+        as `read_object_bytes`/`patch_object_bytes`, §31: proven probe code
+        becomes a bridge method once something other than a one-off probe
+        needs it — here, `k2kmon tui`'s object browser).
+
+        DIRBANK answers with one `INFO` per matching object, then an
+        `EndOfBank` — a reply shape `_send_and_receive` (one reply per
+        request) cannot express, so this drains `client.midi_in` in its own
+        loop until `EndOfBank` arrives or nothing more shows up for
+        `quiet_for` seconds. The `bool` in the return says whether an actual
+        `EndOfBank` was seen (`True`) or the read gave up on quiet
+        (`False`) — a caller that gets `False` back has an unconfirmed,
+        possibly-incomplete listing, not a wrong one.
+
+        `bank` is the K2000's own bank field — the hundreds digit, so bank 3
+        means ids 300-399 — **not** the macro file's own encoding of the same
+        bank as a literal 300 (see `k2kmaced.macfile`'s own note on this).
+        """
+        from k2000.messages import DirBank, EndOfBank, Info, SysexMessage
+        client = self.client
+        while client.midi_in.get_message() is not None:
+            pass  # drain anything stale
+        client.midi_out.send_message(DirBank(obj_type, bank, ram_only).encode())
+
+        found: List[Info] = []
+        last_seen = time.monotonic()
+        done = False
+        while not done and time.monotonic() - last_seen < quiet_for:
+            message = client.midi_in.get_message()
+            if message is None:
+                time.sleep(0.005)
+                continue
+            data, _ = message
+            if not SysexMessage.has_valid_k2_headers(data):
+                continue
+            try:
+                decoded = SysexMessage.decode(data)
+            except Exception:
+                continue
+            last_seen = time.monotonic()
+            if isinstance(decoded, Info):
+                found.append(decoded)
+            elif isinstance(decoded, EndOfBank):
+                done = True
+        return found, done
+
     def read_macro_table(self, timeout: Optional[float] = None) -> bytes:
         """Dump the live Macro Table's object data — DUMP (0x00), a pure read.
 

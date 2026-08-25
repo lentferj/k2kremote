@@ -625,9 +625,10 @@ k2kmon read Program 201       # dump an object (the fast path — see below)
 k2kmon read Program 906 --offset 215 --size 1   # one known byte, via DUMP
 k2kmon compare Program 201    # read it BOTH ways and diff the encodings
 k2kmon patch Program 906 215 58   # write one byte at a known offset. WRITES.
+k2kmon tui                    # interactive browser: list, decode, patch, watch
 ```
 
-Three of these repay knowing about before you need them:
+Four of these repay knowing about before you need them:
 
 **`read` is roughly twenty times faster than the panel.** Reading a program's
 filter page by driving the editor costs about ten seconds and gives you one page
@@ -657,6 +658,15 @@ and refuses to report success unless a read-back matches exactly what was sent.
 reports what a human actually pressed — a better authority than counting your own
 keypresses, which is how this project ended up with a soft-key cycle one short
 and a cursor two fields away from where it thought it was.
+
+**`tui` is the persistent-connection version of the above**, one Textual screen
+instead of separate invocations: an object list (`DIRBANK`), a field pane that
+decodes every offset this project has independently verified (the
+`k2kremote/k2kfields.py` registry — same table a script would import, so the two
+never disagree), a patch modal with `patch`'s own typed-confirmation/read-back
+discipline, and a toggle-able watch pane sharing `watch`'s decoder. It needs
+`textual`, imported only when `tui` is actually selected, so nothing else in
+`k2kmon` gains the dependency.
 
 ---
 

@@ -46,6 +46,8 @@ fault becomes part of the fault. Only ``ask`` transmits, one request at a time.
     k2kmon compare Program 206   # read it BOTH ways and diff the encodings
     k2kmon patch Program 906 215 58   # write one byte at a known offset. WRITES.
     k2kmon types                 # the message table, for reading before guessing
+    k2kmon tui                   # interactive browser -- object list, known
+                                  # fields decoded, patch, and watch, one screen
 
 ``read`` is worth knowing about before reaching for the editor: driving the panel
 for one filter page costs about ten seconds and yields one page of one layer,
@@ -70,6 +72,14 @@ readings of one object share long runs of zeros.
 how this project got a soft-key cycle one short and a cursor two fields off. With
 ``XMIT Bttns`` on, the panel reports what a human actually pressed, which is a
 better authority than a keypress count.
+
+``tui`` is the persistent-connection version of ``read``/``patch``/``watch``: one
+screen with an object list (DIRBANK), a field pane that decodes every offset this
+project has actually verified (``k2kremote/k2kfields.py`` -- the same registry, so
+the TUI and a script importing that module never disagree), a patch modal with the
+same typed-confirmation/read-back-verify discipline as the CLI ``patch`` command,
+and a toggle-able watch pane sharing the CLI ``watch`` mode's own decoder. Needs
+``textual``, imported lazily so the rest of ``k2kmon`` doesn't require it.
 """
 
 from __future__ import annotations
@@ -536,6 +546,19 @@ def patch_object(bridge, type_name: str, idno: int, offset: int, hex_data: str,
     return 0
 
 
+def run_tui(bridge, type_name: str, bank: int) -> int:
+    """Launch `k2kmon tui`. Imports `monitor_tui` (and `textual`) here, not
+    at module scope, so every other `k2kmon` mode stays usable without
+    Textual installed."""
+    from k2kremote.monitor_tui import MonitorTuiApp
+
+    app = MonitorTuiApp(bridge)
+    app._obj_type = _object_type(type_name)
+    app._bank = bank
+    app.run()
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="k2kmon",
@@ -583,6 +606,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     sub.add_parser("types", help="the message table; read before guessing")
 
+    p = sub.add_parser("tui", help="interactive object browser (Textual)")
+    p.add_argument("--type", default="Program", help="starting object type")
+    p.add_argument("--bank", type=int, default=2, help="starting bank")
+
     args = parser.parse_args(argv)
 
     if args.mode == "types":
@@ -605,6 +632,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.mode == "patch":
             return patch_object(bridge, args.type, args.idno, args.offset,
                                args.data, yes=args.yes)
+        if args.mode == "tui":
+            return run_tui(bridge, args.type, args.bank)
         return ask(bridge, args.request)
     finally:
         bridge.close()

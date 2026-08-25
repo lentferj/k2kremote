@@ -2605,3 +2605,70 @@ as the primitive itself: `read --offset 215 --size 1` against program 906
 returned `58` (matching the value already confirmed via the Python API),
 and `patch ... 215 58` (a true no-op write-back) reported success and left
 the byte unchanged. 7 new tests, 495 total pass.
+
+## 32. `k2kfields.py`, `MidiBridge.list_bank()`, and `k2kmon tui` (2026-08-25)
+
+Follow-on to §31: the user asked for `k2kmon` to reach parity with the
+sibling project eosed's TUI, specifically an interactive browser that shows
+a raw byte's known meaning alongside it (eosed does this for algorithm
+names, Hz values, etc., wherever it knows them).
+
+**The registry keeps two different kinds of field knowledge distinct, on
+purpose.** `ENV2->FilFreq Depth` (Program RAM offset 215) and `LFO1->Pitch
+Depth` (offset 199) were found by DUMP-diffing two panel-driven states
+(§30) — both the **offset** and the **decode law** are known, so
+`k2kremote/k2kfields.py`'s `KNOWN_FIELDS` registry auto-decorates them
+wherever an offset is read. The filter-cutoff-to-Hz law
+(`Hz = 440 * 2**((s-9)/12)`, verified to 0.08% against the panel's own
+`Coarse:` field, CUTCAL) is exposed too, as a bare function
+(`filter_cutoff_byte_to_hz`) — but its RAM offset inside a live Program
+object was **never mapped**; CUTCAL set/read it entirely through the
+panel's F1 FRQ page, never via DUMP. `KNOWN_FIELDS` deliberately does not
+carry an entry for it, so nothing in the TUI or CLI implies an offset that
+was never verified — only a manual caller who already knows where the byte
+lives can apply the conversion.
+
+The dense byte-by-byte tables for both known offsets were, before this
+session, only ever sent to mpc2emu in chat — never committed anywhere in
+this repository. `k2kfields.py`'s `decode()` functions return `None`
+("unmapped for this byte") outside the exact ranges/spot-values §30
+actually records in prose, rather than reconstructing the missing interior
+values from memory.
+
+`MidiBridge.list_bank()` — object enumeration via `DIRBANK` (0x0C), an
+INFO×N + `ENDOFBANK` reply that doesn't fit `_send_and_receive`'s
+one-reply-per-request model — was promoted the same way `read_object_bytes`/
+`patch_object_bytes` were in §31: out of hand-rolled probe code
+(`probes/p33_bankdir.py`, unchanged in behaviour, now a one-line wrapper)
+and onto `MidiBridge` itself, so `k2kmon tui`'s object-list pane and any
+future caller share one implementation instead of two.
+
+`k2kmon tui` (`k2kremote/monitor_tui.py`) is a Textual app, kept in its own
+module so `import textual` stays optional for every other `k2kmon` mode.
+Three panes plus a modal: object list (`list_bank`), field pane
+(`read_object_bytes` for every `KNOWN_FIELDS` entry matching the selected
+object's type, decoded via `k2kfields.describe_field`), a patch modal
+reusing `patch`'s own typed-confirmation/read-back-verify discipline
+(`patch_object_bytes`), and a toggle-able watch pane sharing `watch`'s own
+`describe()` decoder — so the TUI and the one-shot CLI commands can never
+decode the same bytes two different ways. Threading follows this project's
+own convention (`refresh.py`'s `RefreshWorker`: a plain `threading.Thread`
+marshaling results back via `call_from_thread`), not eosed's `@work`
+decorator — different codebase, its own established pattern already fit.
+
+One eosed trap deliberately avoided: eosed has Hz-conversion functions that
+are defined and unit-tested but never called from its live display path —
+dead code from the UI's perspective. `k2kfields.describe_field()` is the
+one function both the TUI's field pane and any future script would call, so
+a field added to `KNOWN_FIELDS` is either exercised by the display or the
+test suite that already covers `describe_field` directly — no
+built-but-never-wired path here.
+
+13 new tests (`tests/test_k2kfields.py`, `tests/test_midi_bridge.py`'s
+`list_bank` tests, `tests/test_monitor_tui.py` against a synthetic
+`FakeK2000Bridge` and Textual's own `run_test()`/`Pilot` harness — no
+hardware touched), 513 total pass. Live hardware smoke test still pending
+(browse to program 906, confirm the field pane's decode matches the
+hardware-verified table, confirm the watch pane shows live traffic) — not
+yet run; recorded here as open rather than claiming a verification that
+has not happened.
