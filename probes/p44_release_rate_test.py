@@ -22,7 +22,7 @@ untested one) -- this is not evidence, only a note of what would confirm a
 bias if the data happened to agree.
 
 Subject: program 906 "ObSt lowp kl.lay" (K2000 hard disk, -SYNTHS/OBERHEIM.KRZ),
-picked over a first candidate (program 200 "SPACE E", six layers) and a second
+picked over a first candidate (program 200, a six-layer preset) and a second
 (program 800/801, both two-layer stacks from a same-named-but-different file)
 specifically because it is single-layer -- Layer:1/1, confirmed on the panel
 before this probe was written. A multi-layer program contaminates a release
@@ -33,7 +33,7 @@ exit path): Att1 0.10s/77%, Att2 0.10s/95%, Att3 0.22s/84%, Dec1 4.40s/67%,
 Rel1 2.00s/0%, Rel2 0s/0%, Rel3 0s/User, Loop Off/Inf.
 
 Only Rel1-time and Dec1-% are edited by this probe (Rel1-% was already 0% on
-this program, unlike the SPACE E attempt where it needed changing too). Att/Dec
+this program, unlike the program 200 attempt where it needed changing too). Att/Dec
 TIMES are deliberately left untouched -- rather than speed them up and risk a
 navigation mistake, notes are simply held long enough (HOLD seconds) for the
 unedited attack+decay to fully settle at the target sustain level naturally.
