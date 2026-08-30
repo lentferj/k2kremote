@@ -106,8 +106,32 @@ def _rows(bridge, tries: int = 5) -> List[str]:
 
 
 def _soft_index(row: str, label: str) -> Optional[int]:
-    at = row.find(label)
-    return None if at < 0 else min(5, int(at * 6 / 40))
+    """Which soft key carries `label`, by the zone its text falls in.
+
+    Rejects a match that is fused to an adjacent letter/digit on either side
+    -- a bare substring search matches "Fill" inside "OvFill" (idx 2, before
+    the real "Fill" token at idx 28) and returns OvFill's soft key instead of
+    Fill's. Confirmed live 2026-08-30 (in a sibling copy of this function,
+    `probes/p36_filter_fields.py`), where it pressed OvFill (deletes the
+    target bank's RAM objects before loading) instead of Fill. This module
+    never presses either -- see the module docstring -- but the same flaw
+    was latent here too. An exact fixed-width-zone match was tried first and
+    was ALSO wrong -- zones don't align to button text (e.g. "Append"/"Fill"
+    split mid-word under a plain 40/6 partition) -- so this walks every
+    occurrence and keeps the first one with a real boundary on both sides,
+    rather than assuming zone geometry. See docs/RESOLUTION_NOTES.md."""
+    start = 0
+    while True:
+        at = row.find(label, start)
+        if at < 0:
+            return None
+        before_ok = at == 0 or not row[at - 1].isalnum()
+        after = at + len(label)
+        after_ok = (after >= len(row) or not row[after].isalnum()
+                    or not label[-1].isalnum())
+        if before_ok and after_ok:
+            return min(5, int(at * 6 / 40))
+        start = at + 1
 
 
 def _press(bridge, label: str, *, settle: float = 1.2, hops: int = 4) -> None:

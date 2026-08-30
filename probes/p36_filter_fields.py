@@ -60,11 +60,30 @@ def select_program(bridge, number: int) -> None:
 
 
 def soft_index(soft_row: str, label: str):
-    """Which soft key carries `label`, by the zone its text falls in."""
-    idx = soft_row.find(label)
-    if idx < 0:
-        return None
-    return min(5, int(idx * 6 / 40))
+    """Which soft key carries `label`, by the zone its text falls in.
+
+    Rejects a match that is fused to an adjacent letter/digit on either side
+    -- a bare substring search matches "Fill" inside "OvFill" (idx 2, before
+    the real "Fill" token at idx 28) and returns OvFill's soft key instead of
+    Fill's. Confirmed live 2026-08-30: that pressed OvFill (deletes the
+    target bank's RAM objects before loading) instead of Fill. An exact
+    fixed-width-zone match was tried first and was ALSO wrong -- zones don't
+    align to button text (e.g. "Append"/"Fill" split mid-word under a plain
+    40/6 partition) -- so this walks every occurrence and keeps the first
+    one with a real boundary on both sides, rather than assuming zone
+    geometry. See docs/RESOLUTION_NOTES.md."""
+    start = 0
+    while True:
+        idx = soft_row.find(label, start)
+        if idx < 0:
+            return None
+        before_ok = idx == 0 or not soft_row[idx - 1].isalnum()
+        after = idx + len(label)
+        after_ok = (after >= len(soft_row) or not soft_row[after].isalnum()
+                    or not label[-1].isalnum())
+        if before_ok and after_ok:
+            return min(5, int(idx * 6 / 40))
+        start = idx + 1
 
 
 #: A filter's frequency page is "Fn FRQ", and n is the block slot the filter

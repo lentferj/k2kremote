@@ -44,6 +44,18 @@ def test_soft_index_locates_a_label_by_zone():
     assert _soft_index(row, "Macro") is None
 
 
+def test_soft_index_does_not_match_a_label_inside_a_longer_one():
+    """A bare substring search matches "Fill" inside "OvFill" and returns
+    OvFill's soft key instead of Fill's -- confirmed live 2026-08-30 in a
+    sibling copy of this function, where that pressed OvFill (deletes the
+    bank's RAM objects before loading) instead of Fill. This module never
+    reaches that dialog (see the module docstring), but the same row shape
+    is worth pinning down here too."""
+    row = "OvFill Overwrt Merge Append Fill  Cancel"
+    assert _soft_index(row, "OvFill") == 0
+    assert _soft_index(row, "Fill") == 4
+
+
 def test_ok_is_never_among_the_labels_this_module_presses():
     """OK on the Load page LOADS the file -- slow, and destructive into a
     populated bank. The browser must only ever descend, ascend and cancel."""

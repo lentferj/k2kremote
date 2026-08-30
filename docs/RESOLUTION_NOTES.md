@@ -2685,3 +2685,139 @@ in §31's prose said "hex" outright.) The watch pane opened against the real
 `midi_in` and read cleanly for a quiet 2 s window (0 lines — device idle,
 nothing unexpected; no traffic was deliberately generated to check this
 further).
+
+## 33. AMPENV Loop field, live — and a self-inflicted audio-analysis bug (2026-08-27)
+
+mpc2emu brought a cross-session question: their KRZ writer's `ENV` segment
+byte 14 (§4.4 of their `KRZ_FORMAT.md`, "loop flag (template default)",
+always written 0) was suspected of making an instant-decay envelope
+retrigger from peak while a note was still held, well before note-off.
+Investigated live against program 906 with Jan's explicit sign-off at each
+hardware step (per this file's own hardware-exclusivity rule — mpc2emu never
+drove the device directly; two sessions with open MIDI ports on the same
+K2000 at once is exactly what that rule exists to prevent).
+
+**The AMPENV Loop field is real and reachable, but not documented anywhere
+in this repo before tonight.** `probes/p44_release_rate_test.py`'s own
+docstring already recorded "Loop Off/Inf" on program 906 months ago, unread
+until now. Live navigation confirmed it: a 16-field cursor ring (Att1/2/3,
+Dec1, Rel1/2/3 time and %, plus `Loop-state` and `Loop-Inf`, cursor opening
+on Rel3-%), with `Loop-state` reading named modes, not a binary flag — one
+wheel click from `Off` produced `seg1F` ("segment 1, forward", per the K2000
+manual mpc2emu found at `~/temp/k2000_manual.txt` lines ~3690-3810: Loop
+types only ever cycle the attack/decay portion; release is documented as
+strictly gated on Note Off, regardless of loop state). One indexing bug
+surfaced and was caught by the probe's own sanity check before it could
+touch anything: the ring returned by `read_ring()` is ordered by **steps
+from the opening cursor position**, not by canonical field index — indexing
+it with a canonical index instead of `(canonical - OPEN_INDEX) % 16`
+compared the wrong two values and aborted safely rather than editing blind.
+
+**A real, separate anomaly was confirmed live, independent of Loop-state.**
+A matched A/B (`Loop-state=Off` vs `Loop-state=seg1F`, identical note/hold)
+showed the *same* unexplained envelope swell recurring ~10.3-10.7s after the
+initial attack in *both* conditions — proving Loop-Type is a coincidental
+correlate, not the cause, of mpc2emu's bug. (`seg1F` did add one further,
+distinct recurrence beyond that shared anomaly, consistent with the manual's
+attack/decay-loop description — Loop does something real, just not the
+thing being chased.) mpc2emu independently confirmed the same swell shape at
+full resolution on their own fixed build (907): decay to the floor,
+unexplained rise back toward peak, second full decay — a real K2000 firmware
+behaviour that contradicts the manual's own release-only-on-Note-Off
+description. Settled as *not* a MIDI-routing artifact by subscribing
+`aseqdump` directly to `mididings_k2000r`'s output port during a fresh held
+note: the wire carried exactly the one Note On and one Note Off sent, for
+the entire hold, nothing else. Root cause remains open on mpc2emu's side
+(their TODO.md `§KRZENVLOOP`) — three plausible causes (Loop-Type, a
+too-quiet sustain level, mididings) ruled out with hardware captures rather
+than assumption, not yet a fourth found.
+
+**Bug worth recording so it isn't repeated:** every "silent capture"
+encountered while chasing this (three in a row, blamed in the moment on MIDI
+channel, port index, and per-layer key range) was actually a **units bug in
+this session's own analysis code**, not a hardware or routing problem. The
+mono-downmix line was copied from `p44_release_rate_test.py`'s
+`completion_time()` — `(L + R) / 2 / 32767.0` — which is correct *there*
+because that function's own comparisons (a floor reference computed the same
+way) are self-consistent even though the absolute units are wrong. Reused in
+a new script against an *absolute* noise-floor constant, the extra `/32767`
+shrank an already-normalized (-1..1 float, straight from JACK)
+signal down another factor of 32767, past a hard-coded `0.001` floor — so
+every genuinely successful capture printed `peak=0.0000` and read as total
+silence. Caught only by reading the already-written WAV file's raw int16
+samples directly (`max abs sample 6070/32767`) after three rounds of
+chasing MIDI-plumbing red herrings. **Only divide by 32767 when the source
+is actually int16 PCM (e.g. read back from a WAV file already written by
+`write_wav`) — raw JACK capture arrays are already -1..1 float and need no
+such scaling.** Switched to mpc2emu's own proven `krz_audio_measure.py`
+(`record()` / `_midi_out()`, thread-first-then-note-on, name-substring port
+matching, no numeric port index) for the corrected reruns.
+
+## 34. `soft_index()` pressed OvFill instead of Fill — a real destructive miss (2026-08-30)
+
+While loading a fresh AKAI S3000->KRZ conversion (`FROM_S3.KRZ`, cross-session
+work for mpc2emu) via live panel automation, a helper used to find a soft
+key by its on-screen label pressed the wrong button: asked for "Fill" on the
+Load dialog's mode row (`OvFill Overwrt Merge Append Fill  Cancel`), it
+pressed **OvFill** instead — soft key A, not E. OvFill's own manual
+definition: "First deletes all RAM objects in the selected bank, and then
+loads in objects using consecutive numbering." An actually-destructive
+button, reached by a probe's own untested helper, not a read/patch call
+this project has otherwise been careful to verify before trusting.
+
+**Root cause:** `soft_index(row, label)` (three independent copies —
+`probes/p36_filter_fields.py`, `k2kremote/disk_browse.py`,
+`k2kremote/macro_save.py` — all with the identical flaw) found the soft key
+by `row.find(label)`, then mapped that character index to one of six zones.
+"Fill" is a literal substring of "OvFill" at index 2, well before the real
+"Fill" button's own text at index 28, so the substring search silently
+returned OvFill's zone. Confirmed by hand-tracing the actual row string,
+not assumed.
+
+**First fix attempt was also wrong, worth recording as its own lesson.**
+Tried requiring an EXACT match against a fixed 40/6-character zone slice
+instead of a bare substring — plausible, and wrong: the K2000's soft-key
+zones do not align to a uniform 6.67-character grid. Slicing "OvFill
+Overwrt Merge Append Fill  Cancel" that way put "Append"'s trailing `d`
+into the same zone as "Fill", so neither "Fill" nor "OvFill" landed on a
+zone whose *stripped* text equalled the label, and the code silently fell
+through to the same buggy substring search it was meant to replace. Caught
+by actually running the new test against the real string, not by reasoning
+about the zone math — the same "test it, don't just reason about it"
+discipline eosed's own cmp_route.py fix (§32-adjacent, same night) already
+demonstrated elsewhere in this session.
+
+**Actual fix:** walk every occurrence of `label` in the row via
+`str.find(label, start)`, and accept the first one that is not fused to a
+letter or digit on either side (`row[idx-1]` and `row[idx+len(label)]`,
+where present, must not be alphanumeric). This finds "Fill" at index 28
+(preceded by a space) and correctly skips the index-2 occurrence fused
+inside "OvFill" (preceded by `v`), without assuming anything about zone
+width or button alignment. Verified against the real collision string and
+against every existing call site's expectations (`Root`/`Open`/`Cancel`,
+`Yes`/`No`, `Macro`/`Util`, `more>`, `F1 FRQ`) — 515 tests pass, two of them
+new (`tests/test_disk_browse.py`, `tests/test_macro_save.py`), reproducing
+the OvFill/Fill collision directly rather than only the fixed behaviour.
+
+**Blast radius, confirmed rather than assumed:** the load itself completed
+using OvFill on bank 800-899 — 6 Programs, 18 Keymaps, 16 Soundblocks now
+resident there, consistent with `FROM_S3.KRZ` loading successfully via
+consecutive numbering. Programs 400s and 900s (this session's own
+measurement data) were verified untouched immediately after, since OvFill
+only ever touches the bank it is pointed at. Bank 800-899's *prior* RAM
+contents were never snapshotted for non-Program object types before the
+load, so the delete step's actual cost was unknown at the time this was
+first written up — Jan confirmed directly afterward that nothing of
+significance was there; what's now on 800 is this session's own recent
+scratch content. Reported immediately and in full to mpc2emu and to Jan
+before doing anything else, including before writing this note.
+
+**Standing lesson for any future live panel automation on a destructive
+path:** `k2kremote/disk_browse.py` already existed, already had this exact
+bug latently, and its own module docstring already states outright *why*
+its browser "never presses `OK`" — loading is slow and, into a populated
+bank, destructive. That module was the right place to look before
+hand-rolling a one-off script against the Load dialog's bank/mode-selection
+screens, which it deliberately does not implement. It wasn't checked for
+first. Building an actual safe, tested load flow (bank select + mode
+select, reusing this fixed `soft_index`) is future work, not done here.

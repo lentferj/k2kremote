@@ -86,6 +86,17 @@ def test_soft_index_finds_a_label_by_its_zone():
     assert macro_save._soft_index(row, "Nope") is None
 
 
+def test_soft_index_does_not_match_a_label_inside_a_longer_one():
+    """A bare substring search matches "Fill" inside "OvFill" and returns
+    OvFill's soft key instead of Fill's -- confirmed live 2026-08-30 in a
+    sibling copy of this function, where that pressed OvFill (deletes the
+    bank's RAM objects before loading) instead of Fill. This module doesn't
+    use those labels, but the same row shape is worth pinning down here too."""
+    row = "OvFill Overwrt Merge Append Fill  Cancel"
+    assert macro_save._soft_index(row, "OvFill") == 0
+    assert macro_save._soft_index(row, "Fill") == 4
+
+
 def test_soft_index_is_used_rather_than_a_fixed_position():
     """SoftD is `Macro` on one label page and `Util` on another, so a fixed
     position is wrong as soon as the page changes."""
