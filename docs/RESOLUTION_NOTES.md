@@ -5666,3 +5666,96 @@ expensive way — see §58 and §60.
 label fix from §35 had been applied to the probe but not to `macro_save`'s copy
 of the same parse, so the two had silently diverged with only one of them
 tested.
+
+## 63. Measuring the K2000 column of the conversion matrix (2026-09-07)
+
+Four routes re-captured for mpc2emu's matrix rebuild — `E4_to_KRZ` (10),
+`MPC_to_KRZ` (11, never scored before), `S3_to_KRZ` (6) and `S1_to_KRZ` (6) —
+through the shared three-machine harness at `~/temp/matrix/measure.py`.
+**131 of 132 notes sounded.** Five bank loads, each preceded by a verified RAM
+clear.
+
+### Device facts worth keeping
+
+**The factory source bank uses a deliberate two-level output scheme.** All
+twelve MXKRSRC programs, panel-read:
+
+    organs (6)                OUTPUT Gain  0 dB    F4 AMP Adjust  -4..-7 dB
+    12-string/Phantasia (6)   OUTPUT Gain 12 dB    F4 AMP Adjust  -2..+6 dB
+
+No overlap in either field, and 12 dB is one of the K2000's discrete gain steps
+rather than a tuned value. This settled an open question on mpc2emu's side —
+their converter wrote those six patches ~30 dB *down*, and the source boosts
+them ~22 dB *up*, so nothing was being carried across faithfully. Their reader
+takes zone volume from the sample's own `volumeAdjust` and **never reads the
+program-scope `OUTPUT Gain` or `AMP Adjust` at all**.
+
+**A clean split in the data is not a cause.** Both sides read that as an
+organ-versus-12-string split, because the twelve programs sort exactly that way
+in the source *and* in the output — a 6/6 partition with no overlap in two
+independent fields. The real variable is whether a preset has velocity layers;
+in this bank the two partitions coincide. Twelve programs cannot separate them.
+Only mpc2emu's build log could, because it names the mechanism as it fires.
+
+**§52's drum-program rule is about the K2000's own layer count.**
+`Trap-Kit-Purple` reads `Layer:1/3` — three layers, not more than three — so it
+sounds on any channel, and it did, on the harness's channel 9 with Master
+`DrumChan` at 8. Predicting a drum-channel null for it was wrong. Its actual
+null at note 55 is the key map: layer 1 is `LoKey C 2 / HiKey C#3`, i.e. 36-49.
+That patch now has **three plausible mechanisms that all present as silence** —
+drum channel, key range, and a dead conversion — and only one of them fired.
+
+### The contamination flag fails on quiet material
+
+`measure.py` flags a note when its pre-roll sits within 40 dB of that note's
+peak. `PD Tapemaker` demonstrated both failure modes an hour apart, same
+program, same notes, only the note gap changed:
+
+    gap 3.0 s   pre-roll -66.5 dB   flagged   TRUE POSITIVE, real bleed
+    gap 8.0 s   pre-roll -93.6 dB   flagged   FALSE POSITIVE, bleed gone
+
+27.1 dB of bleed removed and the flag never moved, because that program's whole
+dynamic range is **40.2 dB** — peak -51.0 against a -91.2 floor. A 40 dB
+peak-relative test has nowhere for a clean pre-roll to sit. It cannot pass at
+any gap. The test's premise fails on quiet material, and a floor-relative
+measure belongs in the post-pass where it applies to files already written.
+
+### The sidecar was wrong three times, each time plausibly
+
+`measure.py` averages stereo to mono before computing features, so per-channel
+peaks and floor occupancy needed a companion pass over the WAVs it writes
+(`chan_sidecar.py`). It produced confident wrong numbers three times:
+
+1. **Floor from the file's first 200 ms** — caught a transient in the head and
+   reported a -53.7 dB floor for a program whose own pre-rolls measure -81 to
+   -94 dB.
+2. **Note onsets reconstructed from the nominal PRE/HOLD/GAP constants** — the
+   harness records each note's real `time.time()` and its sleeps overshoot, so
+   by the fourth note the "pre-roll" window had walked inside the note and the
+   floor read -38.8 dB.
+3. **The gap hardcoded at 3.0** — on an 8 s re-take every window walked five
+   seconds further out of place per note and landed in the silence *between*
+   notes, reporting "min above floor" around 14 dB for programs 63-83 dB clear.
+
+Every one of the three **manufactured the floor-limited reading the file exists
+to detect**, and two of them reached a peer before being caught. The fix that
+holds: the floor uses **no timing at all** (quietest 5 % of 250 ms windows
+across the file) and is cross-checked against the harness's independently
+computed `preroll_db` — agreement is printed per program and runs 0.3-1.7 dB.
+Peaks take the gap from the features file rather than a default, and the
+`silent` flag is carried across from `measure.py` rather than re-derived,
+because a raw sample peak and a smoothed envelope peak disagree by ~14 dB on a
+silent window.
+
+### Two process-check bugs, opposite symptoms
+
+A waiting loop polling `pgrep -f blockwalk.py` matched **its own command line**
+and reported a job that had crashed 35 minutes earlier as still running (§61).
+The matrix harness's new concurrency guard matched **its own `timeout`
+wrapper** — whose argv contains the script name — and refused to start a run
+with no conflict present.
+
+Same bug, opposite symptoms: one claimed health that was absent, the other a
+conflict that was absent. Neither is legible as a process-detection failure at
+the point of impact. Check a background job **by pid**, and exclude your own
+ancestors.
