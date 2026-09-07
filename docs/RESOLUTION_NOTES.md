@@ -5406,3 +5406,217 @@ typing digits while the Program Editor happened to be open edited the parameter
 under the cursor instead of selecting a program — fixed by asserting Program
 Mode before typing, which is now also the reason the helper is safe to reuse.
 
+## 60. The algorithm/DSP-function table, and codes that are not global (2026-09-07)
+
+mpc2emu asked for the comprehensive algorithm/function lookup table (their
+`§K2ALGWALK`), framed as a panel walk: step every algorithm, read the block
+chain off the ALG page. Most of it did not need the device at all.
+
+### The table was already in print
+
+The Musician's Guide does not contain it — it *points* at it: "the Reference
+Guide contains a list of all 31 algorithms and the DSP functions available for
+each one". The Reference Guide is on disk as the numbered chapter PDFs beside
+the Musician's Guide, and chapter 26 is `26 DSP Algs.pdf`. `pdftotext -layout`
+renders the block chains and the per-block function lists cleanly; only the
+line-and-arrow glyphs come out as an unmapped symbol font.
+
+Parsed to `~/temp/k2k_algs/k2000_algorithms.json` and `K2000_ALGORITHMS.md` by
+`parse_algs.py`. Five minutes, no hardware. Two structural facts a converter
+needs, both from the manual rather than from measurement:
+
+- **Algorithms 26-31 have no PITCH stage.** Four stages, not five.
+- **A block can span several stage slots** — algorithm 1's HIFREQ STIMULATOR
+  occupies three of the five. So "which block is in F3" is not the same question
+  as "which stage is third".
+
+One parser bug worth recording because it is invisible in the output: keying the
+function lists by block *name* silently merged the two blocks of algorithms 8-15,
+which are both called `LOPASS`. Keyed by position instead.
+
+### What print does not give: the codes
+
+The Reference Guide names functions; the converter needs bytes. That is the part
+worth device time, and an accident made it cheap.
+
+**Typing a number into a block field on the ALG page selects the function by its
+code.** Found by fat-fingering a program number while the cursor sat on a block
+and watching `SINE` become `LOPASS`, with the display showing `1...` mid-entry.
+That is also a warning for anyone driving this machine: stray numeric entry
+edits whatever the cursor is on, and the ALG page's cursor does not start on the
+Algorithm parameter.
+
+Two more facts make the reading trustworthy:
+
+- **A dump taken with the Program Editor open reflects the edit buffer.** Offset
+  241 tracked every typed change. This is what allows (typed code, panel name,
+  stored byte) to be captured as a triple rather than assumed to line up.
+- `get_current_parameter_name()` returns `Algorithm:` on the algorithm parameter
+  and empty on a block field, which gives a self-identifying anchor to navigate
+  from. Ring, rightwards: `block1 -> ... -> Algorithm -> PITCH -> block1`.
+
+### The block type offsets
+
+    F1 = 209    F2 = 225    F3 = 241    F4 = 257
+
+All four measured by DUMP-diff. The 32-byte spacing was deliberately not assumed
+after the first two were known: assuming it would have put two blocks' worth of
+codes at wrong offsets with every value still looking like a legal function.
+
+The offset search has a property that came out of the failure mode rather than
+despite it. Since an accepted code stores its own value, the offset is the
+position holding the typed value for several different probes — and **a refused
+probe fails to vote rather than voting wrongly.**
+
+### The codes are per block, not global
+
+This is the load-bearing result, and it is the opposite of what was reported to
+mpc2emu first.
+
+    NONE          60 in the LOPASS-family blocks and alg 5 F3
+                  61 in alg 5 F1, alg 2 F1, alg 16/17/18 F2
+                  62 in alg 1 F1
+                  63 in alg 21 F2
+    PARA BASS      8 in alg 2/5 F1   but  10 in alg 16 F2
+    PARA TREBLE    9 in alg 2/5 F1   but  11 in alg 16 F2
+
+A byte means something only together with the block it sits in. Full table in
+`~/temp/k2k_algs/K2000_FUNCTION_CODES.md` and `function_codes_by_block.json`,
+60 functions, every name in the printed table covered.
+
+The double-output algorithms carry a surprise for anyone indexing blocks: on
+algorithm 3 the last two stages are **one cursor field offering a pair**,
+reading `AMP U   AMP L` (byte 38) or `BAL     AMP` (byte 39). There is no third
+block to select.
+
+### Four ways this went wrong, all the same way
+
+Every one produced a confident, in-range, legal-looking answer.
+
+**A refused code returns another legal function of that block.** Not an error,
+not a null — a real function name, promptly, from a live device, changed from
+the previous reading and causally downstream of the key pressed. The usual
+defence against a bad read is to check the thing you poked responded at all, and
+here it did.
+
+**A sentinel wiped by the same fallback.** The first refusal detector set the
+field to a known value before each probe and asked whether the probe left it
+standing. The fallback overwrote the sentinel too, so the detector reported "0
+refused" for a block that refused most of the range.
+
+**A terminator that was not one.** The first sweep stopped at 70 because NONE
+sat at 60 and that felt like an end. `LP2RES` and `SHAPE2` were at 73 and 74 —
+eight codes past where the search stopped. A sentinel value that reads like a
+terminator is not a terminator.
+
+**A correct observation retracted because it did not fit.** NONE reading 61 in
+algorithm 5's F1 was reported, then withdrawn as a refusal artefact, because a
+global enumeration had already been committed to. The stored byte says 61. The
+retraction was made in the same message that warned a peer against naming a
+fallback after what they expected.
+
+The rule that survives all four, and it is stronger than the "show the detector
+can produce a non-null" form:
+
+> **A measurement is not evidence until the apparatus has been shown able to
+> produce a reading that CONTRADICTS the one you got.**
+
+Liveness is the weak form; distinguishability is the strong one. Practically:
+ask what reading would have appeared if the hypothesis were false, then check
+the apparatus can produce it. If it cannot, you have built an instrument that
+only says yes. What rescued this walk was not proving the panel responds — it
+was reading the stored byte, a second channel that *could* disagree with the
+panel, and did, on the first block.
+
+### Two rig faults, both of which hid a failure rather than caused one
+
+**A script whose `main()` runs at import drove the panel every time it was
+imported.** Two helper modules were written without an `if __name__` guard, so
+importing them from the next script silently ran a full hardware pass first.
+
+**A waiting loop that polled `pgrep -f blockwalk.py` matched its own command
+line** and therefore never noticed the child had died. A walk crashed at 23:56
+and was reported as "progressing" for 35 minutes. Compounding it, the progress
+check grepped the log for success patterns only, so the traceback was filtered
+out of view. Check a background job by pid, and grep for failure as well as
+progress.
+
+## 61. The LFO1 rate ladder, and a law that was right in one segment (2026-09-07)
+
+mpc2emu's KRZ writer converted an LFO rate to a byte with one undocumented
+line, `byte = 26 + 10*Hz`, no anchors cited and no calibration record. Two
+programs measured on the panner work disagreed with it unevenly — exact on one,
+11.5 % out on the other — which is the signature of a fitted line, not a scale
+error. Swept properly, the machine turns out to be piecewise.
+
+### The table
+
+`LFO1 MnRate` is at Program-object offset **91**. 185 rows, one per byte,
+read off the panel, no interpolation:
+
+    byte   0..20    0.01 Hz/byte      0.00 ..  0.20 Hz
+    byte  20..36    0.05 Hz/byte      0.20 ..  1.00 Hz
+    byte  36..126   0.10 Hz/byte      1.00 .. 10.00 Hz
+    byte 126..176   0.20 Hz/byte     10.00 .. 20.00 Hz
+    byte 176..184   0.50 Hz/byte     20.00 .. 24.00 Hz
+
+**Byte 184 is the ceiling** — the wheel will not move past it. The reachable
+range is 0-184, not 0-255.
+
+In the third segment `byte = 36 + (Hz - 1.00)/0.10`, which reduces to
+`26 + 10*Hz`. **The old law was correct, for 1 to 10 Hz.** Both programs that
+raised the question sit either side of the 10 Hz boundary: 8.70 Hz converts
+exactly, and 11.50 Hz gets byte 141, which really is 13.00 Hz.
+
+Full map at `~/temp/k2k_algs/lfo1_rate_table.json`.
+
+### Audio cross-check
+
+Four bytes across three segments, two reps each, panel value asserted before
+each capture:
+
+    byte  76   panel  5.00 Hz   audio  5.00   delta 0.00
+    byte 126   panel 10.00 Hz   audio 10.00   delta 0.00
+    byte 156   panel 16.00 Hz   audio 16.11   delta 0.11
+    byte 180   panel 22.00 Hz   audio 22.22   delta 0.22
+
+The residuals are **FFT quantisation, not error**: a 1.8 s window at 10 ms
+frames gives 0.556 Hz bins, and 16.11 is bin 29 exactly — the nearest bin to
+16.00 *is* 16.11. The panel is the instrument here and the audio is the check
+that it is not lying; neither confirms the other's third decimal.
+
+### The mistake that nearly produced a table
+
+The first sweep ran 260 steps in which the panel climbed 0 to 24 Hz **while
+the byte being read never left 49**. Offset 32 is `GLFO2`'s MnRate, not
+LFO1's. The discovery run had searched for a field whose parameter name
+contained `MnRate`, but the LFO page's fields return an **empty** parameter
+name — so nothing ever matched, every iteration pressed `CursorRight`, and the
+cursor walked onto GLFO2 before anything was typed. The resulting diff was a
+real byte for the wrong field, and it fit `26 + 10*Hz` beautifully, which is
+exactly what made it convincing.
+
+What caught it was the data, not foresight: **a byte that does not move while
+its value does is not that value's byte.** The sweep now types a known value
+at startup and requires the `LFO1` *screen row* to change before it will sweep
+anything — verifying the subject against the display, since the page does not
+provide a name to verify against.
+
+Two device facts fell out of it:
+
+- **SysEx writes are refused while the Program Editor is open** —
+  `DNAK ObjectCurrentlyBeingEdited` — although reads still reflect the edit
+  buffer (§60). So during an edit a byte can be read but not written from
+  outside, which is why this had to be driven by the alpha wheel.
+- `MxRate` stayed `0.00H` and `RateCt` `OFF` across all 185 rows and the
+  reported rate tracked `MnRate` alone. Consistent with "MnRate is the rate
+  when RateCt is OFF", but untested with RateCt on: unobserved, not excluded.
+
+### Why it matters beyond one program
+
+Above 10 Hz the old law spends one byte per 0.1 Hz where the machine spends one
+per 0.2, so the excess over 10 lands roughly doubled — a 15 Hz source arrives
+at 20 Hz. Above 21.4 Hz it silently clamps at the 24.00 ceiling. Below 1 Hz it
+fails worse in relative terms: 0.10 Hz becomes byte 27, which is 0.55 Hz, five
+and a half times too fast. **Slow LFOs are the proportionally worst affected**,
+and they are the ones a listener notices.
