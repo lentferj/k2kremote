@@ -4613,3 +4613,669 @@ velocities sat at 0.008-0.019, and `shape` went *down* over the interval,
 which is not what a drifting box looks like. Peak takes a single sample and is
 the least averaged statistic in the ladder — see §49.
 
+## 52. A program with >3 split layers only sounds on the drum channel (2026-09-05)
+
+`Lead-PRO5 Lollipop` measured **silent on every key from 0 to 96** across two
+different bank builds and two different loads — 8 enabled layers covering the
+whole keyboard, all velocities, `Adjust 6dB`, every zone with a sample
+assigned, samples present in RAM with real PCM. §50 recorded it as unexplained
+after truncation was excluded by experiment.
+
+It was never silent. **A K2000 program with more than three *split* layers is
+a drum program, and a drum program sounds only when the played channel matches
+`DrumChan` on the Master page.** Lead-PRO5 has 8 layers; everything else in
+the bank has 1 to 3.
+
+    202 'Lead-PRO5 Lollip' v127, played on channel 9   (DrumChan 8):
+        every key -76 .. -71 dBFS, no onset          silent
+
+    same program, DrumChan moved to 10, played on channel 10:
+        k36 -14.38  k48 -12.63  k60 -11.21  k72 -8.96  k84 -11.14
+        onsets detected on all five                   normal
+
+The converter had said so in its own build log, in as many words, including
+why it declined to fuse the layers down to three: *"a faithful four-layer
+electric piano is SILENT on a normal channel, which is not a subtler rendering
+of the preset, it is no rendering at all."* **Three sessions spent hours
+reverse-engineering a fact the tool that produced the file had already
+printed.** Nobody asked whether the generator had anything to say about the
+artefact before measuring it.
+
+**The drum channel is not otherwise special, and an inference that it was cost
+a wrong explanation.** A one-layer program sounds on the drum channel exactly
+as it does anywhere else — `LD Vintage Acid` gave −13.57 dBFS on channel 10
+with `DrumChan` set to 10, against −13.56 when 10 was an ordinary channel. So
+"is this the drum channel?" explains a drum program's silence and nothing
+else. This session had claimed the opposite from a single failed control.
+
+**A separate fact about this rig, unexplained and worth knowing: channel 8
+does not reach the instrument.** Normal and drum programs alike are silent
+there, both through `mididings_k2000r` and by sending straight at
+`ESI M4U eX MIDI 8`, while channels 9 and 10 sound normally over the same
+paths. `~/mididings_k2000r.py` does run `ChannelFilter(9,10,11,12,13,16)`,
+which explains the mididings route but not the direct one. Not chased —
+nothing depends on it — but a test that needs channel 8 will fail for reasons
+that have nothing to do with the instrument's programs.
+
+**Measured properly, the program converts correctly.** Full grid row on the
+drum channel — 45 notes, 0 onset fallbacks:
+
+    key   peak v1..v127        peak swing   attack-RMS swing
+     36   -30.01 .. -14.29       15.73          10.71
+     48   -32.36 .. -12.65       19.71          20.69
+     60   -25.78 .. -11.31       14.46          19.02
+     72   -25.28 ..  -9.22       16.07          15.92
+     84   -27.92 .. -11.25       16.68          23.89
+
+Note that **`mid` sits at the floor (−89.6 to −90.0 dB) on every one of those
+notes** while `attack` and `full` carry real signal: the samples are short
+enough to be over before 0.4 s. Scored on `early` or `mid` this program would
+read as near-silent *again*, for the third time in one bank and the second
+distinct cause — see §51's window artefact. **A statistic that reads a healthy
+note as silent has now produced a false defect on this material three times.**
+
+**Consequence for measurement data:** a grid captured on channel 9 records
+*valid observations of the wrong experiment* for any drum program in the bank.
+The rows are not wrong; they are not a measure of the conversion either, and a
+scoring pass that reads them as 0.000 is scoring the channel assignment.
+
+## 53. Two RAM edits that tested two fixes — one confirmed, one refuted (2026-09-05)
+
+Both run separately, both restored and verified, nothing on the card touched.
+
+### Keymap object layout, and the wrong-sample fix
+
+**Keymap entries are 6 bytes, with the sample id at `31 + 6i` as a 16-bit
+big-endian value.** Found by dumping the object and listing every offset
+holding a plausible sample id: the result reads as a run-length structure and
+the runs line up with the zones the panel shows.
+
+    keymap 215 (Bass-Dark, 668 bytes), entries 0..53:
+      312 x17, 313 x5, 314 x5, 315 x5, 316 x5, 317 x5, 318 x5,
+      311 x5, 320 x5, 321 x49
+
+**`311` sits exactly where `319` belongs** — the ascending run breaks for five
+entries and resumes. That is the noise sample in a bass keymap, and 319
+(`nderhand-061 Db3`) is the bank's one unreferenced sample: the same defect
+seen from both ends. Patching those five low bytes (311 = `0x0137`,
+319 = `0x013F`, so one byte each) across all three layer keymaps:
+
+    k 48   -3.75 ->  -4.22    -0.47 dB   (control)
+    k 60  -32.58 ->  -2.62   +29.96 dB   <-- target
+    k 72   -7.09 ->  -4.39    +2.70 dB   (control)
+
+Key 60 moves from 28 dB below its neighbours to level with them. **The
+control that moved 2.70 dB is not an effect**: that note has read between
+−4.4 and −7.8 dBFS across six runs today, so both controls are inside their
+own spread. Worth stating rather than quietly reporting only the target.
+
+### The up-pitch ceiling is far higher than the writer assumes
+
+§50 recorded the top of `Bass-Dark` as unreachable because the layer stops at
+`HiKey 83`, and the working theory — held by both sessions — was that the
+writer stopped there because the zone's sample (root 71, stored at 24000 Hz)
+could not be pitched higher. Prediction: extending the bound would give
+silence or a mistuned note.
+
+**Program offset `53 + 224n` is the layer `HiKey`** (the only byte reading 83
+on all three layers; neighbourhood `[0,0,0,83,0,127,0]`). Patched to 127 and
+**verified on the panel before measuring** — `HiKey` read `G 9` on all three
+layers, so the byte is what it was taken for.
+
+    k 83  -2.34 ->  -2.50    -0.16 dB   (control -- did not move)
+    k 84 -75.75 ->  -2.44   +73.31 dB
+    k 96 -75.76 ->   0.00   +75.76 dB
+
+**Level alone would have been the wrong evidence** — the prediction allowed a
+mistuned note, which is loud. So: strongest partial per key, v96 (v127 clips
+the capture above k91), across the whole range:
+
+    key  +st   partial     key  +st   partial
+     83   12    492.2       90   19    369.1  (= 738.2 / 2)
+     84   13    521.5       91   20    389.6
+     85   14    550.8       92   21    413.1
+     86   15    585.9       93   22    436.5
+     87   16    621.1       94   23    928.7
+     88   17    659.2       95   24    984.4
+     89   18    697.3       96   25    984.4   <-- identical to key 95
+
+A clean semitone ladder from +12 to +24 (492.2 × 1.0595 = 521.4, and every
+step tracks to within a bin), then key 96 returns **exactly** key 95's
+partials. **The rate caps at +25 and nowhere below.** Keys 84-95 play at the
+correct pitch and full level, and are silent in the shipped bank for no
+reason — twelve semitones of usable range discarded.
+
+For this sample +24 is a playback rate of 96 kHz and +25 is 101.7 kHz, so the
+limit looks like an absolute rate ceiling near 96-102 kHz rather than a fixed
+transposition. **Measured on one sample at one stored rate** — a 44.1 kHz
+sample would presumably hit the same wall around +12, and +24 must not become
+a constant until a second rate has been checked against it.
+
+### It is an absolute rate ceiling of 96 kHz, on two samples an octave apart
+
+One sample at one stored rate cannot separate an absolute rate ceiling from a
+fixed transposition, so the +24 above is not on its own a law. The
+discriminator needs no second stored rate to be *known*, only to be
+*different*: repoint the top run at a neighbouring sample and see whether the
+cap lands on the same semitone offset.
+
+Repointed keymap entries 57-105 in all three layer keymaps from sample 321
+(root 71) to sample **320** (root 66) and swept. Exact stored rates, read out
+of the file afterwards from integer-nanosecond periods:
+
+    smp 321  root 71  23999.808 Hz    +24 -> 95,999.2 Hz  plays   +25 -> 101,707.6 Hz  caps
+    smp 320  root 66  42762.455 Hz    +14 -> 95,998.5 Hz  plays   +15 -> 101,706.8 Hz  caps
+
+**Both last-playing rates are 95,998-95,999 Hz; both first-capped are
+101,707 Hz.** Different samples, different semitone caps (+24 against +14),
+same absolute rate — so the limit is a playback rate and a fixed transposition
+is dead. It matches a `96000` already present in mpc2emu's
+`_compute_base_pitch()`, twenty lines from the `48000` its
+`_compute_max_pitch()` clamps with.
+
+Their corpus evidence for 48000 (sr=30k → +814, sr=15k → +2014) is not a
+contradiction: those are values authors *stored* in a maxPitch field, an
+authoring convention, and **the machine plays an octave past it.** Two true
+observations about different things, which is why this stayed hidden.
+
+**Two samples could only bracket it, and the reason is arithmetic rather than
+effort.** Their rates are 23999.808 and 42762.455 Hz — a ratio of 1.78177,
+which is 9.98 semitones. **They sit on the same semitone grid**, so their step
+ladders land in the same places and bracket the ceiling identically: four
+points, one constraint. The bracket was `(95,999 , 101,707) Hz` — one semitone
+wide, excluding 48000 outright but admitting 100 kHz as readily as 96000.
+
+Narrowing needed a rate that is *not* a semitone multiple of 24 kHz. Of the
+six stored rates in this bank, five sit on that grid to within 0.0004 of a
+semitone; only a 44.1 kHz group is off it, and it reaches **99,000 Hz at +14**
+— inside the bracket.
+
+### The capped pitch measures the ceiling
+
+Sample **220** (`elodic-PD46 Syn4`, root 51, 44099.488 Hz), pitched rather
+than one of the twelve drums at the same rate — a partial ladder cannot be
+read off a kick:
+
+    key  +st     f0 Hz    commanded playback
+     64   13    196.32          93,444 Hz     last playing
+     65   14    201.87          99,000 Hz     CAPPED
+     66+  15+   plateau at 201.78 +- 0.37 Hz through key 72
+
+**99,000 Hz does not play, so the ceiling is below it and 96000 survives.**
+
+But the plateau is not merely "capped" — **it is the ceiling expressed as
+pitch**, and that turns a bracket into a measurement. Key 64 plays at a known
+93,443.6 Hz and reads 196.32; the plateau reads 201.78, **+0.475 semitones**
+above it:
+
+    ceiling = 93,443.6 x 2^(0.475/12) = 96,044 Hz     (plateau mean)
+            = 93,443.6 x 2^(0.483/12) = 96,085 Hz     (key 65 alone)
+
+**0.8 cents from 96,000 (+0.05%)**, and consistent with all six observations
+across the three samples. A capped note does not need a bracket around it: the
+frozen pitch *is* the limit, referred to a key whose rate is known.
+
+**Caveats, the first being the one that matters.** The f0 estimator (harmonic
+product spectrum) **jumps harmonic rank on several keys** — steps of +4.00,
+−1.95 and −10.90 semitones appear between rows that are certainly one semitone
+apart, so the low rows are not a pitch measurement. The boundary rows are
+trustworthy for a narrower reason: key 64, key 65 and the whole plateau lie in
+the same rank (196-202 Hz), so the *ratio* between them holds whatever the
+rank is, and the plateau is flat to 6.3 cents over seven keys.
+
+And **the first attempt clipped at 0.00 dBFS on every note.** This program has
+almost no velocity response, so a lower velocity does not help — attenuating
+the instrument with **CC7 = 40** (restored to 127 afterwards) fixed it. The
+clipped run put the boundary in the same place but its middle rows were worse.
+A clipped capture is exactly the input that makes a harmonic estimator
+confident and wrong.
+
+**Outcome of the fix on the peer's side**, recorded because it is what the
+measurement was for: `_compute_max_pitch()` had two callers doing different
+jobs, and the 48000 was the right constant for the wrong one. The stored
+`maxPitch` field keeps 48000 (an authoring convention that matches every real
+soundset and does not gate playback); how far a zone may *extend* moved to a
+new ceiling at 96000. Over 69 banks / 2160 zones: **zones lost entirely
+78 (3.6%) → 0**, zones clipped at the top **899 (41.6%) → 380 (17.6%)**. A
+"lost" zone was never silence — hole-filling extended a neighbour across those
+keys, so they sounded the wrong sample.
+
+**An off-by-one in reading this sweep cost the peer session an hour.** The
+first report said sample 320 "tracks to +13, caps at +14". It tracks to +14
+and caps at +15: key 80's partials happen to equal the frozen value, because
+the frozen value *is* the +14 rate that everything above clamps to, and the
+first frozen row was read as the first *distinct* one. That one-row shift made
+the two samples disagree by a semitone, which produced a 0.17 ns anomaly, two
+incompatible framings that each fitted three of four points, and a
+frame-offset hypothesis — none of which existed. **Computing the ratios
+between consecutive rows takes one line and would have caught it; looking at
+the column and deciding where it changes did not.**
+
+    k78 -> k79   1.0555  = +0.94 st   tracking
+    k79 -> k80   1.0603  = +1.01 st   tracking     <-- misread as the cap
+    k80 -> k81   1.0000  = +0.00 st   capped
+
+**The failure mode above the cap is the dangerous kind.** The note does not go
+silent: it plays at −5 to −6 dBFS, cleanly, at a frozen wrong pitch, for
+seventeen consecutive keys. **A peak or RMS measurement scores every one of
+those keys as a success.** Only the partials show it.
+
+That is the third distinct mechanism in one day with the same signature — a
+plausible number measuring the wrong thing. The others: §51's window artefact
+reading a healthy note as silent, and §50's truncated bank manufacturing
+15.44 dB of velocity response on a program whose `AMP VelTrk` byte is 0. **A
+number being reasonable is not evidence that it is a measurement of what it is
+named after** — and the transcription slip above is a fourth, cheaper variant:
+a number that measured the right thing and was read wrong.
+
+**Limitation of the sweep, stated because the correction above depends on
+knowing it:** the partial ladder is only cleanly readable from key 78 upward.
+Below that the top-three-partials picker latches onto different harmonics
+between keys (k75→k76 reads +5.82 semitones, an artefact). The
+tracking/capping boundary is unambiguous because it lies in the readable
+region and the frozen rows are bit-identical, but the low rows are not a pitch
+measurement.
+
+### Method notes
+
+- **A byte found by value search is a candidate, not a field.** Both offsets
+  here were confirmed against the instrument's own display before anything was
+  measured — the keymap by its run structure matching the panel's zones, the
+  `HiKey` by reading `G 9` back off the LAYER page after patching. §51's list
+  of confident wrong numbers is what that habit exists to avoid.
+- **`patch_object_bytes` made the keymap edit possible at all.** A panel edit
+  would not survive: three layers use three keymaps, only one editor can be
+  open at a time, and §36's rule is that panel edits die when the editor
+  closes. A SysEx patch persists in RAM, so all three could be changed and
+  then measured together.
+
+## 54. Measuring two converter fixes, and a mean that lied (2026-09-06)
+
+`MX9MPCKR` (MATRIX6) against `MX8V501` (MATRIX5) — same eleven MPC source
+programs, same `convert.py` invocation, differing by mpc2emu's 96 kHz ceiling
+fix and a headroom-downsampler fix. Both grids captured with the same rig, the
+same four windows and the same 25 bands, matched **by program name**: the slot
+order differs between builds, so an index match would compare one program
+against another.
+
+    ceiling fix        WORKS, and correctly    k84 -75.74 -> -2.99 dBFS, right pitch
+                                               layer HiKey 83 -> 95
+    drum-program flag  WORKS                   Lead-PRO5 plays on ch9, 45/45 onsets
+    headroom fix       NO measurable effect    +0.17 dB level = rig offset; the
+                                               apparent +7 dB spectral tilt was retracted
+    wrong sample       NOT FIXED, MOVED        noise run keys 59-63 -> keys 70-74
+    key 85 artefact    invisible to this rig   right pitch, right level, wrong sample
+    k88 and two others  NOT REAL                single-capture flukes; do not
+                                               trust an unrepeated single cell
+
+### "Audible" is a weaker claim than the fix predicts
+
+`Bass-Dark` k84 went from 1/9 audible to 5/9 and +72.75 dB — but a key playing
+the wrong sample at the wrong pitch is also not dead. The partial ladder
+settles it:
+
+    k80 208.01   k81 219.73   k84 260.74   k85 275.39   k86 292.97 ... k91 389.65
+    every step +1.00 semitone (two estimator rank-jumps at 82/83 aside)
+
+k84 sits mid-ladder at the right pitch and a level in line with its
+neighbours. **That is "correct", not "not dead".** The distinction was
+mpc2emu's ask and it was the right one.
+
+Coverage now stops at key 95, and that is **physics rather than a clamp**: the
+topmost sample is root 71 at 24 kHz, and +24 semitones is exactly key 95 under
+the 96 kHz ceiling measured in §53. The writer's bound and the hardware limit
+now coincide.
+
+### A defect this rig cannot see, by construction
+
+The build log records a dropped zone at key 85. **In audio, key 85 is clean —
+right pitch, level in line with its neighbours.** The hole-fill covers it with
+the neighbouring sample, so it is *wrong sample at the right pitch*, and a
+level-and-pitch check passes it. Catching it needs a timbre comparison against
+the source.
+
+**This is a permanent limitation of the measurement, not a gap in one run**, and
+"k85 clean" must never be quoted as evidence the zone-drop is harmless.
+
+### The wrong sample did not get fixed; it moved
+
+Read out of the keymap objects rather than inferred from the level change:
+
+    MX8V501    entries 47..51  -> keys 59..63   sample 311 (noise)
+    MX9MPCKR   entries 58..62  -> keys 70..74   sample 311 (noise)
+
+Same five-entry run, same broken sequence `316, 317, 318, 311, 320, 321`,
+sample 319 still the missing member and still unreferenced. **k60 improving by
++28.24 dB and k72 regressing by −27.64 dB are the same defect moving one zone
+up with the coverage remap** — not a fix and a regression. Reading the object
+is what distinguished those; the levels alone would have supported either
+story.
+
+### The mean said +1.33 dB. The median said +0.01. Both were wrong.
+
+mpc2emu predicted the headroom fix (11% → 90% of samples retained at 44.1 kHz)
+would show as programs getting louder. It did not: +0.17 dB median across 66
+cells, which is this rig's own inter-session offset (§49) and nothing else.
+**Retaining sample rate buys bandwidth, not level, and a level grid cannot see
+it** — but the grid stores 25 bands per note, so the right measurement was
+captured alongside the wrong one and cost no hardware to run.
+
+Per matched cell at v127: `band_v9 − band_v501`, each cell's **median band
+delta subtracted** so the level offset is removed by construction, then
+tilt = mean(≥5 kHz) − mean(<1 kHz). The set-wide mean came out **+1.33 dB,
+t = 2.5** — and it is an artefact: the median over the same 56 cells is
+**+0.01 dB**, only 28 of 56 positive. Broken down per program, two appeared to
+gain ~7 dB and seven were flat.
+
+**That per-program breakdown was also an artefact, and catching the first one
+did not stop me publishing the second.** One more level down:
+
+    LD Retro Powder   k36 +21.86   k48 +0.04   k60 +0.03   k72 +0.02   k84 +13.75
+    PD Tapemaker      k36  +1.08   k48 +6.80   k60 +10.77  k72 +9.45   k84  +8.20
+
+`LD Retro Powder` is **+0.02 to +0.04 dB on three of five keys** — its +7.14 is
+two outlier keys averaged with three nulls. `PD Tapemaker` is the ~18 dB quiet
+program and its raw band deltas at k60 run **−52.9, +33.2, −24.6, +32.1**: not
+spectral changes, but third-octave bands close enough to the floor that the
+value depends on which noise realisation landed in the window.
+
+Two independent predictions had already failed against the "two gainers" —
+mpc2emu's own file-side spectral check said −2 dB for both, and a zone-width
+test on the loaded keymaps found **four programs with byte-identical zone
+geometry, two "gaining" and two not**, with the single most heavily pitched
+program in the bank (one zone, 106 keys) gaining nothing. **Two failed
+predictions in a row are usually the measurement.**
+
+For contrast, a real null — `LD Retro Powder` at k60, all 25 bands:
+
+    +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2 +0.2
+    +0.1 +0.1 +0.1 +0.1 +0.1 +0.0 +0.1 +0.2 +0.4 +0.4 -0.1 -0.0
+
+**Corrected finding: no measurable spectral effect of the headroom fix in this
+data**, and the file-side check agrees. A mechanism (playback interpolation)
+had been proposed to reconcile +7 against −2; there is no +7 to reconcile.
+
+**The lesson is not "compute a second statistic" — I did that, at one level,
+and stopped.** A mean over five keys hides bimodality exactly as well as a
+mean over nine programs. **Every level of aggregation needs the same
+treatment, and the one you stop at is the one that will be wrong.** This is the
+fourth member of the week's family: §51's window artefact, §53's frozen-pitch
+plateau, §54's set-wide mean, and now §54's per-program mean — each a number
+that is arithmetically correct and is not a measurement of what it is named
+after.
+
+### The three odd keys were flukes, and that is the more useful result
+
+`LD Retro Powder` k36 (+21.86) and k84 (+13.75), and `Bass-Dark` k88 (8 dB
+low) all looked like single keys misbehaving inside a zone with no file-side
+cause. Re-measured with their neighbours, three repeats each, **under the same
+CC7=60 attenuation the original pass used** so the comparison was not across a
+gain change:
+
+    Bass-Dark        k86 -21.37  k87 -22.28  k88 -21.91  k89 -23.27  k90 -23.91
+      original pass: k87 -21.32  k88 -30.22  k89 -23.24
+
+    LD Retro Powder  k35 -35.80  k36 -36.00  k37 -35.90
+                     k83 -36.20  k84 -35.93  k85 -35.96
+
+**None of the three reproduce.** k88 reads −21.91 where it read −30.22; the
+two `LD Retro Powder` keys sit within 0.2 dB of their neighbours, sd 0.03-0.11
+across three repeats.
+
+**The bound this corrects matters more than the keys did.** §49 put this rig's
+repeatability at **0.004 dB back-to-back** — but that was a *sustained sine on
+one program*. On real multisampled material a single note occasionally
+deviates by several dB: k88 was **8 dB** off once and identical to its
+neighbours three times running. Typical repeatability is still fine (sd
+0.03-0.78 dB across fifteen re-measures); **the excursions are rare and large,
+which is the worst combination for a grid that measures each cell once.**
+
+**So a single-cell difference on this material is not a finding until it
+repeats.** That retroactively accounts for the +2.70 dB "control move" on
+Bass-Dark k72 flagged the previous day — noted then as inside that note's own
+spread across six runs, now with a mechanism — and, more importantly, for
+`LD Retro Powder`'s +7.14 itself: two outlier keys out of five, **each
+measured once**. The retraction above said those outliers were unexplained;
+they were flukes, and the whole +7.14 is now accounted for rather than merely
+withdrawn.
+
+**Practical consequence for future grids: measure each cell twice and keep
+both, or re-measure any cell that stands out before reporting it.** The cost is
+one extra pass. The alternative is what happened here — three single cells
+consumed an afternoon across two sessions, and two of them reached a peer's
+notes as findings before anyone asked whether they repeated.
+
+## 55. The KRZ column, and a bound that is wrong in both directions (2026-09-06)
+
+Three banks — `MX9E4KR` (E4B source), `MX9S3KR` (S3000), `MX9S1KR` (S1000) —
+22 programs, **1980 notes with every cell captured twice** on Jan's
+instruction. `mxgrid_krzcol.json`.
+
+### Two measurements are a detector, not insurance
+
+The reason for capturing twice was §54's flukes. What the pairs actually show
+is more useful than a safety margin. Across 990 paired cells:
+
+    median |r0-r1|  0.011 dB      over 1 dB   6.16 %
+    95th pct        1.212 dB      over 2 dB   2.53 %
+    max             6.199 dB      over 3 dB   0.91 %
+
+**But it is not spread evenly — it is almost entirely five programs.**
+
+    E4B    (10 programs)   median 0.001-0.010 dB    3 cells over 1 dB of 450
+    S1000  (6 programs)    median 0.004-0.014 dB    2 cells over 1 dB of 270
+    S3000  (6 programs)    NEWAGE 10/45, SPACE 16/45, VELSTACK 15/45,
+                           COSMIC 10/45, CRYSTAL 5/45 (max 6.20 dB)
+                           -- and BASIC E.P is clean at 0/45
+
+**Sixteen of twenty-two programs repeat to about a hundredth of a decibel.**
+All the instability is in five of six S3000 electric pianos, and the sixth — in
+the same bank, same load, same session — is perfectly stable. So it is not the
+rig, the bank or the load: **repeat disagreement is a property of the
+program.** `CRYSTAL E.P` at key 72 alone supplies five of the ten worst cells
+in the grid.
+
+That refines §54 rather than confirming it. The rule is not "measure
+everything twice because material is noisy" but **"measure twice to find out
+which material is noisy"** — a program agreeing to 0.01 dB needs no repeats;
+one scattering by 6 dB cannot be quoted from a single capture at all and wants
+more than two.
+
+### One constant, wrong in both directions at once
+
+Every `MX9E4KR` program is one layer over a **single-zone keymap covering keys
+12-117** — one sample stretched across 105 keys — with `LoKey 21 / HiKey 79`,
+identical on all ten. Key 84 measured silent on all ten and only those (0 of 18
+cells each; every S3000 and S1000 program is 18/18 everywhere).
+
+The obvious reading — the bound is too low and the top of the keyboard is being
+thrown away — **was wrong, and only a pitch sweep could tell.** Patching
+`HiKey` to 127 on `Super Sub 2`:
+
+    k72 131.84   k73 137.70   k74 146.48   k75..k95 all 146.48, -14.8 dBFS
+
+**The pitch stops tracking at 75 and the layer runs to 79.** Extending the
+bound gains nothing; keys 75-79 were already sounding at a frozen pitch, at
+full level, a semitone and a half flat by k79. **A level check passes every one
+of them** — the third appearance this week of the same shape.
+
+mpc2emu then computed the per-sample ceiling key from the file
+(`rate x 2^((k-root)/12) <= 96000`) and predicted four programs before they
+were measured:
+
+    program          predicted        measured
+    Synth Bass 23    tracks to 74     tracks to 74, frozen 75-79     exact
+    DX Bass 1        tracks to 79     tracks to 79, no frozen keys   exact
+    Moog Bass        tracks past 79   tracks to 79, no frozen keys   exact
+    JP4 Bass         tracks to 79     tracks to 77, k78/79 SILENT    no
+
+**So one written constant of 79 is simultaneously too high for six programs
+(which sound wrong keys) and too low for one (`Moog Bass`, which would track to
+84 and is cut at 79).** The fix is neither raising nor lowering it but
+computing it per sample. That is a stronger argument than either failure alone,
+and neither failure alone would have produced it.
+
+**`JP4 Bass` is unexplained and fails differently in kind.** Its program,
+layer, keymap and zone are identical to `DX Bass 1`'s, and the file gives both
+the same rate and root — yet they track identically to k77, to the FFT bin, and
+then one continues while the other drops to the noise floor. `Super Sub 2`
+*clamps* at the ceiling (frozen pitch, full level); `JP4 Bass` *stops*. If both
+are the same limit, **the machine does not respond to it uniformly**, and a fix
+derived from one behaviour will not predict the other.
+
+### A detector fault worth recording
+
+The freeze test marked `JP4 Bass` k79 as frozen. It is not — k78 and k79 are
+both at the noise floor, so the "identical f0" is the same noise peak read
+twice. **A pitch-equality test is meaningless below the floor and must be gated
+on level.** It did not mislead here because the levels are unmissable; in a
+quieter case it would have manufactured a ceiling that was not there.
+
+
+## 56. "The audio moved" was a broken MIDI cable (2026-09-06)
+
+A capture that had read −13 dBFS all day started reading the noise floor. A
+scan of all twenty physical inputs found the instrument on `capture_15/16`
+with a 65 dB note-versus-silence margin, and later on `capture_13/14`, and
+then nowhere at all. The rig's capture constant was changed twice to follow
+it.
+
+**The audio never moved. It was on `capture_17/18` the whole time.**
+
+`mididings_k2000r`'s `out_1` had been disconnected from the ESI port that
+feeds the K2000's MIDI IN. No note reached the instrument, so every capture of
+it was silence — and the scan, which asks *where does a note land*, found
+whatever else was answering a mis-wired MIDI path. One `aconnect 135:1 64:7`
+restored the morning's documented state and the instrument came straight back
+at −12.8 dBFS, inside the range the same program measured in that morning's
+grid.
+
+**Why the diagnosis went wrong.** SysEx and notes take different routes on
+this rig: the bridge talks *directly* to `ESI M4U eX MIDI 8`, while notes go
+through `mididings_k2000r`. So the panel stayed fully responsive — programs
+selected, pages read, edits applied — while nothing could be played. **Every
+check that the instrument was alive passed, because the instrument was
+alive.**
+
+**A port scan finds where a NOTE lands, which is the instrument you meant only
+if the MIDI path is intact.** Verify the MIDI connection before believing a
+scan that appears to move the audio; the scan cannot tell "the audio is
+elsewhere" from "the note went elsewhere".
+
+The guard added afterwards, `Rig.prove_audio()`, plays one note and refuses to
+run unless the capture hears it 20 dB over the measured floor. It would have
+caught this in one note rather than in an hour — but note what it does *not*
+do: it says the path is broken, not which half. That is still the right guard,
+because refusing to record is the important part.
+
+**Chain of consequences worth counting**, since each step looked reasonable:
+a sweep read silence; the silence was attributed to the program under test
+(`JP4 Bass`); a control was run and also read silence, correctly moving
+suspicion to the rig; a port scan appeared to locate the instrument elsewhere;
+the constant was changed to match; the next scan moved it again; and only then
+was the MIDI graph inspected. **The control did its job — it stopped a wrong
+claim about JP4 Bass — and the scan that followed then produced a second wrong
+claim of its own.** A diagnostic tool needs its own precondition as much as a
+measurement does.
+
+## 57. The PANNER block, mapped by DUMP-diff (2026-09-06)
+
+§56's pan finding left the question of *where* the panner's fields live. The
+peer session proposed setting every field to a distinct value, **saving the
+bank** and diffing the files. Saving writes to the K2000's disk, which is one
+of Jan's three reserved actions, so it was done over SysEx instead — dump the
+object, make the panel edits with the editor still open, dump again, exit
+discarding. Same answer, nothing on disk, and the object verified byte-
+identical afterwards.
+
+**Subject: program 244 `Proteus 12String`, whose panner fields all read zero**,
+so every field moves from 0 to a distinct non-zero value and no byte can stay
+put by coincidence. Identity confirmed from its keymap id before anything was
+touched.
+
+    field    typed    panel read    offset   signed   scale
+    Adjust     37        37%          242       37    1 %/unit
+    KeyTrk   -9.0      -9.0%/key      244      -45    0.2 %/key per unit
+    VelTrk    115       114%          245       57    2 %/unit
+    Depth     -73       -72%          247      -36    2 %/unit
+    MinDpt     21        20%          249       10    2 %/unit
+    MaxDpt   -137      -136%          250      -68    2 %/unit
+    Pad        12        12dB         252        2    6 dB/unit (0/6/12/18)
+    ?           -         -           268        2    UNEXPLAINED
+
+**The scales are self-consistent and self-confirming.** Every `±200%` field is
+2 %/unit, which is exactly what fits ±200 into a signed byte — and the
+quantisation shows in the read-backs: 115, 21, −73 and −137 came back as 114,
+20, −72 and −136, every odd value snapping to the nearest even one. `Adjust`
+is 1 %/unit over ±100, which independently matches six panel values read in
+§56 mapping directly to the same byte as percent.
+
+**Confirmed from the other side.** The peer session aligned these program
+offsets against the F3 HOB segment in a real bank and found
+`segment index = program offset − 241`, with `seg[0]` the block type and
+**PANNER = 40** — which extends the offset-241 block-type table this file
+already had (`BAND2 = 35`, `NONE = 60`). Checked against `St. Phantasia`,
+whose panel reads `Adjust −32` and whose segment is literally
+`[0x52, 40, −32, …]`. **Two independent addressings of the same bytes, one
+from the panel and one from the file, agreeing exactly** — which is the check
+worth having before writing into a block that had only ever been read.
+
+**Two gaps left open rather than filled in.** Offset **268** also changed,
+0 → 2, and cannot be attributed: it is outside the panner block, inside the
+F4 AMP region, and nothing on that page was edited. It happens to have taken
+the same value as `Pad`. And **`Src1`, `Src2` and `DptCtl` are not located** —
+they are enumerations chosen with the wheel rather than typed, so a
+digit-entry pass cannot reach them and no source byte appears in the diff.
+
+### The source enumerations, and why spread beat adjacency
+
+`Src1`, `Src2` and `DptCtl` are wheel-selected and unreachable by digit entry,
+so they needed a second pass: step the wheel, dump after **every** step, and
+read the name the panel reports at each.
+
+    Src1      offset 246
+    Src2      offset 251        <-- LFO2 = 116, the auto-pan route
+    DptCtl    offset 248
+    all three share one encoding (verified on four common values)
+
+**Stepping to well-separated entries rather than adjacent ones is what made
+the encoding readable, and it was mpc2emu's design point rather than this
+session's.** Positions 1, 8, 24 and 60 gave bytes 127, 7, 23, 91 — and
+positions 8 and 24 both look exactly like `byte = position − 1`. **Any three
+adjacent points in that stretch would have said "dense index" with complete
+confidence.** Position 60 breaking it is the only reason the real scheme
+appeared.
+
+**The byte is the K2000's control-source code, and for controller sources it
+is the MIDI CC number**: `MWheel` 1, `Breath` 2, `Volume` 7, `Pan` 10,
+`Sustain` 64, `FX Depth` 91, with `OFF` 0 and `ON` 127. Internal sources form
+a block from 96 up:
+
+    Note St  96   AttVel  100   VTRIG1 106   ASR1 110   LFO1   114
+    Key St   97   InvAVel 101   VTRIG2 107   ASR2 111   LFO1ph 115
+    KeyNum   98   PPress  102   RandV1 108   FUN1 112   LFO2   116
+    BKeyNum  99   BPPress 103   RandV2 109   FUN2 113
+
+A 112-position walk is saved as `lfo2_code.json` with ~70 named sources.
+
+So the bank's two auto-panning programs read completely as
+`Src2 = 116 (LFO2)`, `MinDpt 4 %`, `MaxDpt 56 %`, `DptCtl = 1 (MWheel)`,
+`Adjust +7 %`, `KeyTrk −1.0 %/key` — a routable description rather than
+orphaned depths.
+
+**Offset 268 did not move** in the wheel pass or across 112 source positions.
+It changed only in the digit pass, alongside `Pad`. Still unassigned, but now
+bounded: it is not a panner source field.
+
+**The experimental design deserves recording, because it is what made the diff
+decisive rather than suggestive.** Every value distinct, none zero, none
+repeating, both signs represented. Three of the seven bytes landed on 57, −36
+and −68 — unremarkable numbers that would have been ambiguous under a tidier
+set of inputs, and two fields sharing a value could not have been separated
+from the diff at all.
+
+**The control was the load-bearing part.** `Adjust` was already placed at that
+offset from panel readings alone; setting it to 37 and requiring the byte to
+become 37 tested the anchor before anything else in the diff was believed. A
+diff with no control is a list of bytes that changed, not a mapping.
+
