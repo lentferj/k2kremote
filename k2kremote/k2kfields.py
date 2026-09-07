@@ -88,6 +88,45 @@ def _lfo1_pitch_depth_ct(raw: bytes) -> Optional[int]:
     return None
 
 
+def _amp_veltrk_db(raw: bytes) -> Optional[int]:
+    """`F4 AMP VelTrk`, Program offset 261. Unsigned, 1 dB per unit, no
+    offset -- the byte IS the dB figure the panel shows.
+
+    Unlike the two fields above, this one needs no "proven range" hedge. The
+    offset came from a differential dump over four objects built to differ in
+    exactly this parameter and nothing else (RESOLUTION_NOTES §47): two
+    offsets varied across the four, this one and the keymap pointer, and the
+    values were 0/5/15/36 against a panel reading `VelTrk:0dB/5dB/15dB/36dB`.
+    The *audio* was then measured on the same four -- v1-to-v127 swings of
+    0.00/5.27/15.49/36.13 dB -- so the unit is confirmed at the sound, not
+    only at the display.
+
+    Its neighbours `Src1` (262) and `Depth` (263) are mapped in §43 but are
+    deliberately NOT in this table: `Src1` is a control-source code whose
+    table this project has not enumerated, and decoding it would mean
+    inventing names for codes nobody here has read off the device."""
+    return raw[0]
+
+
+def _panner_adjust_pct(raw: bytes) -> Optional[int]:
+    """`F3 POS (PANNER)` Adjust, Program offset 242. Signed, 1 % per unit --
+    the byte IS the percentage the panel shows, negative left.
+
+    Placed twice by independent routes (RESOLUTION_NOTES §56/§57): six
+    programs' panel readings mapped straight onto this byte as percent, and a
+    DUMP-diff that set it to 37 and got 37 back. The second was run as a
+    control for the rest of the panner block, so this offset is the one field
+    in that block confirmed by more than a single point.
+
+    Its neighbours -- KeyTrk 244, VelTrk 245, Depth 247, MinDpt 249,
+    MaxDpt 250, Pad 252 -- are deliberately NOT in this table. Each rests on
+    one measured value plus a zero baseline, which fixes a slope but has
+    tested nothing in between, and §51's list of confident wrong numbers is
+    what that restraint exists for."""
+    b = raw[0]
+    return b - 256 if b > 127 else b
+
+
 #: Only offsets independently confirmed by DUMP-diffing two panel-driven
 #: states go here -- see the module docstring for why this list is short.
 KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
@@ -100,6 +139,16 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
         name="LFO1->Pitch Depth", size=1, unit="cents",
         notes="RESOLUTION_NOTES §30; exact for byte 0-20, 79, 123",
         decode=_lfo1_pitch_depth_ct,
+    ),
+    (ObjectType.Program, 261): Field(
+        name="F4 AMP VelTrk", size=1, unit="dB",
+        notes="RESOLUTION_NOTES §47; whole range, 1 dB per unit",
+        decode=_amp_veltrk_db,
+    ),
+    (ObjectType.Program, 242): Field(
+        name="F3 POS Adjust", size=1, unit="%",
+        notes="RESOLUTION_NOTES §56/§57; signed, 1 % per unit, negative left",
+        decode=_panner_adjust_pct,
     ),
 }
 

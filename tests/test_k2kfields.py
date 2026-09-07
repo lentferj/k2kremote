@@ -65,3 +65,45 @@ def test_filter_cutoff_byte_to_hz_matches_the_hardware_verified_table():
 def test_filter_cutoff_byte_to_hz_middle_c_reference():
     # byte 9 is s=9 -> 440*2**0 = 440Hz exactly, the formula's own anchor.
     assert k2kfields.filter_cutoff_byte_to_hz(9) == 440.0
+
+
+def test_describe_field_decodes_amp_veltrk_as_the_measured_bank_read():
+    # RESOLUTION_NOTES §47: the four VELCHECK presets carried 0/5/15/36 at
+    # offset 261 and the panel showed VelTrk:0dB/5dB/15dB/36dB. These are the
+    # bytes actually read off the instrument, not a constructed example.
+    for byte, shown in ((0, 0), (5, 5), (15, 15), (36, 36)):
+        out = k2kfields.describe_field(ObjectType.Program, 261, bytes([byte]))
+        assert out == f"{byte:02x} (F4 AMP VelTrk: {shown} dB)"
+
+
+def test_describe_field_amp_veltrk_has_no_unmapped_range():
+    # Unlike the two depth fields, this byte IS the dB figure over its whole
+    # range -- there is no partial-formula hedge to fall through.
+    for byte in (1, 63, 64, 127, 200, 255):
+        out = k2kfields.describe_field(ObjectType.Program, 261, bytes([byte]))
+        assert "unmapped" not in out
+
+
+def test_amp_veltrk_neighbours_are_deliberately_not_decoded():
+    # F4 AMP Src1 (262) and Depth (263) are mapped in §47/§43 but stay out of
+    # KNOWN_FIELDS: Src1 is a control-source code whose table this project has
+    # never enumerated. Decoding them would be inventing meaning.
+    assert k2kfields.describe_field(ObjectType.Program, 262, b"\x72") == "72"
+    assert k2kfields.describe_field(ObjectType.Program, 263, b"\x00") == "00"
+
+
+def test_describe_field_decodes_panner_adjust():
+    # RESOLUTION_NOTES §56/§57: six programs read 0, 0, +7, +7, -11, -32 % off
+    # the panel and mapped straight onto this byte; a DUMP-diff then set it to
+    # 37 and read 37 back. Negative values are two's complement.
+    for byte, pct in ((0, 0), (7, 7), (37, 37), (256 - 11, -11), (256 - 32, -32)):
+        out = k2kfields.describe_field(ObjectType.Program, 242, bytes([byte]))
+        assert out == f"{byte:02x} (F3 POS Adjust: {pct} %)"
+
+
+def test_panner_neighbours_are_deliberately_not_decoded():
+    # KeyTrk 244, VelTrk 245, Depth 247, MinDpt 249, MaxDpt 250, Pad 252 each
+    # rest on one measured value plus a zero baseline -- a slope with nothing
+    # tested in between. Offsets recorded in the notes, not decoded here.
+    for off in (244, 245, 247, 249, 250, 252):
+        assert k2kfields.describe_field(ObjectType.Program, off, b"\x0a") == "0a"
