@@ -5279,3 +5279,130 @@ offset from panel readings alone; setting it to 37 and requiring the byte to
 become 37 tested the anchor before anything else in the diff was believed. A
 diff with no control is a list of bytes that changed, not a mapping.
 
+## 58. The PANNER that panned nothing: it is a two-wire block (2026-09-06)
+
+§57 mapped the `F3 POS (PANNER)` block byte by byte, and mpc2emu's converter
+then emitted a program using it — 263, algorithm 2, `Src1 = LFO1`, `Depth 52 %`,
+LFO1 free-running at 8.70 Hz. Every field read back correctly on the panel and
+in RAM. The program produced **no stereo movement at all**: balance sd
+0.015 dB, with nothing at 8.70 Hz anywhere in the spectrum, and the control
+program 208 (block `NONE`) measured *less* steady at 0.034 dB.
+
+The answer is in the Musician's Guide, p284, and it is not a bug in anything:
+
+> "This single-stage function converts a single wire at its input into a double
+> wire at its output, splitting the signal between an 'upper' and 'lower' wire.
+> ... **By itself the PANNER doesn't change the pan position of the sound.** It
+> just defines what percentage of the currently selected layer's sound goes to
+> each wire. ... So when you use the PANNER function, you'll also want to adjust
+> the Pan parameters on the OUTPUT page, setting the upper wire's pan fully
+> right, and the lower wire's pan fully left."
+
+`PANNER` is **one wire in, two wires out**. It positions nothing. The `OUTPUT`
+page's `U` and `L` rows are those two wires, and if both sit at centre — which
+is the inherited default — the wires sum and the block is inaudible no matter
+how hard it is driven. All of §57's fields were doing exactly what they claim;
+their output was being re-summed one stage later.
+
+The manual passage also states independently that `PANNER` exists only in
+**algorithms 2, 13, 24 and 26**, matching `_ALG_WITH_PANNER` in the KRZ parser,
+which was derived months earlier by a different route.
+
+### The measurements (mpc2emu's, on 263)
+
+    Adjust +50 %, wires centred            0.01 dB     static, still nothing
+    Src1 LFO1, Depth 52 %, centred      sd 0.015 dB
+    Src2 RandV2, MaxDpt 100 %, MW 127   sd 0.045 dB
+    wires SPREAD hard L/R               sd 10.118 dB, peak 8.70 Hz / 13.29 dB
+
+The peak lands on LFO1's own rate. The modulation was present throughout and
+never reached the outputs.
+
+**Program 246 (`MXKRSRC`) was the contrast that gave it away**, though not for
+the reason it was offered. §57 recorded that the bank's own working panners
+drive from `Src2`/`GLFO2` with `MinDpt 4 % / MaxDpt 56 %` rather than
+`Src1`/`Depth`, and that was passed across as a hypothesis about the *route*.
+The route was never the variable. What actually distinguished 246 is that **its
+two wires are panned hard left and hard right on the OUTPUT page** — the one
+field neither side had looked at.
+
+### The check that made the null interpretable
+
+Before concluding the block was dead, mpc2emu pushed the panner's own `Pad`
+from 0 dB to 18 dB and measured −18.08 dB. `Pad` is a `PANNER` field, so one
+edit proved the block was in the audio path *and* that its gain stage worked
+while its pan did nothing — which is what narrowed the fault to the output
+stage rather than to the block or its source.
+
+The first attempt at that check pressed `Pad` **downward**, where the range
+floors at 0, and nothing moved. **A control that cannot move is not evidence
+that nothing responds.** That near-miss is the same failure family as §36's
+rule about panel edits dying with the editor: an experiment that cannot produce
+a signal reads identically to one that produces none.
+
+### For the converter
+
+Emitting a `PANNER` block without also writing the layer's `OUTPUT` wire pans
+is a no-op. The fix is two more fields, not a rewiring — filed on the mpc2emu
+side as `§K2PANWIRES`.
+
+### The offset map
+
+mpc2emu's RAM dump of 263 read `@241 = 0` with none of `40 / 114 / 26` present,
+and they initially concluded the §57 offsets did not index RAM. They do. The
+values read by `read_object_bytes` at 241 / 246 / 247 are rendered by the
+device's own panel as `(PANNER)` / `Src1:LFO1` / `Depth:52 %` — two independent
+routes agreeing on three values, which a RAM-vs-file encoding difference could
+not produce. Their dump was the odd one out; the cause was not chased down.
+**When two maps disagree, the one that agrees with the device's own decode
+wins.**
+
+### The pattern this makes five of
+
+s3ked's observation from earlier today — a route wired with something on it left
+at zero — now has five instances across three machines and three writers:
+`MODVPAN1` zero with the source wired, `MODVFILT3` against `SUSTN2` zero, an
+envelope depth multiplied by zero sustain, and now two output wires summing at
+centre. The common shape is a converter carrying sources and primary depths
+across while leaving the destination block's secondary fields at whatever they
+happened to hold. That argues for auditing every writer for unset secondary
+fields rather than patching the four sites separately.
+
+## 59. Parameter values can be typed on the numeric pad (2026-09-06)
+
+Panel automation in this project has driven values with `alpha_wheel()` clicks
+throughout. It did not have to. Jan pointed out that the alphanumeric pad enters
+**values**, not just names and program numbers — manual 3-4, "The Alphanumeric
+Pad" — and `Button.Number0..Number9` (0x00-0x09), `PlusMinus` (0x0A), `Cancel`
+(0x0B), `Clear` (0x0C) and `Enter` (0x0D) have been in the enum the whole time.
+
+Typing is deterministic: no click counting, no accumulated drift, no read-back
+to discover where the wheel landed. It also needs no `patch_object_bytes`, so it
+is the route that still works when a byte-level object write is unavailable.
+
+**The trap is the decimal point.** Digits fill from the rightmost decimal place,
+so the field's displayed precision is a multiplier:
+
+    Adjust:0%          integer      32 %    = 3, 2, ENTER
+    KeyTrk: 0.0%/key   1 decimal    5.0     = 5, 0, ENTER
+    LFO1 MnRate 8.70H  2 decimals   2.00 Hz = 2, 0, 0, ENTER
+
+Typing `2` into that rate field gives **0.02 Hz** — a 50-second period, which
+across any plausible recording window is indistinguishable from a panner that
+does not move. A decimal-scale slip can therefore manufacture exactly the null
+result you are investigating.
+
+So: read the field's decimal places off the screen *before* typing, and read the
+value back *after* `ENTER`. The value does not commit until `ENTER`, and an
+un-committed entry looks identical on screen to a committed one — which is why
+the read-back must come after. `CANCEL` before `ENTER` restores the original
+value, giving a free abort.
+
+A typed value is still a panel edit and remains subject to §36: live only
+while the editor is open, and discarded when the exit prompt is answered `No`.
+
+Demonstrated accidentally on this rig before it was known: `select_program`
+typing digits while the Program Editor happened to be open edited the parameter
+under the cursor instead of selecting a program — fixed by asserting Program
+Mode before typing, which is now also the reason the helper is safe to reuse.
+
