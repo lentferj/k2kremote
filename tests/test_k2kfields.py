@@ -76,12 +76,23 @@ def test_describe_field_decodes_amp_veltrk_as_the_measured_bank_read():
         assert out == f"{byte:02x} (F4 AMP VelTrk: {shown} dB)"
 
 
-def test_describe_field_amp_veltrk_has_no_unmapped_range():
-    # Unlike the two depth fields, this byte IS the dB figure over its whole
-    # range -- there is no partial-formula hedge to fall through.
-    for byte in (1, 63, 64, 127, 200, 255):
+def test_describe_field_decodes_negative_amp_veltrk():
+    # RESOLUTION_NOTES §62: measured on the device by typing the value and
+    # reading the byte back. The first version of this decoder returned the
+    # raw byte, so -32 dB rendered as "224 dB" -- a figure the parameter
+    # cannot hold, printed with no hedge.
+    for byte, shown in ((224, -32), (160, -96), (96, 96), (36, 36)):
         out = k2kfields.describe_field(ObjectType.Program, 261, bytes([byte]))
-        assert "unmapped" not in out
+        assert out == f"{byte:02x} (F4 AMP VelTrk: {shown} dB)"
+
+
+def test_amp_veltrk_outside_the_devices_range_is_unmapped():
+    # The manual's range is +-96 dB and the device confirms it, so bytes 97
+    # to 159 correspond to no setting the field can hold. Say so rather than
+    # print a plausible number.
+    for byte in (97, 127, 128, 159):
+        out = k2kfields.describe_field(ObjectType.Program, 261, bytes([byte]))
+        assert "unmapped" in out
 
 
 def test_amp_veltrk_neighbours_are_deliberately_not_decoded():
@@ -90,6 +101,17 @@ def test_amp_veltrk_neighbours_are_deliberately_not_decoded():
     # never enumerated. Decoding them would be inventing meaning.
     assert k2kfields.describe_field(ObjectType.Program, 262, b"\x72") == "72"
     assert k2kfields.describe_field(ObjectType.Program, 263, b"\x00") == "00"
+
+
+def test_panner_adjust_is_signed_and_clamps_at_100():
+    # §62: +100 % -> byte 100, -100 % -> byte 156, and typing 127 leaves the
+    # field at 100 -- so bytes 101..155 are unreachable from the panel.
+    for byte, shown in ((100, 100), (156, -100), (224, -32)):
+        out = k2kfields.describe_field(ObjectType.Program, 242, bytes([byte]))
+        assert out == f"{byte:02x} (F3 POS Adjust: {shown} %)"
+    for byte in (101, 127, 128, 155):
+        out = k2kfields.describe_field(ObjectType.Program, 242, bytes([byte]))
+        assert "unmapped" in out
 
 
 def test_describe_field_decodes_panner_adjust():

@@ -89,42 +89,49 @@ def _lfo1_pitch_depth_ct(raw: bytes) -> Optional[int]:
 
 
 def _amp_veltrk_db(raw: bytes) -> Optional[int]:
-    """`F4 AMP VelTrk`, Program offset 261. Unsigned, 1 dB per unit, no
-    offset -- the byte IS the dB figure the panel shows.
+    """`F4 AMP VelTrk`, Program offset 261. **Signed**, 1 dB per unit.
 
-    Unlike the two fields above, this one needs no "proven range" hedge. The
-    offset came from a differential dump over four objects built to differ in
-    exactly this parameter and nothing else (RESOLUTION_NOTES §47): two
-    offsets varied across the four, this one and the keymap pointer, and the
-    values were 0/5/15/36 against a panel reading `VelTrk:0dB/5dB/15dB/36dB`.
-    The *audio* was then measured on the same four -- v1-to-v127 swings of
-    0.00/5.27/15.49/36.13 dB -- so the unit is confirmed at the sound, not
-    only at the display.
+    Measured on the device 2026-09-07 by typing values on the numeric pad and
+    reading the byte back, because the first version of this decoder returned
+    `raw[0]` unsigned and would have rendered every negative setting as a
+    number the parameter cannot hold:
+
+        panel  +36 dB -> byte  36      panel  -32 dB -> byte 224
+        panel  +96 dB -> byte  96      panel  -96 dB -> byte 160
+
+    Two's complement, and the manual's range for the field is +-96 dB (F4 AMP
+    parameter table). Bytes between 97 and 159 are outside it and decode to
+    `None` rather than to a plausible-looking figure -- the whole point of this
+    table is that an unproven byte says so.
 
     Its neighbours `Src1` (262) and `Depth` (263) are mapped in §43 but are
     deliberately NOT in this table: `Src1` is a control-source code whose
     table this project has not enumerated, and decoding it would mean
     inventing names for codes nobody here has read off the device."""
-    return raw[0]
+    b = raw[0] - 256 if raw[0] > 127 else raw[0]
+    return b if -96 <= b <= 96 else None
 
 
 def _panner_adjust_pct(raw: bytes) -> Optional[int]:
     """`F3 POS (PANNER)` Adjust, Program offset 242. Signed, 1 % per unit --
     the byte IS the percentage the panel shows, negative left.
 
-    Placed twice by independent routes (RESOLUTION_NOTES §56/§57): six
-    programs' panel readings mapped straight onto this byte as percent, and a
-    DUMP-diff that set it to 37 and got 37 back. The second was run as a
-    control for the rest of the panner block, so this offset is the one field
-    in that block confirmed by more than a single point.
+    Placed twice by independent routes (RESOLUTION_NOTES §56/§57) and then
+    measured directly 2026-09-07, typing values and reading the byte back:
+
+        panel  +37 % -> byte  37       panel  -32 % -> byte 224
+        panel +100 % -> byte 100       panel -100 % -> byte 156
+
+    The field clamps at +-100 -- typing 127 leaves it at 100 -- so bytes 101
+    to 155 are unreachable from the panel and decode to `None`.
 
     Its neighbours -- KeyTrk 244, VelTrk 245, Depth 247, MinDpt 249,
     MaxDpt 250, Pad 252 -- are deliberately NOT in this table. Each rests on
     one measured value plus a zero baseline, which fixes a slope but has
     tested nothing in between, and §51's list of confident wrong numbers is
     what that restraint exists for."""
-    b = raw[0]
-    return b - 256 if b > 127 else b
+    b = raw[0] - 256 if raw[0] > 127 else raw[0]
+    return b if -100 <= b <= 100 else None
 
 
 #: Only offsets independently confirmed by DUMP-diffing two panel-driven
@@ -142,12 +149,12 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
     ),
     (ObjectType.Program, 261): Field(
         name="F4 AMP VelTrk", size=1, unit="dB",
-        notes="RESOLUTION_NOTES §47; whole range, 1 dB per unit",
+        notes="RESOLUTION_NOTES §47/§62; signed, 1 dB per unit, +-96 dB",
         decode=_amp_veltrk_db,
     ),
     (ObjectType.Program, 242): Field(
         name="F3 POS Adjust", size=1, unit="%",
-        notes="RESOLUTION_NOTES §56/§57; signed, 1 % per unit, negative left",
+        notes="RESOLUTION_NOTES §56/§57/§62; signed, 1 % per unit, +-100 %",
         decode=_panner_adjust_pct,
     ),
 }
