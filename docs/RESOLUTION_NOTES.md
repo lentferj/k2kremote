@@ -2821,3 +2821,36 @@ hand-rolling a one-off script against the Load dialog's bank/mode-selection
 screens, which it deliberately does not implement. It wasn't checked for
 first. Building an actual safe, tested load flow (bank select + mode
 select, reusing this fixed `soft_index`) is future work, not done here.
+
+## 35. `current_field()` never actually matched padded labels like "Depth" (2026-08-31)
+
+`probes/p36_filter_fields.py`'s `current_field()` — the SysEx 0x17/0x16
+"ask the device what's selected" helper `goto_field()` is built on — returned
+`"Depth "` and `"Src1  "` (trailing spaces intact) instead of `"Depth"` and
+`"Src1"`, so `goto_field(bridge, "Depth")` silently returned `None` on any
+page where that field exists. Found live, mid-session, chasing a real
+`AssertionError` trying to reach Layer 2/3 of the reference preset for a cross-session
+measurement request.
+
+**Root cause:** the K2000 pads short field labels with spaces before the
+colon to align the value column across a page — the device answers
+`"Depth :"`, `"Src1  :"`, not `"Depth:"`, `"Src1:"`. The old code did
+`.strip().rstrip(":")` — `.strip()` only touches the string's true outer
+ends, and the colon (not whitespace) is what's actually at the end, so it
+strips nothing; `.rstrip(":")` then removes the colon but leaves the
+padding spaces that were sitting *before* it. Confirmed by reading the raw
+device reply directly (`bridge.client.get_current_parameter_name()`) rather
+than trusting the already-processed helper. Labels with no padding needed
+(`"Coarse:"`, `"FineHz:"`) were unaffected, which is why this went unnoticed
+through `goto_field(bridge, "Depth")` calls that quietly worked in some
+contexts and not others.
+
+**Fix:** strip after removing the colon, not before —
+`name.replace(":", "").strip()`. Verified against both padded and unpadded
+labels in `tests/test_p36_filter_fields.py`; full suite (517 tests) passes.
+
+**Not fixed here:** `k2kremote/macro_save.py:161`'s `current_disk()` has the
+identical `.strip().rstrip(":")` pattern, currently harmless only because
+`"CurrentDisk"` has no internal padding. Worth the same fix if that function
+is ever pointed at a padded label.
+
