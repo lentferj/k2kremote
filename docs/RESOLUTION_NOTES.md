@@ -5620,3 +5620,49 @@ at 20 Hz. Above 21.4 Hz it silently clamps at the 24.00 ceiling. Below 1 Hz it
 fails worse in relative terms: 0.10 Hz becomes byte 27, which is 0.55 Hz, five
 and a half times too fast. **Slow LFOs are the proportionally worst affected**,
 and they are the ones a listener notices.
+
+## 62. Two decoders that were signed, and a review that caught one (2026-09-07)
+
+A code review flagged `k2kfields._amp_veltrk_db` as decoding a signed field as
+unsigned, citing the manual's F4 AMP parameter table (`VELOCITY TRACKING
++-96 dB`). It was right, and the device says so directly. Typing values on the
+numeric pad and reading the byte back:
+
+    F4 AMP VelTrk, offset 261        F3 POS Adjust, offset 242
+      +36 dB -> byte  36               +37 % -> byte  37
+      +96 dB -> byte  96              +100 % -> byte 100
+      -32 dB -> byte 224               -32 % -> byte 224
+      -96 dB -> byte 160              -100 % -> byte 156
+
+Both are **two's complement**. `VelTrk` runs +-96 dB, `Adjust` +-100 % — and
+Adjust clamps: typing 127 leaves the field at 100, so bytes 101-155 are
+unreachable from the panel. Both decoders now return `None` outside their
+proven range instead of a plausible figure.
+
+The original `_amp_veltrk_db` returned `raw[0]`, so a program with
+`VelTrk:-32dB` would have been rendered as **"224 dB"** — a value the parameter
+cannot hold, printed with no hedge, in a module whose entire stated contract is
+to say "unmapped" rather than guess.
+
+Three things are worth separating out about how it got there.
+
+**The measurements were all positive.** §47's four objects carried 0, 5, 15 and
+36. Every one confirmed the law and none of them could have exposed the sign,
+because the sign only shows up in the half of the range that was never
+sampled. The docstring then claimed the field "needs no proven-range hedge" —
+a claim about the whole range from evidence covering half of it.
+
+**The file contradicted itself.** `_panner_adjust_pct`, five lines below,
+two's-complements its byte on the same class of evidence. Two decoders written
+in the same sitting disagreed about whether K2000 parameters are signed, and
+neither docstring mentioned the other.
+
+**The manual had the answer the whole time.** The F4 AMP parameter table gives
+the range explicitly. This is the third time in two days that a page of the
+Musician's Guide has settled something that was being established the
+expensive way — see §58 and §60.
+
+`normalise_param_label()` moved to `midi_bridge` in the same pass: the padded
+label fix from §35 had been applied to the probe but not to `macro_save`'s copy
+of the same parse, so the two had silently diverged with only one of them
+tested.
