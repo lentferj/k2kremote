@@ -10,11 +10,14 @@ strip().rstrip(":") leaves "Depth ", "Src1  " and goto_field() can never match
 the plain field name. Found 2026-08-31 chasing a silent goto_field(bridge,
 'Depth') failure live on hardware; see RESOLUTION_NOTES.md.
 """
+import pathlib
+import sys
 from types import SimpleNamespace
 
-import sys
-
-sys.path.insert(0, ".")
+# Not sys.path.insert(0, ".") -- that resolves against the process CWD, so
+# running pytest from inside tests/ aborts collection with ModuleNotFoundError
+# rather than skipping.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from probes.p36_filter_fields import current_field
 

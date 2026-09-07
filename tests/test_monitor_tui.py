@@ -11,6 +11,17 @@ from k2000.definitions import ObjectType
 from k2000.messages import Info
 
 from k2kremote import k2kfields
+
+
+def _program_field_count():
+    """Rows the field pane shows for a Program.
+
+    refresh_fields() filters KNOWN_FIELDS by the selected object type, so
+    counting the whole registry would fail the moment a non-Program offset
+    is registered -- against correct app behaviour.
+    """
+    return sum(1 for t, _ in k2kfields.KNOWN_FIELDS
+               if t is ObjectType.Program)
 from k2kremote.midi_bridge import PatchUnverified
 from k2kremote.monitor_tui import MonitorTuiApp
 
@@ -42,8 +53,14 @@ class FakeK2000Bridge:
                             242: bytes([37])},
                       907: {215: b"\x05", 199: bytes([50]), 261: bytes([0]),
                             242: bytes([256 - 32])}}
-        missing = set(o for _t, o in k2kfields.KNOWN_FIELDS) - set(self._data[906])
-        assert not missing, f"fake bridge has no data for offsets {missing}"
+        # every canned program must answer every known offset: if only 906
+        # is checked, adding a field leaves 907 raising KeyError, which
+        # device_op swallows into a "read failed" status and the test then
+        # fails on a missing row instead of on this guard
+        for idno, data in self._data.items():
+            missing = set(o for _t, o in k2kfields.KNOWN_FIELDS) - set(data)
+            assert not missing, (
+                f"fake bridge has no data for offsets {missing} on {idno}")
         self.patches = []
         self.client = SimpleNamespace(
             midi_in=SimpleNamespace(get_message=lambda: None))
@@ -82,7 +99,7 @@ async def test_selecting_an_object_populates_known_fields():
         app._selected_idno = 906
         app.refresh_fields()
         fields = app.query_one("#fields")
-        assert await _wait_for(pilot, lambda: fields.row_count == len(k2kfields.KNOWN_FIELDS))
+        assert await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
         rendered = {str(fields.get_cell_at((r, 2)))
                    for r in range(fields.row_count)}
         assert any("ENV2->FilFreq Depth: 1200 cents" in text for text in rendered)
@@ -98,7 +115,7 @@ async def test_unmapped_byte_reports_unmapped_not_a_fabricated_value():
         app._selected_idno = 907
         app.refresh_fields()
         fields = app.query_one("#fields")
-        await _wait_for(pilot, lambda: fields.row_count == len(k2kfields.KNOWN_FIELDS))
+        await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
         rendered = {str(fields.get_cell_at((r, 2)))
                    for r in range(fields.row_count)}
         assert any("unmapped for this byte" in text for text in rendered)
@@ -113,7 +130,7 @@ async def test_patch_writes_through_patch_object_bytes():
         app._selected_idno = 906
         app.refresh_fields()
         fields = app.query_one("#fields")
-        await _wait_for(pilot, lambda: fields.row_count == len(k2kfields.KNOWN_FIELDS))
+        await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
 
         app.action_patch_selected()
         assert await _wait_for(pilot, lambda: len(app.screen_stack) > 1)
@@ -141,7 +158,7 @@ async def test_patch_reports_dnak_without_closing_the_modal():
         app._selected_idno = 906
         app.refresh_fields()
         fields = app.query_one("#fields")
-        await _wait_for(pilot, lambda: fields.row_count == len(k2kfields.KNOWN_FIELDS))
+        await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
 
         app.action_patch_selected()
         await _wait_for(pilot, lambda: len(app.screen_stack) > 1)
