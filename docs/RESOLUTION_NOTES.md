@@ -2854,3 +2854,1762 @@ identical `.strip().rstrip(":")` pattern, currently harmless only because
 `"CurrentDisk"` has no internal padding. Worth the same fix if that function
 is ever pointed at a padded label.
 
+## 36. The v1 "knee", panel-edit persistence, and mpc2emu's fold branch (2026-09-01)
+
+Measured for the mpc2emu ↔ s3ked cross-machine preset comparison. Two
+results worth keeping, one of them a correction of a claim this session had
+already sent to a peer.
+
+### The v1 "knee" was the velocity->filter route, NOT an amp limit
+
+**Superseded finding, kept because the wrong version was circulated.** On
+the reference preset v13 the whole-signal velocity curve looked like the amp was failing to
+deliver its `VelTrk` setting: v1..v127 swing of 30.01 dB where 35 dB was
+written, with a flat plateau below v4. It is not the amp. Measured with the
+Program Editor held **open** (see below), three conditions in one session:
+
+```
+                                slope(v>=32)  full-range  v1..v127 swing
+  A  VelTrk 35, filter 7500/8200    0.26534     0.23984      30.01 dB
+  B  F1 FRQ VelTrk 0/0              0.27141     0.27416      34.59 dB
+  C  AMP VelTrk 24/24               0.17662     0.15249      19.16 dB
+  the amp's own law, measured separately:       0.27618
+```
+
+**B**: zeroing the velocity->cutoff route gives 34.59 dB of a 35 dB setting and
+the plateau disappears rather than shrinking -- the curve is monotonic to v1
+(-34.59 / -34.29 / -33.80 / -32.56 / -30.42 at v1/2/4/8/16, against
+-30.01 / -30.77 / -30.46 / -27.40 / -27.52 with the route live).
+
+**C**: v1's *absolute* level moved **+10.94 dB** when AMP VelTrk went 35 -> 24,
+against +11.0 predicted for full delivery and +0.0 for a fixed floor. **The amp
+delivers its VelTrk setting in full.** The shortfall is constant, not
+proportional -- 4.99 dB at VelTrk 35, 4.84 dB at VelTrk 24 -- i.e. a fixed
+filter-route contribution.
+
+**Consequence:** `VelTrk 24` (the value the reference preset's source wants) can be written
+as-is; no compensation is needed and none should be applied. A converted patch
+will still measure ~5 dB less whole-signal swing than its VelTrk setting
+whenever a velocity->cutoff route is present, and that is the patch working,
+not a defect.
+
+### Panel edits are live ONLY while the editor is open
+
+**The bug that produced the wrong version above, and it invalidated two runs.**
+`probes/p36_filter_fields.leave_editor()` exits the Program Editor answering
+the save prompt with **"No"** -- which its own docstring states in its first
+line, correctly, because it exists to guarantee a read-only probe never leaves
+the box modified. The prompt is:
+
+```
+  Save <program name>.P before exiting?
+                Rename Cancel Yes    No
+```
+
+Reusing it inside a script that *made* edits meant every sequence ran as:
+
+```
+  1. enter editor, set the field, read it back      <- edit applied, verified
+  2. leave_editor()  -> "No"  -> program REVERTS    <- edit discarded
+  3. capture                                        <- UNMODIFIED program
+```
+
+**An immediate read-back cannot catch this** -- the value really was set. Two
+runs were lost to it: a filter-neutralisation test reported as a *failed
+prediction* (it was never tested) and a `VelTrk 24` sweep that was a second
+`VelTrk 35` sweep.
+
+**The fix is to capture with the editor still open.** Closing the SysEx bridge
+does not exit the editor, so the working pattern is: enter editor, edit, close
+the bridge, capture, reopen the bridge for the next edit, and `leave_editor()`
+at the very end to discard. Proven by setting AMP `VelTrk 0` (which should
+collapse the velocity response entirely): v1..v127 spread went 30.17 dB ->
+**-3.49 dB** in-editor, and back to 35/35 after exiting.
+
+**The general rule, from s3ked, worth more than the specific bug:** *if a
+neutralisation is real, the measurement must move; if it does not move, you
+have not established a null result, you have established nothing.* The invalid
+run moved the slope by 0.010 dB/unit and was reported as a null result
+refuting a hypothesis. The valid one moved it by 3.4 percentage points. Treat
+"nothing changed" as a broken experiment until the mechanism is shown live.
+
+**A methodological trap this session walked into.** A single-capture fit over
+the *full* range gave 0.22927 dB/unit at r² 0.984 with 2.1 dB residuals, and
+that was reported to a peer as a velocity-dependent *shape* artefact. Two
+checks were needed, both cheap and both skipped the first time:
+
+- **Repeatability.** Six captures per velocity: sd 0.24–0.57 dB, spread
+  ≤1.46 dB. That established the ~2.4 dB deviation as real (not noise) *and*
+  gave the resolution needed to see it was confined to one point.
+- **A falsifiable prediction, run.** "Zero `F1 FRQ VelTrk` on both layers and
+  the slope snaps to 0.276 ± 0.005, r² > 0.999." It did not: 7500→0 and
+  8200→0 moved the slope by **0.010 dB/unit** (0.22927 → 0.23965). The
+  hypothesis was wrong and the retraction went out within the hour.
+
+Every other velocity route was then eliminated by reading the box:
+`LAYER LoVel ppp / HiVel fff` (no velocity switching), `ENVCTL Att/Dec/Rel
+VelTrk 1.000x` (no velocity→envelope rate), `F4 AMP Src1 OFF / Depth 0dB`,
+`KEYMAP VelTrk 0ct`. This is [[k2000-ampenv-panel-automation]]'s "unretested
+plausible inference" failure mode again — see it there for the pattern.
+
+### mpc2emu's zero-coverage fold branch is correct on hardware
+
+`writers/krz_writer.py:1666`, the `if _vel_ct and _vel_min_ct:` floored-sweep
+branch, whose own comment says *"ZERO of 1383 velocity routings in the corpus
+take this branch"* and *"untested until the reference preset"*. The reference preset v13 is the first
+patch to exercise it. Source bytes from s3ked, written values read off the
+box, and mpc2emu's own parser+writer run forward:
+
+```
+  kg0  MODVFILT1 35  FILFRQ 35 -> cutoff  96.05 Hz  -> writer 16.35 Hz / 7455 ct
+       K2000 actual: Coarse C 0 16 Hz, VelTrk 7500 ct           (-45 ct)
+  kg1  MODVFILT1 35  FILFRQ 65 -> cutoff 844.18 Hz  -> writer 84.03 Hz / 7989 ct
+       K2000 actual: Coarse D 2 73 Hz, VelTrk 8200 ct          (-211 ct)
+
+  top of sweep   kg0  source 1212.73 Hz  vs box 1244.51 Hz   +44.8 ct
+                 kg1  source 8479.36 Hz  vs box 8372.02 Hz   -22.1 ct
+```
+
+The §AKAICHOKEFILTER compensation works: the comment feared kg0's sweep top
+landing near 2.6 kHz against a ~1.2 kHz source ceiling, and it lands at
+1244 Hz. **Identical `MODVFILT1 = 35` on both keygroups producing 7500 and
+8200 is the source's own asymmetry**, not the branch inventing one — the
+parser's room clamp `min(_half, _room_down, _room_up)` binds on a different
+side for each (kg0 down to the AKAI's 7.607 Hz floor → 4390 ct; kg1 up to the
+8481 Hz ceiling → 3994 ct).
+
+**The −200 ct gap above was this session's own error, and it is instructive.**
+The forward run computed kg1 *alone*. Since §AKAILAYERGAP (mpc2emu,
+2026-08-31) the writer does not write a keygroup to a layer: `_fit_layers`
+fuses three source voices into one K2000 layer and `_fuse_voices` **key-span
+weighted averages** the continuous filter fields on the way:
+
+```
+  before fusion   kg1 keys 24-59    844.18 Hz  3994.3 ct   <- what was calculated
+                  kg3 keys 60-71   1212.71 Hz  3367.2 ct
+                  kg5 keys 72-127   679.26 Hz  4370.6 ct
+  after  fusion   L2  keys 24-127   797.90 Hz  4124.6 ct   <- what the writer folds
+```
+
+mpc2emu's current build writes `hob_f1[1] = -22 / hob_f1[4] = 110` — byte for
+byte what is on the box. **702 is current, not stale.** The discrepancy was
+two calculations of different objects.
+
+**Carry this into any future source↔device comparison: since v13, a K2000
+layer is not any single AKAI keygroup.** L1 is the three choke-losers fused,
+L2 the three survivors, with cutoff, resonance, filter-env depth, keytrack
+and both velocity-filter fields averaged by key span. A per-keygroup source
+value will not equal a per-layer device value for any of those fields, by
+design — and there is therefore no per-keygroup counterpart to give a layer
+an asymmetric `AMP Adjust` from.
+
+### ROM #199 has no filter
+
+`_TPL_LAYER` is byte-identical to ROM #199, and #199's EditProg reads
+`F1 OFF  F2 OFF  F3 OFF` with one layer. **Every filter value on a converted
+program is written by the converter — never template residue.** This was
+checked precisely because "inherited from the template" was the first and
+wrong assumption about where 7500/8200 ct came from.
+
+## 37. The K2000 keymap has a per-key-range `VolumeAdjust`, and nothing writes it (2026-09-01)
+
+Found while checking whether mpc2emu's §KRZSHAREDGAIN (per-sample gain
+averaged across every zone in the bank that references a sample) had a
+lossless home on the device. It does.
+
+`EditKeyMap` on keymap 707 (the reference preset layer 2), walking every range with the
+`Key Range` selector — which the manual documents as a *view* selector, so
+this is a read, and the selector was stepped back afterwards:
+
+```
+   Key Range              Sample                VolumeAdjust
+   C 0 - B 3   (..59)     703*KK DXE-C 3          0.0 dB
+   C 4 - B 4   (60-71)    704*KK DXE1-C 4         0.0 dB
+   C 5 - G 10  (72..)     705*KK DXE2-C 5         0.0 dB
+                          (wraps — exactly 3 ranges)
+```
+
+Manual, §"The Keymap Editor Parameters":
+
+> **Volume Adjust** — "Here you can adjust the volume of the notes in the
+> *current key range*. This enables you to make each key range play at the
+> same volume even if the samples in the various ranges were recorded at
+> different volumes."
+
+**Three fields are easy to confuse and only one of them is per-key-range:**
+
+| field | scope | who writes it |
+|---|---|---|
+| Soundfilehead `volumeAdjust` | per **sample** | mpc2emu `krz_writer` (bank-wide mean over referencing zones) |
+| F4 AMP `Adjust` | per **layer** | mpc2emu (from the source's layer gain) |
+| Keymap range `VolumeAdjust` | per **key range** | **nobody** |
+
+The per-sample byte is shared across presets — the reference preset shares samples with
+CRYSTAL E and VELSTACK E, which is what makes the mean lossy — and the
+per-layer `Adjust` can only hold one value for all ranges. **The keymap
+object is private to its preset and its `VolumeAdjust` is per range**, so it
+is the only one of the three that structurally matches the model's per-zone
+`volume`. Suggested to mpc2emu as `zone.volume − sample_gain_db[sample]`,
+which is identically 0 wherever a sample is not shared (so no regression on
+byte-identical unity banks).
+
+**Measured on the panel, 2026-09-01** (all edits discarded via the exit
+prompt; field verified back at `0.0dB` on every range afterwards):
+
+```
+  STEP    +1 click -> 0.5dB   +2 -> 1.0dB   +3 -> 1.5dB   +4 -> 2.0dB
+          -1 click -> -0.5dB  -2 -> -1.0dB  -3 -> -1.5dB
+  RANGE   both rails driven:  upper +63.5dB   lower -63.5dB
+  SCOPE   range C 0-B 3 set to 63.5dB; C 4-B 4 and C 5-G 10 stayed 0.0dB;
+          returning to C 0-B 3 still read 63.5dB
+```
+
+**The low rail is −63.5 dB, NOT −64.0.** The *sample* editor's equivalent
+reaches −64.0 (signed i8, byte 0x80), but the keymap field uses **bytes
+−127..+127 and never 0x80** — so a writer must clamp to ±127. This is the one
+value the panel cannot produce.
+
+Per-key-range scoping is now established **by experiment** rather than from
+the manual's wording.
+
+**Byte layout** (from mpc2emu's `docs/KRZ_FORMAT.md`, not measured here): the
+keymap `method` word is a bitfield, `0x04` selects a per-entry `volumeAdjust`
+i8 sitting **+2 into the entry**, between the i16 tuning and the i16 sampleID.
+mpc2emu writes `0x13` (entry size 5); adding volume means `0x17` (size 6).
+Their *reader* (`krz_parser._decode_table`) already decodes the full bitfield
+including `0x04` — this is a write-side-only gap.
+
+**Navigation note:** in `EditKeyMap`, `ChanBankInc/Dec` steps the *velocity*
+level (`<>VelocityRange:` on the top line), **not** the key range — the K2000
+supports 1–3 velocity levels per keymap and they cannot be added to an
+existing keymap. Key ranges are stepped with the `Key Range` field itself.
+Walking ranges with ChanBank silently shows the same range every time.
+
+## 38. §KRZSHAREDGAIN verified on hardware; v14 at bank 800 (2026-09-01)
+
+mpc2emu's fix for per-sample gain averaged across every zone in the bank (the
+bug §37's keymap `VolumeAdjust` finding was chased down for) shipped as v14.
+Loaded `FROM_S3.KRZ` (709K, byte-size-matched against
+`out_MXS3toKRZ_v14/MXS3TOKRZ_01.KRZ` = 726414) into **bank 800**, verified
+empty first, mode **Fill**. The reference preset is at **802**; **702 keeps v13** as the
+reference artefact.
+
+### The two fields sum to the source gain
+
+```
+  C 0-B 3   KK DXE    keymap -5.5 + sample -6.5 = -12.00   source -12.115   +0.12
+  C 4-B 4   KK DXE1   keymap -4.0 + sample -1.0 =  -5.00   source  -4.846   -0.15
+  C 5-G 10  KK DXE2   keymap -8.0 + sample -4.0 = -12.00   source -12.115   +0.12
+```
+
+Max |error| **0.154 dB** against the field's own 0.5 dB quantisation. Layer 1's
+ranges are all `0.0dB`, consistent with the writer emitting `method 0x17` only
+on the keymaps that need a residual and `0x13` elsewhere.
+
+### Audio A/B, paired — both versions resident at once
+
+Because v13 (702) and v14 (802) are in RAM simultaneously, each pair was
+captured back to back through the same chain, the same Volume knob and the same
+minute. **Chain and gain cancel exactly, so no reference design is needed** —
+this is a much stronger design than the cross-machine comparison of §36 and it
+is available whenever two versions can be resident together.
+
+Whole patch (mean of v127/v64, 3 reps): note 48 **-1.55**, note 63 **-2.57**,
+note 80 **-5.33** dB. All negative, as required if v13 was too loud — but the
+*ordering* contradicted the zone errors (+5.65 / +3.88 / +8.08 predicts
+80 > 48 > 63; observed 80 > 63 > 48).
+
+**Tested rather than explained away.** Layer 1 is untouched by the fix, so it
+is pure dilution; muting it on both programs isolates the change:
+
+```
+  L2 ONLY    v13 -> v14   predicted    err
+    note 48    -5.55        -5.65     +0.11
+    note 63    -4.02        -3.88     -0.14
+    note 80    -8.07        -8.08     +0.01      ordering restored to [80,48,63]
+```
+
+Max error **0.14 dB**. The anomaly was layer 1's *note-dependent* share: at
+note 48 the whole-patch delta is only 27% of the L2 change, at notes 63 and 80
+it is 66%. **A whole-patch measurement dilutes a per-layer change by an amount
+that varies with note**, so per-layer claims need the other layer muted — which
+is cheap, since the mute is an in-editor edit discarded on exit (§36).
+
+### Loading into a verified-empty bank cannot go destructively wrong
+
+The K2000 offers only `Append / Fill / Cancel` when the target bank is empty —
+`OvFill`, `Overwrt` and `Merge` are not presented at all. Useful given that
+`soft_index` once matched "Fill" inside "OvFill" and pressed the destructive
+one for real (§34). Verifying the bank is empty first is therefore a stronger
+guard than getting the soft key right.
+
+## 39. v15 verified: the resonance change is symmetric, not top-only (2026-09-01)
+
+Jan loaded v15 to program **902**; mpc2emu asked for parameter-level
+verification. Banks 200-499 had been cleared, but 500/600/700/800/900 remain,
+so **702 (v13), 802 (v14) and 902 (v15) are all resident** and comparable back
+to back.
+
+### Confirmed as v15
+
+```
+  LAYER COUNT      3          (v13/v14 have 2 -- checked, not assumed)
+  F2 RES           L1 5.0dB   L2 19.0dB   L3 14.0dB
+  F1 FRQ Coarse    L1 16Hz    L2 104Hz    L3 55Hz
+  keymap ranges    L1 3       L2 2        L3 1
+```
+
+**Two entries in the supplied expectation table were wrong, and both were
+expectation errors, not build errors** — worth knowing because as written they
+would fail a correct build:
+
+- `AMPENV Dec1` is **not** 7/3/3. It is `0.02s/37%` and `5.10s/21%`, **identical
+  across v13, v14 and v15**, with L3 inheriting L2's envelope exactly. v15
+  changed no amp envelope, which is what a resonance/fusion fix should do.
+- The keymap ranges are **wider** than described (L2's second range runs
+  `C 4-G 10`, L3's single range spans `C 0-G 10`). Coverage is still correct
+  because the **LAYER bounds** do the gating: `L2 C1-B4`, `L3 C5-G9` —
+  contiguous, no gap, no overlap. v14 achieved the same coverage the opposite
+  way, with full-range layers and three bounded keymap ranges; the splits have
+  to live *somewhere*, and which of the two carries them depends on whether the
+  keygroups share a keymap.
+
+### The change is symmetric — the "control" note moved more than the effect
+
+Set up note 48 as a control on the claim that the builds are near-identical
+below key 60. It moved **+9.4%** in centroid, three times the effect being
+looked for. Reading the resonances rather than reporting the number:
+
+```
+  keys <=71   16.5 -> 19.0  =  +2.5 dB  MORE resonant
+  keys >=72   16.5 -> 14.0  =  -2.5 dB  LESS resonant
+```
+
+**Fusing two keygroups instead of three does not merely release the third — it
+re-averages what remains**, and kg1+kg3 average higher than kg1+kg3+kg5 did.
+(The fused value on the box is **16.5 dB**, not the 17.5 that was quoted.)
+
+Audio, all three builds paired back to back, centroid over 0.10-0.60 s, v127:
+
+```
+  v14 -> v15     d_rms      d_centroid
+    note 48     -0.22 dB   +265.0 Hz (+9.4%)    L2, now more resonant
+    note 72     +0.07 dB    -67.8 Hz (-2.5%)    L3, now less resonant
+    note 80     +0.07 dB   -136.6 Hz (-3.2%)
+    note 88     -0.09 dB   -107.2 Hz (-2.3%)
+```
+
+RMS flat to ±0.22 dB throughout, so §KRZSHAREDGAIN's level fix survives v15 —
+the change is purely spectral, as intended.
+
+### Scored against the source, and where the error now lives
+
+```
+  keys        source   v13/v14        v15
+   24-59      18.7      16.5 (-2.2)   19.0 (+0.3)
+   60-71      25.5      16.5 (-9.0)   19.0 (-6.5)   <-- remaining error
+   72-127     14.9      16.5 (+1.6)   14.0 (-0.9)
+```
+
+All three ranges improve. **The residual is now concentrated in keys 60-71 at
+-6.5 dB**, because kg1 and kg3 remain fused and differ by 6.8 dB — the same key
+range where §KRZSHAREDGAIN's residual was largest. Unlike that bug there is
+**no per-key-range escape**: K2000 resonance is a per-LAYER DSP parameter and
+the program already uses three layers, so splitting kg1/kg3 is not available.
+Treat it as a hard limit rather than an open defect.
+
+**Method note:** a resonance change is a peakiness change, and RMS cannot
+distinguish "quieter" from "less resonant". Spectral centroid is gain-invariant
+and does — and with two builds resident simultaneously the comparison is paired
+against the same chain and knob (§38).
+
+## 40. `F2 RES KeyTrk`: pivot 60, literal dB/key, linear both ways (2026-09-01)
+
+Measured because it is the only lever that could relax §39's "keys 60-71 are
+6.5 dB under source and there is nothing to be done" — K2000 resonance is a
+per-LAYER DSP parameter, but the `F2 RES` page carries its own `KeyTrk`, which
+mpc2emu's writer has never emitted.
+
+```
+  resonance(key) = Adjust + KeyTrk * (key - 60)
+
+  KeyTrk 0.04:  d = -1.44 -0.96 -0.39  0.00 +0.54 +0.97 +1.49   (keys 24..96)
+       gradient 1.010 dB/key per unit set   pivot 59.2   r2 0.9989
+  KeyTrk 0.10:  d = -3.60 -2.41 -1.21  0.00 +1.23 +2.45 +3.65
+       gradient 1.009 dB/key per unit set   pivot 59.8   r2 1.0000
+```
+
+**Pivot is key 60** — middle C, agreed independently by both settings, and
+**not** the endpoint pivot the amp's `VelTrk` uses (§36). Linear in key and in
+the setting; the displayed dB/key is literal to within 1%; `0` is genuinely
+neutral (the KeyTrk 0 row is flat to 0.00 dB across six octaves).
+
+### The rig, and why the first one was thrown away
+
+**Built on ROM #199's edit buffer**: one layer, ALG 5, keymap 163 Sine Wave
+with **both** KEYMAP and PITCH `KeyTrk` at 0 so the pitch is frozen at 262 Hz,
+the corner parked on it at `C 4`, `F1 FRQ` KeyTrk/Depth/VelTrk 0, `F4 AMP`
+VelTrk 0. Control: 0.00 dB level spread across keys 24-96 at crest 3.03.
+Nothing saved.
+
+**CORRECTION (2026-09-01, later): F3 was NOT switched off.** This note and §42
+both claimed it was; §40's own transcript prints the chain as
+`PITCH 2POLE LOWPASS BAND2 AMP` throughout. Pressing the `F3` soft key
+*navigates to* that block's page — it does not change the block's type, which
+lives on the ALG page. **#199 defaults its F3 block to BAND2 under algorithm
+5** and it stayed in circuit for every §40/§42 capture.
+
+**Harmless for the KeyTrk law, fatal for anything absolute — and the reason
+matters more than the conclusion.** The tempting argument is "a fixed stage in
+series divides out of a difference". True, but it assumes the premise that
+actually needed checking: **was BAND2 fixed?** A bandpass has its own block
+parameters, and `F3 SEP` on the 4-pole turned out to carry its own
+`KeyTrk`/`VelTrk` (§42). BAND2's were never touched. Had its centre tracked the
+key, the series gain would have varied with key and the measurement would be
+corrupted — invisibly, because it would look exactly like resonance
+keytracking.
+
+**The control settles it empirically:** §40's KeyTrk-0 run measured **0.00 dB
+level spread across keys 24-96**. A key-dependent BAND2 could not produce that.
+So the stage was key-independent on that rig, whatever its settings were — and
+the calibration curve was measured through BAND2 as well, so its constant gain
+cancels in the level→resonance inversion before any difference is taken.
+
+**State it that way round.** "The control was flat, therefore the stage was
+key-independent" is the check; "a fixed stage divides out" is an argument from
+an unchecked premise. §40/§42's results stand — pivot 60, 1.009-1.010 dB/key
+per unit, offset 228, rails ±100 — but they stand *with BAND2 in circuit*, not
+because it was removed.
+
+Any measurement of the transfer function *itself* (a corner frequency, a
+rolloff slope) does have BAND2 in series with the filter under test and is
+invalid. Found while measuring filter corners (§45), where the same rig
+produced fits railing at the search limit.
+
+**A sine parked exactly on the corner turns RMS into a direct readout of the
+resonant peak**, which is what makes this measurable at all — resonance is a
+peak, not a broadband gain, so RMS on any other source barely moves.
+
+The first attempt was built on **program 902** because it already had a working
+2-pole lowpass, so the rig was ~8 edits away instead of built from scratch.
+That reasoning was about edit count, not validity, and it was wrong: 902 is the
+v15 reference artefact and carries seven confounds (three layers, a choke
+click, ENV2->corner at 7600/4000 ct, velocity->corner at 7500/8200 ct, layer
+key spans that differ so sweeping the key changes which layer sounds, musical
+samples, pitch keytracking). All were neutralised and the control did come back
+flat — but each took a run to find, and two more runs were lost to state left
+behind in the rig. **The clean rig beat it in one run.** Build the rig from a
+known state; do not subtract confounds from an unknown one.
+
+### Resonance -> level SATURATES, and that broke the first measurement
+
+```
+  Adjust  0->6 dB : level tracks at 1.00 dB/dB
+          6->12   : 1.4 dB total
+         12->24   : almost nothing
+```
+
+The first attempt used the reference preset's own 19 dB base, so KeyTrk's whole +-7 dB
+excursion sat in the flat region and produced 0.4 dB where 14.4 was expected —
+**a false null that read as "KeyTrk does nothing"**. Choose an operating point
+in the 0-6 dB region, and invert measured level back through a calibration
+curve rather than treating level as proportional to resonance.
+
+Practical corollary: **the reference preset's layers sit at 19 and 14 dB, already saturated**,
+so a resonance change up there moves the output far less than its dB value
+suggests. Do not predict audibility from a resonance delta alone.
+
+### What it buys, and what it does not
+
+```
+  L2 (keys 24-71)                      RMS err   worst
+    v15 today: flat 19.0 dB             3.26      6.5 dB
+    best ramp: 22.4 dB, KeyTrk 0.159    1.95      3.5 dB
+```
+
+KeyTrk **halves** the error on a fused layer but does not eliminate it:
+**KeyTrk is a linear ramp and the source is piecewise-constant**, so matching
+kg3 costs accuracy inside kg1 where v15 is currently almost exact. And it only
+helps when the source resonances are **monotonic in key** — the reference preset's run
+18.7 -> 25.5 -> 14.9, up then down, and one ramp across all three keygroups is
+*worse* than the three-layer split (RMS 2.81 dB, worst 7.8 dB). Use KeyTrk for
+a fused layer whose members trend one way; keep separate layers where they do
+not.
+
+## 41. `F2 RES KeyTrk` byte: offset 228, and `ram_only=True` is not "is this ID free" (2026-09-01)
+
+§40 measured the law; mpc2emu needed the byte to write it. Found by DUMP-diff
+(§30's method) across four scratch programs identical in everything but
+`F2 RES KeyTrk`:
+
+```
+  KeyTrk    byte@228   signed   dB/key per unit
+   +0.00        0        +0         -
+   +0.10        5        +5       0.0200
+   -0.10      251        -5       0.0200
+   +1.00       50       +50       0.0200      <- 10x check
+```
+
+**Offset 228 was the only byte that differed across the set.** Signed i8 at
+**0.02 dB/key per unit**, which matches the alpha-wheel step measured
+independently. The ±0.10 pair alone could not distinguish a linear scale from a
+curve through those two points, hence the 1.00 confirmation.
+
+**Panel rails are −2.00 .. +2.00 dB/key = bytes −100 .. +100 — NOT the signed
+i8 range.** −128/+127 would reach −2.56/+2.54, values the panel cannot produce.
+
+```python
+# F2 RES KeyTrk, Program object offset 228
+byte = max(-100, min(100, round(db_per_key / 0.02))) & 0xFF
+```
+
+This is the second rail in two days that is narrower than its container (§37's
+keymap `VolumeAdjust` is ±63.5, not −64.0). **Measure the rails; do not infer
+them from the byte width.**
+
+### `list_bank(..., ram_only=True)` hides ROM, and is not a free-ID test
+
+The scratch copies were first aimed at "empty bank 100" — empty per this
+project's own census. The K2000 refused: the save dialog came back
+`(Replace Cheeze)` with its soft key changed from `Save` to **`Replace`**.
+**Bank 100 holds 100 ROM programs**; `ram_only=True` had hidden all of them and
+reported the bank empty.
+
+**Guard, now in the probe: refuse to save if the dialog offers `Replace`.**
+The device's own dialog is the authority on whether an ID is free — a census
+with `ram_only=True` answers a different question ("what is in RAM here"), and
+0-199 is ROM territory on this machine. Worth the same guard anywhere an ID is
+chosen programmatically.
+
+**Save-dialog flow** (Program Editor → `Save`): the ID must be typed **and
+committed with Enter** — typing alone leaves it mid-entry (`as:100...`) and the
+screen still reads the old ID. Then the soft row is
+`Object | Rename | Save | Cancel` for a free ID, and
+`Object | Rename | Replace | Cancel` for an occupied one.
+
+**Left resident:** scratch programs **200-203** (`Default Program` copies at
+KeyTrk 0.00 / +0.10 / −0.10 / +1.00), RAM-only, ROM keymap 163 so no sample RAM
+involved. Not deleted: a delete flow this project has not exercised, on a box
+with a known delete-time lockup ([[lockup-heartbeat-during-deletes]]), run for
+tidiness alone, is a poor risk trade — flagged for Jan's next bank clear
+instead.
+
+## 42. The 4-pole `F2 RES KeyTrk` law is the same law — read the manual first (2026-09-01)
+
+Jan pointed out that the algorithms are described in the manual. Consulting it
+before designing the probe **prevented a real error and revealed a confound no
+amount of probing the F2 page would have surfaced.**
+
+Manual, "Four-pole Lowpass Filter with Separation (4POLE LOPASS W/ SEP)":
+
+> "This combines 2POLE LOWPASS and LOPAS2 in one **three-stage** function. The
+> parameters on the F1 FRQ page affect the cutoff frequencies of **both**
+> filters. The parameters on the **F2 RES** page affect the resonance of
+> **2POLE LOWPASS**. The parameters on the **F3 SEP** page shift the cutoff
+> frequency of LOPAS2."
+
+**F3 is not a spare slot on a 4-pole — it is the filter's own SEP stage.** The
+plan of record before reading this was to "check F3 and switch it off", which
+would have dismantled the filter being measured. And **`F3 SEP` carries its own
+`KeyTrk`/`VelTrk`/`Depth`**: a non-zero SEP KeyTrk moves LOPAS2's corner with
+key — exactly the confound the rig exists to exclude — and nothing on the
+`F2 RES` page would show it. (On #199 it defaults to all zeros, so the run
+would have survived; that is luck, not method.)
+
+### Result: identical, and structurally so
+
+```
+                 dB/key per unit set    pivot     r2
+  4-pole  KeyTrk 0.04       1.052        59.0    0.9993
+          KeyTrk 0.10       1.020        59.5    0.9998
+  2-pole  (§40 reference) 1.009-1.010  59.2-59.8
+
+  byte@228:  4-pole  0.00 -> 0,  1.00 -> 50    identical to 2-pole (§41)
+```
+
+Control spread at KeyTrk 0: **0.00 dB** across keys 24-96. The prediction was
+stated before measuring. It holds *because* `F2 RES` on a 4-pole is literally
+the same 2POLE LOWPASS resonance stage with a second lowpass cascaded after —
+structural, not two numbers happening to agree.
+
+**One rule covers both filter types:**
+
+```python
+# F2 RES KeyTrk -- Program object offset 228, 2-pole AND 4-pole
+byte = max(-100, min(100, round(db_per_key / 0.02))) & 0xFF
+# resonance(key) = Adjust + KeyTrk * (key - 60)
+```
+
+**Saturation knee moved**: 4-pole flattens at Adjust ~8 dB against 2-pole's ~6.
+Found before sweeping, operating point set at 4.0; crest stayed 3.15-3.26
+against a pure sine's 3.01, so nothing clipped.
+
+### Scope, and one manual caveat
+
+Measured for `2POLE LOWPASS` and `4POLE LOPASS W/SEP` only. Algorithm 1's
+centre block also offers HIFREQ STIMULATOR, PARAMETRIC EQ, STEEP RESONANT BASS,
+4POLE HIPASS W/SEP, TWIN PEAKS BANDPASS and DOUBLE NOTCH W/SEP — **none
+measured**, and the 4-pole result transfers only because the manual states the
+resonance stage is shared. Do not assume the highpass or bandpass match.
+
+**The manual is authoritative on structure but not always on field labels**: it
+renders the F3 SEP first field as `Adjust:0ct`; the device says `Coarse:0ct`.
+That difference broke the first run.
+
+**Scratch programs 200-205** remain resident in bank 200 (200-203 from §41,
+204-205 from this note's byte check) — RAM-only, ROM keymap 163, no sample RAM.
+
+## 43. F4 AMP `Src1` / `Depth` bytes: 262 / 263, 1 dB per unit (2026-09-01)
+
+mpc2emu's tremolo path (`lfo1_to_volume`) is read by no hardware reader and
+written by no writer, so LFO→amplitude is absent from every hardware path. They
+could infer `Src1`/`Depth` adjacency from the F1 FRQ block but not the absolute
+offsets or the scale.
+
+DUMP-diff, no audio needed — set the field, save, dump:
+
+```
+  state                @262      @263
+  Src1 OFF,  Dep   0     0         0     (baseline, id 206)
+  Src1 LFO1, Dep   0   114         0
+  Src1 LFO1, Dep +12   114        12
+  Src1 LFO1, Dep -12   114       244  (-12)
+  Src1 LFO1, Dep +24   114        24
+  Src1 LFO1, Dep  +6   114         6
+```
+
+**Offset 262 = `Src1`**, holding the control-source code directly
+(`OFF` = 0, `LFO1` = **114**). **Offset 263 = `Depth`**, signed i8,
+**1.0 dB per unit** — the byte equals the displayed dB.
+
+**Panel rails −96 .. +96 dB = bytes −96..+96.** Third rail in two days narrower
+than its container (§37 `VolumeAdjust` ±63.5; §41 `F2 RES KeyTrk` ±100; this
+±96). The habit stands: **measure the rail, never infer it from byte width.**
+
+```python
+src1_byte  = control_source_code                          # offset 262
+depth_byte = max(-96, min(96, round(depth_db))) & 0xFF    # offset 263
+```
+
+Note the scale is **1 dB/unit here against 0.02 dB/unit for `F2 RES KeyTrk`**
+(§41) — there is **no shared scaling convention across the F-blocks**, so each
+depth field needs its own measurement.
+
+**Selecting a control source: type the code, do not wheel.** The `Src1` list is
+long; wheeling 60 clicks overshot to `FX Depth` without reaching LFO1. The
+manual's Main Control Source List gives the numbers (LFO1 = 114, LFO2 = 116,
+ENV2 = 121, Data = 6).
+
+**A self-inflicted analysis bug worth remembering:** the script's automatic
+"which byte varies with Depth" step printed `[]`. It intersected the
+changed-byte sets across states, and the Depth-0 state has no change at 263, so
+263 fell out of the intersection. The raw per-state diffs were unambiguous —
+but a reader skimming for the summary line would have concluded that no byte
+encodes Depth. **A derived summary can fail while its inputs are fine.**
+
+**Not measured:** `Src2`, `DptCtl`, `MinDpt`, `MaxDpt`. Probably 264+ by the
+same adjacency; that is an inference, not a result.
+
+## 44. F4 AMP tremolo swings ±Depth about nominal (2026-09-01)
+
+mpc2emu's model asserted, unmeasured, that LFO→volume is "always positive: a
+tremolo swings symmetrically down from the zone's own volume" — self-
+contradictory as written. It decides whether writing depth D costs headroom
+above nominal.
+
+```
+  Depth   peak vs nominal   trough vs nominal   total swing   2xDepth
+   12.0        +12.08            -11.51            23.58        24.0
+   24.0        +23.85            -22.52            46.37        48.0
+  peak/Depth 1.007, 0.994    swing/(2*Depth) 0.982, 0.966
+```
+
+**`Depth` is the one-sided amplitude in dB, applied bipolar about the
+un-modulated level.** Peak-to-peak is 2×Depth. **Writing depth D costs the full
+D dB of headroom above nominal** — so a zone within D dB of full scale clips on
+every tremolo peak. Both halves of the model's claim were wrong: it is not
+one-sided, and it does not stay at or below nominal.
+
+**The residual asymmetry is REAL — it is the device, not the floor. My first
+reading of it was wrong and I disproved it myself.** §44 first recorded the
+shallow trough as "probably my noise floor, not proven". Measuring the same
+Depth 24 at two gains 8 dB apart settles it:
+
+```
+  Adjust   peak-nom   trough-nom   centre offset   half-swing   trough hdr
+   -24.0    +24.46      -21.53         +1.46          23.00       9.68 dB
+   -16.0    +24.48      -21.05         +1.72          22.77      18.17 dB
+```
+
+**The trough moved 0.48 dB while its headroom over the floor nearly doubled**
+(9.68 → 18.17 dB), and floor-correcting the power leaves −22.0 / −21.1 — still
+~2.5 dB short of −24. Floor-limited would have closed the gap. It did not.
+
+Meanwhile **the peak is identical at both gains to 0.01 dB** (+24.46 / +24.48),
+which also rules out compression at the top: the louder run had only 5.21 dB of
+peak headroom and read the same as the quiet one with 13.12 dB.
+
+So the swing is **not** exactly ±D. Measured:
+
+```
+  Depth 12   +12.08 / -11.51    centre +0.29   half-swing 11.80
+  Depth 24   +24.47 / -21.53    centre +1.47   half-swing 23.00
+```
+
+The modulation centre sits slightly **above** the un-modulated level, by an
+amount that grows with depth, and the half-swing is ~0.96-0.98 × D. The
+mechanism is not established and is not worth guessing at from two depths.
+
+**The practical consequence is unchanged and if anything firmer**: the headroom
+cost is the *peak*, which is **≥ D** (+12.08 at D=12, +24.47 at D=24). Budget
+the full Depth above nominal.
+
+**Rig:** ROM #199 at its **default algorithm** — `PITCH / NONE / AMP`, F1/F2/F3
+all OFF, so no filter anywhere can colour an amplitude measurement. Sine keymap
+163, LFO1 (control source 114) into `F4 AMP Src1`, LFO1 at its default 2.00 Hz
+sine giving ~4.5 cycles in the window. **Linearity verified before capturing**
+(Adjust −18→−24 gave −5.95 dB against −6.0) — a clipped peak would have read as
+"down only" regardless of the truth.
+
+### The verdict line in the script was wrong while its numbers were right
+
+It printed **"UP ONLY (peak +D above nominal)"**. The classifier tested only the
+peak against `D`; `peak ≈ +D` matched a branch *defined* by the trough staying
+at nominal, and the trough had moved to −D too. **Second instance the same day**
+of a derived summary failing over sound inputs (§43's byte-detector printing
+`[]` was the first). Both were caught by reading the raw rows. **Do not report a
+classifier's label without checking it against the numbers it classified** —
+and prefer printing the numbers next to the verdict, as these scripts do, so
+the discrepancy is visible at all.
+
+## 45. Filter corner measured with audio — the displayed Hz IS the corner (2026-09-02)
+
+§KRZCUTCAL confirmed `440*2**((s-9)/12)` against the K2000's **own displayed
+`Coarse:` label**, never against a measurement. AKAI/E4XT/MPC all have measured
+−3 dB corners, so AKAI→KRZ was mapping a measured corner onto a display
+convention with an unknown offset. Prediction stated before running: they are
+the same. **They are.**
+
+```
+  2POLE LOWPASS, F3=NONE verified by DUMP
+   displayed   fitted   resid(n=2)   ratio   source
+      261.6    235.7      0.7        0.901   saw  note 24
+      523.3    491.2      0.9        0.939   saw
+     1046.5   1059.8      0.9        1.013   saw
+     2093.0   1965.7      2.2        0.939   hihat note 60
+     4186.0   3840.0      1.4        0.917   hihat
+     8372.0   8539.3      1.0        1.020   hihat
+
+  mean 0.9548  sd 0.0498  n=6  95% CI 0.915-0.995  -- no resolvable offset
+```
+
+**Pole count confirmed independently of the panel:** n=2 beats n=1 and n=4 by
+~7 dB of residual at every low-band point.
+
+**4-pole NOT established** — one trustworthy point (8372 Hz, ratio 0.884). A
+24 dB/oct rolloff buries its stopband in the floor far faster; at 3.36% of real
+layers it is not worth a flat-source rig.
+
+### Redone with the real noise source — and the honest bound is ±10%
+
+Jan loaded the §KRZCUTCAL bank (`CUTCAL.KRZ`) to **300ff**: eleven programs
+`CUT 000`-`CUT 100` plus the **`CalNoise`** soundblock. Verified before use and
+it is the right source — **sustained** (AMPENV loops; flat to 0.2 dB over 3 s,
+so window placement cannot bias anything) and **flat to about 1 dB per octave**
+across 63 Hz-16 kHz, comparable to mpc2emu's ±0.7 dB MPC benchmark. Reference
+SNR 62 dB median, 100% of the band clear.
+
+**The answer still moves with the ANALYSIS, not the instrument:**
+
+```
+  run                              n    mean     sd     range
+  saw+hihat, fixed band 63-16k     6   0.955   0.050  0.901-1.020
+  CalNoise,  fixed band 63-16k     5   0.912   0.063  0.868-1.022
+  CalNoise,  adaptive band (2P)    8   0.856   0.212  0.363-1.051
+  CalNoise,  adaptive band (4P)    5   0.965   0.079  0.877-1.043
+
+  spread of the MEANS across analysis choices: 0.856 .. 0.965  (11 points)
+```
+
+**The fit-band policy shifts the result by as much as the effect being sought.**
+A real corner offset would not move when the analysis band changes; this does.
+So the 0.87-0.91 clustering that looked like a systematic ~10% offset in the
+mid-band is **a method artefact, not a device property** — and that sensitivity
+is itself the diagnostic.
+
+Pooling every CalNoise point that passed both gates (n=10): **mean 0.939,
+sd 0.073, 95% CI 0.893-0.984**.
+
+**Conclusion, stated at the precision actually achieved: the displayed cutoff
+and the measured corner agree to within ±10%, and no offset is resolvable.**
+That is weaker than the ~1% the AKAI/E4XT/MPC corners carry, but it does rule
+out a gross mismatch, which was the conversion risk. Tightening it needs a
+different method (swept sine, or a proper analyser) rather than more runs of
+this one — five attempts converged on the bound, not past it.
+
+**Also learned: a low residual is not a quality gate.** The 65 Hz 2-pole point
+fitted 23.6 Hz — ratio 0.363, plainly wrong — with residual **2.9 dB**, passing
+a `resid<3` filter. A truncated curve is easy to fit well. Gate on usable
+bandwidth *and* plausibility, not on residual alone.
+
+### RESOLVED — the swept sine works, and it supersedes the ±10 % bound
+
+**Cause of the earlier failure: the CUT programs sound on ONE KEY.**
+`LoKey C 4, HiKey C 4` — they were built for a fixed-pitch noise calibration.
+Swapping the keymap does not widen the layer, so 48 of 49 sweep notes were
+silent and "pitch not tracking" was 48 noise-floor captures averaged with one
+real tone. Purity 0.64 and 56 dB of reference spread were both that.
+**Identical to the reference preset's layer bound in §36 — written up in this same file and
+not applied.**
+
+Found by Jan's one-note test, which settled it in a single capture where three
+sweep runs had not:
+
+```
+  note   expect    FFTpeak   zero-x   autocorr   purity     rms
+    48    130.8     150.0    6489.0      50.0    0.617   0.00003   NOISE FLOOR
+    60    261.6     261.8     282.3     262.3    0.999   0.00050   perfect sine
+    72    523.3     150.0    6537.1      50.0    0.615   0.00003   NOISE FLOOR
+```
+
+**Check the thing every later step assumes, on ONE sample, before scaling up.**
+
+### The measurement
+
+Rig: program 300 → keymap 163 Sine Wave, **layer widened C 1–G 9**, both
+KEYMAP and PITCH `KeyTrk` at 100 ct/key, F2 RES 0, all modulation zeroed,
+F3 asserted `NONE` by DUMP. Reference pass filter-open; per-note ratio is
+|H(f)| directly — **no model, no fit band**.
+
+```
+  purity   median 1.000, min 0.999      span 12.2 octaves (4 .. 19188 Hz)
+  flatness 5.4 dB p-p, sd 1.1 dB        plateau +0.0 dB
+
+  2POLE   -3 dB at  1.259 / 1.265 / 1.203 x displayed   mean 1.242  sd 0.034
+  4POLE   -3 dB at  0.783 / 0.775 / 0.722 x displayed   mean 0.760  sd 0.034
+```
+
+Three cutoffs four octaves apart agreeing to **3.4 %** each. **The offset is
+constant with frequency and differs by filter type by a factor of 1.63.**
+
+**The 4-pole has a structural explanation that nearly lands.** Two identical
+cascaded 2-pole sections are −6 dB at the section corner, so the cascade's
+−3 dB sits at **0.802 × corner**; measured 0.760, 5.3 % off. So the label
+plausibly means the *section* corner and the 4-pole's offset is mostly the
+cascade rather than a calibration error. **The 2-pole's 1.242 is unexplained** —
+a Butterworth 2-pole should read 1.000.
+
+**This supersedes the ±10 % bound above**, which came from a method with a
+demonstrated ±11-point fit-band sensitivity and was simply too coarse to
+resolve a 24 % offset.
+
+### RESOLVED: the label is honest — it is f0, not a −3 dB corner
+
+The Q question was tested by measuring the gain **at** the displayed corner,
+rather than inferring Q from the −3 dB point (which would be circular):
+
+```
+  2-POLE   gain at displayed corner  -0.10 dB  ->  |H(f0)| = Q = 0.989
+           -3 dB crossing at 1.264 f0          ->        Q = 0.986
+           two independent readings of one curve, agreeing to 0.2 %
+
+  4-POLE   gain at displayed corner  -6.11 dB  ->  |H(f0)| = 0.495
+           as two cascaded sections =>  each 0.703  (Butterworth 0.7071, -0.5 %)
+           that cascade predicts -3 dB at 0.802 f0; measured 0.774  (-3.5 %)
+```
+
+**There is no calibration error. The displayed cutoff is f0 — the section's
+natural frequency — in both filters.** They differ in Q, and both values are
+sensible:
+
+- **2-pole runs Q ≈ 0.99: unity gain at the labelled frequency.** A deliberate
+  design choice, not an accident — at zero resonance the response passes
+  through 0 dB at the corner.
+- **4-pole is two Butterworth (0.707) sections at the same f0.** Its −6.11 dB
+  at f0 is 0.707², and its −3 dB necessarily falls below f0.
+
+`SEP` was read back off the panel after writing (`Coarse 0ct, Fine 0ct,
+KeyTrk 0ct/key, Depth 0ct`), so the sections really were co-located and the
+cascade arithmetic applies — which is why 0.703 lands on 0.7071.
+
+**The conversion still needs a correction, but not an error-correction.** The
+label is honest f0; AKAI/E4XT/MPC corners are measured −3 dB points. Mapping
+one onto the other:
+
+```
+  if the source number is a measured -3 dB corner:
+    2-pole:  cutoff_byte_Hz = source_3dB / 1.264    (-406 cents)
+    4-pole:  cutoff_byte_Hz = source_3dB / 0.774    (+444 cents)
+```
+
+**Opposite directions**, and the 2-pole case is 77 % of real layers — setting
+the byte to the source's −3 dB frequency directly puts f0 about 4 semitones
+high on the common case. **That is what the writer does today.** Held for Jan
+rather than wired: one rig, one day, and a four-semitone change on the
+dominant path deserves a listen first.
+
+**Root cause, fixed on mpc2emu's side:** `VoiceLayer.filter_cutoff` was
+documented as `#: Hz` and nothing else. **That is a unit, not a definition** —
+two machines can both report "cutoff in Hz" and mean different frequencies,
+which is exactly what happened. It now reads "the −3 dB corner, in Hz" with
+each format's convention spelled out and the K2000's f0 flagged as the
+exception. Same species as this project's earlier "physical quantity in one
+machine's parameter scale" defects, but subtler: this one *was* in physical
+units, just not the same physical quantity.
+
+### Confirmed against an independent instrument (2026-09-02)
+
+The f0 result was internally consistent but had never been checked against a
+machine that measures corners the same way. The MPC does. Jan set it static
+(`Cutoff 70`, envelope depth 0 → −3 dB corner **808 Hz**); K2000 program 403
+(same converted bass samples, `2POLE LOWPASS`) was captured at two cutoff bytes,
+note 48 velocity 100, identical window (0.3–2.0 s) and band (40 Hz–14 kHz).
+
+**403 carried `F1 FRQ Depth 10800ct` from ENV2** — a nine-octave sweep that
+hides a 406-cent change in the resting corner completely. Zeroed first; that
+error had already produced one inconclusive run on mpc2emu's side.
+
+```
+    band     MPC       A(831)    B(622)     A-MPC     B-MPC
+     630     -22.6      -7.8      -6.5     +14.8     +16.1
+     800     -26.0      -8.1     -12.8     +17.9     +13.2
+    1000     -32.6     -18.5     -26.4     +14.1      +6.2
+    1250     -39.8     -31.5     -38.7      +8.3      +1.1
+    1600     -50.2     -43.1     -49.6      +7.1      +0.6
+    2000     -62.0     -59.7     -62.8      +2.3      -0.8
+  mean |error| 1000-2000 Hz:   A 7.9 dB    B 2.2 dB
+  crossing -40 dB:  MPC 1256   A 1498 (+305 c)   B 1287 (+43 c)
+```
+
+**B — the f0-corrected byte — tracks the MPC to within ~1 dB from 1250 Hz up;
+A, which is what the writer ships today, is 7–8 dB brighter.** Three
+independent lines now agree the label is f0: gain at the corner (Q 0.989), the
+−3 dB crossing (Q 0.986), and an external instrument.
+
+**The metric nearly inverted the conclusion.** The requested statistic was
+spectral centroid. Over the same captures:
+
+```
+  centroid    A 585 Hz   B 547 Hz    (+115 cents -- right sign, far too small)
+  rolloff85   A 391 Hz   B 458 Hz    (-272 cents -- WRONG SIGN)
+```
+
+Two summaries of one capture set **disagreeing in sign**. Both are dominated by
+the bass fundamental far below either corner; rolloff85 asks where 85 % of the
+energy sits and so reports the source, not the filter. Reported as asked, the
+centroid would have read "115 cents where 406 was predicted — under-powered,
+inconclusive", which is wrong. **On a pitched source, measure the filter where
+the filter is acting** — the 1/3-octave slope above the corner — not with a
+whole-spectrum statistic.
+
+The cross-machine caveat shows up exactly where predicted: at 630/800 Hz both
+K2000 versions sit 13–18 dB above the MPC, which is the converted sample's own
+spectrum near the fundamental. Hence comparing **slopes above the corner**,
+where the source difference has died away.
+
+**Still not established:**
+- **repeatability** — 1047 Hz measured twice per filter (2-pole 1.265/1.264,
+  4-pole 0.775/0.774), but same rig, same day;
+- ~~whether the source formats' numbers really are −3 dB points~~ —
+  **ANSWERED by mpc2emu: all three are.** `akai_filfrq_to_hz` documents
+  "FILFRQ -> the −3 dB corner in Hz"; §E4BFILTCAL read the E4XT's off a noise
+  spectrum in 1/6-octave bands; §MPCCUTOFF fitted a 2-pole whose fc *is* the
+  −3 dB point, and the MPC's resonance-0 response measures +0.15 dB, near
+  enough to Butterworth that fc and −3 dB coincide. **So the K2000 is the odd
+  one out and the correction is real, not a no-op.**
+- the 4-pole's residual −3.5 % against the ideal cascade — small, possibly
+  non-identical sections, not chased.
+
+### Superseded: swept-sine attempt, rig verified, sweep did not sweep
+
+Jan's idea, and the reasoning is right: a chromatic scale on keymap 163 (Sine
+Wave) with pitch keytracking ON is a swept sine, which would remove all three
+limits at once — SNR (all energy at one frequency, so a point 60 dB into the
+stopband still measures), the topology assumption (read −3 dB off the curve,
+no model), and the fit band (no such knob). It is the method that would take
+the ±10 % bound to something tight enough to be a constant.
+
+**It is not working, and the failure is well characterised rather than
+mysterious.** Rig verified correct by DUMP and by reading it back:
+
+```
+  ALG 5, PITCH / 2POLE LOWPASS / NONE / AMP     F3 byte@241 = 60 (NONE) OK
+  KeyMap 163 Sine Wave
+  KEYMAP KeyTrk 100ct/key   AND   PITCH KeyTrk 100ct/key
+  F2 RES 0, F1 Depth/VelTrk/KeyTrk 0, AMP VelTrk 0, Adjust -12 dB
+```
+
+and yet, across 49 notes spanning MIDI 24–120 (**eight octaves**):
+
+```
+  measured f range   148 .. 260 Hz     SWEEP SPAN 0.8 octaves
+  purity             median 0.64       (a clean sine should be >0.95)
+  reference flatness 56 dB p-p across notes
+```
+
+**The pitch is pinned and the tone is not clean.** Setting *both* KeyTrk fields
+to 100 changed nothing — which rules out the obvious cause and is the inverse
+of mpc2emu's original "set both to 0 to freeze pitch" warning. Purity 0.64 says
+whatever is being measured is not a clean fundamental either, so the pinned
+frequency may itself be an analysis artefact rather than the instrument's
+output.
+
+**Three gates refused to emit numbers, correctly**, on three successive runs:
+the purity gate, the pitch/tuning gate, and finally a hard sweep-span gate that
+skipped the cutoff passes outright. Earlier versions of this rig would have
+produced ratios (0.301, 1.522, 0.217, 0.348...) that look like measurements.
+**None of those are reported anywhere** — that is the gates working.
+
+**Next step if resumed** (not attempted, ~9 attempts is where this stopped):
+capture one long note at one pitch and inspect the waveform and spectrum
+directly, before any sweep logic — establish that a single note produces a
+clean sine at the expected frequency, which is the assumption every later step
+rests on and the one thing never independently checked.
+
+### This ROM has no noise, and no single source covers the band
+
+All 192 ROM keymaps listed: nothing noise/white/pink. **Open Hihat (44)** gives
+100% bin coverage of 63 Hz-16 kHz (sawtooth: 2.9%) and is spectrally a noise
+substitute — its non-flatness divides out with the wide-open reference.
+
+But **coverage and SNR trade off**: a cymbal spreads its energy over ~20000
+bins where a saw concentrates it into ~400, so a closed filter drops the
+hihat's stopband under the capture floor. The hihat starves below ~2 kHz; the
+saw runs out of band above ~2.8 kHz. **Use each where it has signal.** Their
+overlap at 2093 Hz is also where they disagree most (1.161 saw vs 0.939 hihat),
+an edge effect on the saw side — the ratio drifts monotonically with where the
+corner sits inside the source's band, which is how edge effects announce
+themselves.
+
+### Pressing the `F3` soft key does not switch F3 off
+
+It **navigates to** that block's page. The block's **type** lives on the ALG
+page. #199 defaults F3 to **BAND2** under algorithm 5, so a bandpass sat in
+series with the filter under test in every earlier run — including §40 and §42,
+whose claim to have switched it off is corrected there.
+
+**Verify by SysEx, not by reading the screen** (Jan's suggestion, and it is the
+general lesson). DUMP-diff of two saved copies:
+
+```
+  F3 block type = Program object offset 241     BAND2 = 35,  NONE = 60
+```
+
+Exactly one byte differed, and **NONE = 60 matches mpc2emu's `f3_byte` writer
+constant**, derived independently. Runs now assert `byte@241 == 60` before
+capturing.
+
+### Two self-inflicted failures worth keeping
+
+- **A clipped REFERENCE flattens everything.** One run railed every fit because
+  the reference peaked at 0.418 against a ~0.10 ceiling — an AMP Adjust copied
+  from a previous rig instead of chosen. Clipping flattens a spectrum, so the
+  divided response looks open at every setting. Both sources now search the
+  level down until the peak clears, and assert it.
+- **A starved fit returns the search limit, not an error.** Fits that ran out
+  of stopband returned exactly 20000.0 Hz — the top of the grid — with *low*
+  residual, because a truncated curve is easy to fit. The SNR gate (% of fit
+  band above the floor) is what makes that visible; without it the number looks
+  like a result.
+
+## 46. Six failures in one day, all the same shape (2026-09-02)
+
+Across three sessions on 2026-09-01, six results were wrong. Not one was a bad
+measurement — **every one was a sentence, label or assumption written on top of
+sound data**, and every one looked plausible on the way out:
+
+| | what was sound | what was wrong |
+|---|---|---|
+| §43 | the per-state byte diffs | the auto-detector printed `[]` (its set-intersection dropped the byte whose value happened to match the baseline) |
+| §44 | peak/trough numbers | the verdict label said "UP ONLY" — it tested only the peak against a branch *defined* by the trough |
+| §44 | the asymmetry itself | "probably my noise floor" — a hedge that turned out to be the device |
+| §45 | the fitted corners | "F3 switched off" — the soft key navigates, it does not change the block type |
+| §45 | the capture chain | an AMP Adjust copied from another rig, clipping the reference at 0.418 into a 0.10 ceiling |
+| (mpc2emu) | the audio | an envelope indexed by schedule times, reading −240 dB from a capture peaking at −11 |
+
+**The measurements were being checked adversarially and the layer on top was
+not.** That layer is what reaches a constants file.
+
+**Taxonomy (mpc2emu's, and it is the useful cut):**
+
+```
+  wrong label over sound data        a classifier verdict, a units ambiguity
+  wrong hypothesis over sound data   "probably my noise floor"
+  wrong index over sound data        an envelope indexed by schedule times
+  wrong state assumed                F3/BAND2, bank-of-100, a copied AMP Adjust
+  wrong statistic, computed right    spectral centroid on a bass note
+```
+
+The first four are all catchable by a better check — something is broken and a
+gate can be made to see it. **The last is not**: nothing is broken anywhere,
+every gate passes, the number is real, and it simply does not answer the
+question asked. The only defence found for it is redundancy — **compute two
+statistics of the same thing, and if they disagree, neither is the answer
+yet.** On the §45 cross-machine capture, centroid said +115 cents and
+`rolloff85` said −272 cents over identical data; the disagreement, not
+judgement, is what prompted looking further.
+
+**What actually caught each one was something independent disagreeing** — the
+manual (F3 is part of the 4-pole, not a spare block), a prior measurement
+(mpc2emu's `corner_frequency` reading 25% low), a control run built for a
+different purpose (§40's flat KeyTrk-0 sweep, which turned out to be the only
+proof that a rogue BAND2 was key-independent), a peer's corpus census, a second
+gain setting. **Worth engineering deliberately rather than waiting for it.**
+
+Practices that earned their place, all used above:
+
+- **Print the numbers beside the verdict**, so a wrong label is visible against
+  its own inputs rather than replacing them.
+- **State a falsifiable prediction before the run** and report it failing. §40's
+  filter-route prediction failed and the failure was the finding; §42's 4-pole
+  prediction held and meant more for having been stated first.
+- **Assert the rig, don't inherit it.** Levels, corner settings, block types —
+  measured or asserted each run. Prefer a SysEx DUMP to a screen read (§45).
+  **Including the audio path**: every capture script in this session wrapped
+  its JACK `connect()` in `except Exception: pass`. A failed connect then
+  yields a silent capture that analyses cleanly — the same silent-capture
+  failure mpc2emu hit from a stale cached recorder, reached by a different
+  route. Assert the connection, or at minimum assert the reference capture is
+  above the noise floor before trusting anything downstream of it.
+
+  **This was live, not latent.** mpc2emu's shared
+  `tests/re_banks/krz_audio_measure.py::record()` printed the failure to
+  stderr and recorded anyway; its caller is
+  **`krz_stereo_measure.py:46`** — the KRZ stereo rig, which is *queued* for
+  the next K2000R session (the channel-order question). So the hazard sat in a
+  script waiting to be run fresh by someone trusting a helper that had worked
+  before. Fixed there with a connection read-back, which also separates the two
+  cases the old `except` conflated: **"already connected" is harmless,
+  "missing port" is fatal**, and printing both then recording treats them
+  alike. **Pull that read-back before running the stereo rig.**
+- **Gate on both ends.** A starved fit returns the search limit with a *low*
+  residual; a clipped reference flattens every spectrum. Neither announces
+  itself.
+- **A hedge is cheap; an assertion is not.** "Probably my floor" survived into a
+  peer's notes marked unproven and cost one run to close. Asserted, it would
+  have become a constant.
+- **A confound that mimics the signal cannot be caught by looking at the
+  signal** — it needs a control that varies something the confound does not.
+- **"We never swallowed it" is a claim about the code; "the port is connected"
+  is a claim about the world.** Only the second is what a measurement depends
+  on. Every state bug this session had that shape: `byte@241` versus the panel
+  read, bank-of-100 versus the MIDI spec, the layer key range versus what the
+  program was built for. In each the code did exactly what it said and the
+  world was arranged differently. **Read the world back.**
+
+## 47. AMP `VelTrk` is Program offset 261, and the K2000 delivers it (2026-09-04)
+
+The last leg of mpc2emu's `§KRZAMPVEL`: for years every K2000 voice their
+converter wrote inherited ROM #199's `AMP VelTrk 35`, whether the source asked
+for velocity response or not. They built a four-preset bank to test the fix on
+the three machines at once — one shared 1 kHz sine at −6 dBFS on key 60, root
+60, four presets identical in every respect *except* `AMP VelTrk`:
+
+    program 800  'VT00 NULL'   VelTrk  0     <- the NULL is the point, not a warm-up
+    program 801  'VT05 SOFT'   VelTrk  5
+    program 802  'VT15 FULL'   VelTrk 15
+    program 803  'VT36 AKAI'   VelTrk 36
+
+**The byte: Program object offset 261, unsigned, 1 dB per unit.** Found by
+reading all four objects whole (272 bytes) and printing *every* offset that
+differs across the four — **no target byte in mind**. Exactly two varied:
+
+    offset  800  801  802  803
+       189   66   67   68   69     keymap pointer, low byte (834/835/836/837)
+       261    0    5   15   36     AMP VelTrk
+
+That method is worth more than the answer. A read of a named byte cannot fail
+to confirm the byte you named; a differential dump can only report what
+actually varies, and the second varying offset (the keymap pointer) is itself
+the check that the four objects were otherwise identical. Confirmed
+independently on the panel — `F4 AMP (FINAL AMP)`, Layer 1/1, algorithm 1,
+chain `PITCH NONE ... AMP` — reading `VelTrk:0dB / 5dB / 15dB / 36dB`. Either
+reading alone would have been a guess about the other.
+
+261 sits directly beside §43's `Src1` at 262 and `Depth` at 263, which is the
+same page. mpc2emu addresses all three as segment `0x53`, indices 4/5/6, and
+**all three differ from these offsets by a constant 257** — two address spaces
+over the same bytes, cross-checked from a direction that knew nothing about
+this dump.
+
+**Delivered in full, measured.** Ladder at key 60, velocities
+1/16/32/48/64/80/96/112/127, peak level per note:
+
+    program  byte   v127 dBFS   v1 dBFS   swing     error
+    800       0      -14.16     -14.16     0.00 dB  +0.00
+    801       5      -14.16     -19.43     5.27 dB  +0.27
+    802      15      -14.16     -29.65    15.49 dB  +0.49
+    803      36      -14.08     -50.21    36.13 dB  +0.13
+
+The NULL preset reads flat across all nine velocities — peak-to-peak spread
+0.097 dB, sd 0.036, max deviation from mean 0.072 dB. **A voice that asks for
+no velocity response has none.** Note this is the same machine that in §36
+measured a *constant ~5 dB shortfall* against its `VelTrk` setting on a
+whole-signal RMS statistic; on peak level, with one flat sine and no filter
+modulation anywhere in the program, the shortfall is gone. §36's shortfall was
+never the amp — it was the statistic and the source material.
+
+**The compression trap, checked rather than assumed.** mpc2emu had just lost an
+E4XT leg to analogue compression ahead of the converter: staged by ear on one
+loud note, the nine-point ladder came back 15.6 dB short at v127 with v112
+measuring *quieter* than v96. Fitting 803's lower half (v1..v64) and
+extrapolating:
+
+    v  1  resid -0.03    v 48  resid +0.03    v 96  resid +0.28
+    v 16  resid -0.30    v 64  resid -0.19    v112  resid -0.33
+    v 32  resid +0.48    v 80  resid -0.66    v127  resid -0.41
+
+The line through the bottom four points predicts v127 to within 0.41 dB — no
+bend, no inversion, linear in velocity to ~0.5 dB across the whole 36 dB.
+Loudest peak of the run was 0.198, ~14 dB below full scale. **Two endpoints
+would not have shown this**: the E4XT looked fine at v1 and v127 and was
+bending from v64 up. The inversion only appears if you have a middle.
+
+**One imperfection, recorded rather than smoothed.** Normalising each preset to
+its own v127 and dividing by its `VelTrk` should collapse all three onto one
+curve. It nearly does — worst disagreement 0.109 of the 0..−1 range, at v48,
+where 801 sits higher than the other two. In absolute terms that is 0.5 dB on a
+5 dB preset. So the velocity *curve* is mildly `VelTrk`-dependent: endpoints
+agree to well under a dB, the middle does not. Fitting an endpoint swing is
+safe; fitting a curve *shape* is not, and would need measuring per setting.
+
+**Two rig disciplines that earned their keep, both from prior failures here.**
+
+- **One JACK client for all 36 captures**, not one per note — per-capture client
+  create/destroy is what wedged jackd before (`[[jack-client-churn-wedges-jackd]]`),
+  and the capture connection is **read back from the JACK graph** before
+  recording rather than inferred from whether `connect()` raised. "Already
+  connected" and "port missing" raise the same exception; only the graph tells
+  them apart, and the second records silence that analyses perfectly.
+- **Program selection verified, not assumed.** Program Mode draws the program
+  number in the **graphics plane**, so ALLTEXT reads rows 1-6 as blank and
+  cannot see which program is current. Each preset's identity was confirmed by
+  opening the editor and reading its `VelTrk` off the panel before any note was
+  played. This is not paranoia: §36 lost a run to a ladder captured against a
+  program that had never changed.
+
+### The load flow, staged (the OvFill path, done deliberately)
+
+§34 left "a safe, tested load flow (bank select + mode select)" as future work.
+This is it, and it was driven one screen at a time rather than as one script:
+
+1. Browser at `\BANKS\`, select the file, press `OK` — **stop and read**. The
+   K2000 answers with `Load this file as:200...299*` and a scrolling bank list.
+2. The list scrolls **with the selection fixed on the label row** (row 3), one
+   bank per alpha-wheel click. Wheel until row 3 reads `800...899`, verify it,
+   then `OK` — **stop and read**.
+3. The mode row appears, verbatim `OvFill Overwrt Merge Append Fill  Cancel`
+   — the same string as 2026-08-30.
+4. Before pressing anything, assert `soft_index(row, "Fill") == 4` **and**
+   `soft_index(row, "OvFill") == 0` against the real row string, and refuse to
+   press if either disagrees. Both held; `Fill` pressed.
+
+The guard is the point. §34's bug pressed OvFill — which deletes the target
+bank's RAM objects — while asking for Fill, and a remembered key position would
+have hidden it again. Asserting *both* labels resolves correctly is cheap and
+fails loudly. Load completed in ~3 s for a 158K bank; free sample RAM went
+1305K → 1196K, program memory 409K → 405K. Programs landed at 800-803 as
+predicted; **keymaps landed at 834-837**, appended after the 34 already
+resident, and nothing resident was touched.
+
+Corollary worth carrying: *"bank 800 is free"* was true for Programs and false
+for Keymaps and Soundblocks. The DIRBANK survey said so plainly and it was
+still nearly read as "the bank is empty". **A bank is empty per object type.**
+
+## 48. LISTEN3 verified — and a 20.75 dB error that was never the amp (2026-09-04)
+
+The real bank, after §47's synthetic one. Four presets, one per source, loaded
+from `\BANKS\LISTEN3.KRZ` (23843K) into an empty bank 800. mpc2emu supplied
+expected values **and named the trap in advance**, which is what made the read
+falsifiable rather than a nod.
+
+### Layer stride: 224 bytes
+
+Object sizes came back 272 / 496 / 720 for 1 / 2 / 3 layers, so layer *n*'s
+`AMP VelTrk` should be at `261 + 224*(n-1)`. That is a prediction from three
+sizes, not a measurement, so it was printed with its neighbours and checked
+against an independent panel walk of every layer. Both agree:
+
+    program        panel                       dump
+    800 MPC MIXED  2 layers  [0dB, 0dB]        261=0   485=0
+    801 MPC SOFT   1 layer   [5dB]             261=5
+    802 MPC FULL   1 layer   [15dB]            261=15
+    803 AKAI VEL   3 layers  [36,36,36]        261=36  485=36  709=36
+
+**800 is not a null and must not be read as one.** Its MPC source has four
+voices asking for 0.0, 17.2 and 19.0 dB; the K2000's 3-layer cap forces a
+reduction and the survivors come out at 0. At the *byte* that is
+indistinguishable from a correct `VelTrk 0` — so the discriminator is the
+**layer count**, not the value. Two layers both at 0 is the known loss; three
+or four with differing values would have meant the reduction preserved them.
+The honest statement is that the K2000 cannot hold that preset's velocity
+structure at all.
+
+### The 20.75 dB error, and why it was not the writer
+
+Ladder at key 60, nine velocities, peak per note:
+
+    program  byte   v127      v1        swing      error
+    801       5    -20.78   -46.53    25.75 dB   +20.75
+    802      15     -9.30   -24.35    15.05 dB    +0.05
+    803      36    -10.40   -47.12    36.73 dB    +0.73
+
+802 is exact — and it is the **only preset in the bank with no filter**
+(algorithm 1, `PITCH NONE ... AMP`). Every layer's filter page had been read
+**before** the ladder ran, precisely so the explanation could not be
+retrofitted:
+
+    800  F1 FRQ 4P LOPASS  VelTrk 7900ct  Src1 ENV2 Depth 10800ct
+    801  F1 FRQ 2P LOPASS  VelTrk 5900ct  Src1 OFF
+    802  no filter page at all
+    803  F1 FRQ 2P LOPASS  VelTrk 3200/2700/3400ct  Src1 ENV2 Depth 9600ct
+
+801 carries **5900 cents of velocity-to-cutoff with no envelope on the filter
+at all**, so velocity alone opens it — and its ladder visibly saturates above
+v64 (−22.79, −21.96, −21.77, −21.42, −20.78) as the corner passes the top of
+the sample's own spectrum. Zeroing that one field and re-capturing:
+
+    v1 -46.93   v16 -46.05   v32 -45.82   v48 -44.71   v64 -44.26
+    v80 -43.64  v96 -42.92   v112 -42.37  v127 -41.78
+
+    swing 5.14 dB against a byte of 5.  Error +0.14 dB.
+
+**25.75 → 5.14.** The excess was entirely the source's own velocity→cutoff
+routing. §47 had already shown the amp delivers `VelTrk` 1:1 on a flat sine
+with no filter; this shows what a *peak* statistic does the moment a filter
+route exists. **Peak level tracks velocity→filter as faithfully as it tracks
+velocity→volume, and cannot tell them apart.** s3ked found the same thing on
+the AKAI within the hour (one preset 14.42 dB over, excess vanished when its
+filter route was zeroed), and mpc2emu predicted it here before the ladder ran.
+
+Two disciplines this depended on, both from failures already in this file:
+
+- The edit was made **with the editor open** and captured before exiting —
+  a panel edit is live only while the editor is up, and `leave_editor()`
+  answers the save prompt "No" (§36).
+- The object was **DUMP-diffed before and after** rather than trusting that
+  the edit took. "Nothing changed" is a broken experiment, not a null result
+  (§40). Exactly one byte moved. 801 was then restored by exiting with No,
+  and offset 213 verified back at 87 by a further dump.
+
+**Cross-machine postscript, and the reason 20.75 was worth reporting as a
+number rather than as "the filter".** The E4XT and the AKAI had both measured a
+filter excess of **14.43 and 14.42 dB** from this same source — agreeing to
+0.01 dB. mpc2emu wrote that up as two points, explicitly declined to call it a
+shared constant, and said a third machine would separate the readings:
+
+    E4XT    5958 ct   210 Hz resting corner            14.43 dB
+    AKAI   ~5900 ct   FILFRQ 70, 12 dB/oct             14.42 dB
+    K2000   5900 ct   2-pole LOPASS, no filter env     20.75 dB
+
+The K2000 separated them. The agreement was a coincidence of resting corners,
+not a law: **the level change from opening a filter depends on where the corner
+starts and on the source's spectrum, not on the depth in cents alone.** Claimed
+on two points it would have entered the notes as a fact and been wrong within
+the hour. What survives, and is now confirmed on three machines with three
+filter designs, is the weaker and actually-tested claim: the velocity→filter
+depth converts faithfully, verified each time by removing it and watching the
+excess vanish.
+
+### New byte: `F1 FRQ VelTrk` is Program offset 213
+
+Free from that diff. `5900ct` read as byte **87**, and `(87−28)×100 = 5900` —
+the same cents encoding as §30's `ENV2->FilFreq Depth` at 215. But `0ct` read
+as byte **0**, which that formula does not produce (it would give −2800), so
+the bottom of the range is a different mapping.
+
+**Deliberately NOT added to `k2kfields.KNOWN_FIELDS`.** Two verified points is
+an offset, not a law: asserting §30's closed form over a different field on the
+strength of one agreeing sample is exactly the overclaim that module's docstring
+exists to prevent. The offset is solid and recorded here; the decode is a
+candidate for the next session that can afford a proper sweep.
+
+### The load-mode row has two shapes
+
+Into a **populated** bank the K2000 offers
+`OvFill Overwrt Merge Append Fill  Cancel`; into an **empty** one it offers only
+`Append Fill  Cancel` — with nothing to overwrite, it does not offer to. §47's
+guard asserted the six-label row and correctly **refused to press anything**
+when the three-label row appeared. That is the guard working, not failing: it
+was written to accept one known shape and it met an unknown one.
+
+The fix was to teach it both shapes explicitly — full row requires `Fill`→E
+*and* `OvFill`→A; empty-bank row requires exactly `["Append", "Fill", "Cancel"]`
+and `Fill`→E — rather than to loosen it until it passed. **A guard relaxed to
+make a run proceed is not a guard.**
+
+Related, and the reason the earlier survey read oddly: the trailing `*` in
+`800...899*` on the bank dialog **marks a bank that is not empty**. After
+`Master → Delete → Everything` the same row reads `800...899` with no asterisk.
+Every bank carried one in the earlier listings because every bank had something
+in it.
+
+### `Master → Delete → Everything` takes ~45 s of total silence
+
+Run on Jan's direct instruction to free sample RAM. Free memory went
+`Samples:1196K / Memory:405K` → `Samples:65536K / Memory:752K`, and every
+object type read back empty.
+
+**During the operation the K2000 answers nothing at all** — ALLTEXT returns a
+blank screen and then times out for roughly 45 seconds before the device comes
+back cleanly. This is normal for the operation and not a hang. Worth having
+written down: this project already has a K2000 lockup on record from a
+heartbeat arriving during a destructive object op, and a machine that looks
+dead for 45 s is a machine somebody power-cycles mid-delete.
+
+The confirmation prompt is a bare **`Are you sure?`** with `Yes / No` — it does
+not restate the verb. A guard requiring the word "delete" in the prompt text
+will refuse it, which is the right way round: read the prompt, then answer it.
+
+## 49. What the audio rig does when nothing changes (2026-09-04)
+
+Every measurement in §45, §47 and §48 was reported to two decimals without
+anyone having measured how much this rig moves **when nothing moves**. That is
+the same gap mpc2emu's `§MATRIXV4` diagnosed in their old confidence score:
+three metrics combined into a number with no threshold below which a
+difference was not a finding.
+
+Program 802 (`MPC FULL`, the only preset in LISTEN3 with no filter page), key
+60, velocities 1/32/64/96/127, peak per note. Two runs back to back with
+nothing touched between, then a third after 45 minutes idle. `tilt` is the
+slope of the 1/3-octave band differences at v127 against log frequency;
+`shape` is the RMS of what remains after that slope is removed.
+
+    NOISE  (back to back)     swing -0.004 dB   tilt +0.0091 dB/oct   shape 0.0816 dB
+    DRIFT  (after 2700 s)     swing +0.081 dB   tilt +0.0170 dB/oct   shape 0.0579 dB
+
+Alongside the sibling projects' own rigs, same source material:
+
+    E4XT    swing 0.062   tilt 0.020   shape 0.145
+    MPC     swing 0.000   tilt 0.001   shape 0.013
+    K2000   swing 0.004   tilt 0.009   shape 0.082
+
+**The drift swing figure is not uniform gain creep — it is one note.**
+Per-velocity deltas across the 45 minutes:
+
+    v1 +0.009    v32 +0.019    v64 +0.016    v96 +0.008    v127 +0.089
+
+Four of five sit inside the back-to-back noise band; v127 moved +0.089 and
+dragged the swing with it, because swing is `v127 − v1` and inherits whatever
+happens at either end.
+
+**Most likely the statistic, not the rig** — stated as a reading, not a
+measurement. `peak` takes a single sample, the highest excursion in the attack,
+so it is the least averaged number in the ladder, and the loudest note is where
+the transient has most room to vary. The supporting observation is that
+`shape` went *down* over 45 minutes (0.0579) versus back to back (0.0816): a
+drifting box would show band energies diverging with time, and they did not.
+Whatever moves is not accumulating.
+
+Two limits worth keeping attached to these constants:
+
+- **One 45-minute interval, measured once.** A single sample of a drift process
+  is a data point, not a bound. Whether 0.089 is a ceiling or the middle of a
+  distribution is unmeasured.
+- **The box was idle throughout.** This bounds thermal and gain creep on a
+  machine sitting still. It says nothing about the failure actually worth
+  fearing — an xrun partway through real work — which needs a session with load
+  in it.
+
+**Practical consequence for every earlier section:** differences below about
+0.1 dB in a peak-derived swing on real multisampled material are not findings
+on this rig. §47's residuals (0.00 / 0.27 / 0.49 / 0.13 dB) and §48's 802
+result (0.05 dB) sit above or near that floor and survive; §48's 803 residual
+of 0.73 dB is comfortably real. Anything a future session reports below 0.1 dB
+as a *difference* needs either a tighter statistic (an RMS or sustain-window
+average, both far better averaged than peak) or a repeatability pair of its own
+run alongside it.
+
+## 50. A bank load that silently drops a third of itself (2026-09-04)
+
+mpc2emu's matrix bank, `MX_mpc_to_krz.KRZ` (`MXMPCTOK.KRZ` on SCSI 5 — the
+K2000's filesystem is 8.3 and mangles the name, which is worth knowing before
+anyone searches the card for the original), loaded into bank 900 with `Fill`.
+It reported success. **A third of it was not there.**
+
+### 100 objects per bank, per type — and `Fill` stops silently
+
+    file: 11 programs (ids 200-210), 22 keymaps (200-221), 149 samples (200-348)
+
+    loaded at bank 900:  Soundblock bank 9: 100, ids 900..999   <- exactly 100
+    loaded at Everything: Soundblock bank 2: 100, ids 200..299
+                          Soundblock bank 3:  49, ids 300..348   <- all 149
+
+A K2000 bank holds **100 objects of each type**. Loading into a *specific*
+bank re-banks every id into it ("the bank digit is ignored, and the remainder
+is used" — manual, Disk Mode / Load Function Dialog), so 149 samples were
+asked to fit in 100 slots and **49 were discarded with no error, no warning
+and a normal-looking return to Disk mode**.
+
+Free sample RAM was **21,661K at the moment it stopped** — it did not run out
+of memory, it ran out of ids. A limit that bites with a third of memory free
+is a count, not a capacity.
+
+**The manual documents the way out, and it is a destination, not a mode:**
+
+> "For loading as 'Everything', the ID number for an object stored in a file
+> is taken literally, and not re-banked (except if Fill or OvFill mode is
+> chosen, in which case the K2vx will use ID numbers starting from 200.)"
+
+`Everything` + `Fill` numbered from 200 and spanned banks 2 **and** 3.
+Verified by control: same file, same mode, only the destination changed, and
+`Soundblock TOTAL` went 100 → 149 with sample RAM consumption 20,044K →
+25,553K against the 24.8 MB of PCM the file carries.
+
+Also documented and separately useful: **`Overwrt` "will individually
+overwrite objects in the bank following the just filled bank"**, and `OvFill`
+"skips over object IDs that are in use". So a specific-bank load is not
+inherently capped — **`Fill` is the one mode that simply stops.** And a load
+into bank 9 cannot work in *any* mode, because there is no bank 10 to spill
+into.
+
+**No writer change was needed.** The converter's `_MAX_OBJ_ID = 999` against
+`base_id = 200` describes exactly what the K2000 did when asked properly. The
+fault was the load destination.
+
+### Truncation does not merely lose objects — it repoints zones at wrong ones
+
+The nastier half, found by walking keymap zones on the panel. On the
+truncated load, the top zone of every layer of `Lead-PRO5 Lollipop` read:
+
+    keys B 4-G 10   smp 999*elodic-PD46 Syn4-D#3
+
+`999` is the saturation boundary and `…elodic-PD46 Syn4` is the **drum
+program's** material. A zone that referenced a sample past the ceiling did not
+end up dangling or silent: it ended up pointing at whatever object occupied
+the clamped id. **A wrong-object reference is worse than a missing one,
+because it plays.**
+
+And it is not confined to the top. The same program measured **7 dB louder at
+key 36** and **16 dB different at key 60** after the clean reload — same
+program, same notes, only the destination changed. **The truncated bank was
+wrong in the middle as well as missing at the top**, which is why the first
+530-note grid was rerun rather than annotated.
+
+### The high keys were never the truncation — nor the rate ceiling
+
+The obvious story — high keys silent because the high-rooted samples were the
+ones dropped — was wrong, and only a control showed it. `Bass-Dark-The Poker`,
+v127, same rig, only the load destination changed:
+
+    bank 900    k36 -9.87  k48 -3.03  k60 -14.86  k72 -4.96  k84 -52.84  k96 -75.37
+    Everything  k36 -3.92  k48 -4.37  k60 -30.54  k72 -7.79  k84 -61.98  k96 -76.48
+
+**k84 and k96 are silent with all 149 samples resident.**
+
+The *second* story was also wrong, and this one had numbers behind it. The
+top keymap zone points at a sample stored at **24000 Hz** where its neighbours
+are at 42762 — exactly the converter's own `_KRZ_RATE_FLOOR` — and the panel
+reports that zone running to the top of the keyboard, so playing key 84 would
+need 50,854 Hz and key 96 would need 101,708 Hz. Silence above roughly +12
+semitones fitted a playback ceiling near 48 kHz, and the arithmetic, the file's
+rate field and the measurements all agreed.
+
+**The actual mechanism is the LAYER bound, and the panel says so plainly:**
+
+    program 205 'Bass-Dark-The Poker'   all three layers   HiKey: B 5   (= MIDI 83)
+    program 200 'LD Vintage Acid'       layer 1/1          HiKey: G 9   (= MIDI 127)
+
+205 stops at **83**. Keys 84 and up are outside every layer of the program, so
+nothing sounds because **nothing covers them** — no zone is being asked to
+stretch past any ceiling. 200 runs to 127 and sounds at k84 normally, which is
+the control.
+
+Both readings of the keymap were correct and were about different objects: the
+keymap *zone* really does run to the top, and the *layer* selects which part of
+it applies. Conflating the two is what produced a rate-ceiling explanation that
+fitted every number and named the wrong cause. mpc2emu's parser had the mirror
+image of the same fault — indexing a full 128-key table without applying each
+voice's key range.
+
+The rate floor is probably still what *sets* the limit: the writer's stretch
+window ends +12 semitones above the top sample's root (71 + 12 = 83), which is
+exactly where `HiKey` sits. **The bug is that it then does not extend the outer
+zones to the keyboard edges.** Coverage:
+
+    MPC source    keys 0-127
+    KRZ output    keys 12-83        56 of 128 keys lost, at both ends
+
+**Two independent measurements agreeing is not evidence when both can inherit
+the same class of fault.** The drum "collapse" was reported from two sides —
+a hardware level ramp and a file-side keymap read — and *both were wrong*: the
+ramp came from a truncated bank playing clamped references, the parse from a
+mis-indexed table, and they matched because a repeated wrong sample and a
+mis-indexed table produce the same signature. The E4B control stood outside
+both and said sixteen distinct samples; it was cited as corroboration when it
+was the only real evidence, and it was disagreeing. **There was never a drum
+collapse.**
+
+### How wrong the truncated grid was — measured, not estimated
+
+Both 530-note grids were captured with the same rig, same windows, same
+bands, so the truncated load can be compared against the clean one directly.
+v127 peak level, per program and key:
+
+    66 cells   median delta +2.44 dB   mean |delta| 4.72 dB   35 cells over 3 dB
+
+    LD Casiopaya 9   k36   -50.11 -> -24.21   +25.90
+    LD Vintage Acid  k48   -29.53 -> -13.07   +16.46
+    Bass-MS20 Antima k84   -24.40 -> -10.02   +14.38
+    LD Tube Pipe     k36   -23.38 -> -12.16   +11.22
+
+**Over half the grid moved by more than 3 dB.** A load that reported success
+and returned normally to Disk mode produced a data set that was wrong almost
+everywhere, and nothing in the capture path could have detected it — every
+note sounded, every measure computed, every row looked plausible.
+
+Two specific consequences worth keeping:
+
+- **A withdrawn finding.** On the truncated load the drum probe showed keys
+  36-45 marching in a smooth 0.02 dB/key ramp — the signature of one sample
+  transposed — which was reported to mpc2emu as evidence for a keymap
+  collapse in their writer. On the clean load the same sixteen keys give
+  scattered levels. **The ramp was the truncated bank playing clamped
+  references.** The caveat given at the time ("level cannot prove sample
+  identity; this is a pointer, not a verdict") turned out to be the entire
+  load-bearing part of the claim.
+- **A false positive that would have been believed.** `Bass-MS20 Antimatter`
+  has `AMP VelTrk 0` and on the clean load delivers 0.03-0.70 dB of velocity
+  swing — correct. On the truncated load it showed **15.44 dB**. Scored, that
+  reads as a converter inventing velocity sensitivity the source never asked
+  for: a plausible, specific, entirely fabricated defect.
+
+**"Missed onsets" were a symptom of it, not a separate bug.** `LD Casiopaya
+9` fell back on 17 of 45 notes for want of a detectable onset, which looked
+like slow-attack material defeating the search window. On the clean load it
+is 0 of 45 — the program had simply been 26 dB too quiet to trigger
+detection. A measurement artifact can masquerade as a limitation of the
+measuring method.
+
+### What made the difference, methodologically
+
+- **The variable neither session varied was the destination.** Both had built
+  a confident account of a writer bug from one load into one bank. Jan asked
+  "did you reload at a lower bank and re-measure?" from outside both chains of
+  reasoning, and the answer took an hour of analysis with it.
+- **`exactly 100` had appeared three times earlier in the night** — banks
+  600/700/800/900 each reporting exactly 100 Soundblocks — and was read as
+  "this is what a full bank looks like". It was the ceiling, unremarked.
+- **A fingerprint that collides is not an identity check.** The first attempt
+  at verifying which program was selected used the F4 AMP fields and collided
+  on six of eleven programs, because the converter writes the same amp
+  settings to most voices. The keymap pointer (bytes 188-189, cross-checked
+  against the KEYMAP page) is unique. Program Mode draws the program number in
+  the **graphics** plane, so ALLTEXT cannot read it and something else has to.
+
+## 51. Rig faults found while driving it hard for six hours (2026-09-04)
+
+Five things that each looked like a result and were not. Recorded because
+every one of them produced a clean, confident, wrong number rather than an
+error.
+
+**"No K2000 answered on any of 38 output ports" was a leaked file
+descriptor.** A peer session's capture script was creating an
+`rtmidi.MidiOut` per capture without `delete()`, and had accumulated 22 ALSA
+sequencer clients, then 48, then 51. `MidiBridge.autodetect()` opens ~70 at
+once (one per output port to probe, plus every input to listen on), so it hit
+`snd_seq_hw_open: Cannot allocate memory` and reported the instrument dead.
+**The instrument was fine and answering.** Two lessons: *"no device answered"
+is a claim about your ability to ask, not about the device*; and autodetect's
+client burst makes it the first thing to fail on a busy machine, so a rig that
+knows its ports should say so — `MidiBridge.split_rig(send_port="ESI M4U eX
+MIDI 8", recv_iface="ESI M4U eX")` needs 9 clients, and a single named
+bidirectional port needs 2. (The same leak is on record here from 2026-07-12:
+`close_port()` does not free the backend client; `delete()` must be called.)
+
+**Windows placed on the commanded note-on, not the audible one.** The rig
+sends the note, so the commanded instant is exact — and it is not when the
+sound arrives. Measured MIDI-to-audio lag on this machine: **24-78 ms**
+(rtmidi → mididings → USB → K2000 → converters → JACK) against an attack
+window that opened at 20 ms. Every attack window was landing **before the
+note**. The data said so on its own: a decaying note read *quieter* at its
+attack than 100 ms later, which is impossible, and that column had been read
+twice without noticing.
+
+Fixed by anchoring each note's windows to its **detected onset** — threshold
+relative to that note's own peak (velocity-invariant), searched near the
+commanded instant. A single measured constant would have been wrong: the
+78 ms figure is a quiet note crossing a fixed threshold late, not transport.
+
+**A search window is a prior, and a prior that excludes the truth produces a
+confident fallback rather than an error.** The first onset search looked
+250 ms past the commanded on. Slow-attack material lands later, so four
+programs fell back on 9-25 notes each — and a fallback places the windows
+before the note, the exact artifact the anchoring existed to prevent. Widened
+to 600 ms. Some notes still fall back, and `peak_time_s` (added for exactly
+this) shows why: they peak at **1.7-2.1 s**, *after* note-off. Those are not
+slow attacks a wider window can catch; a note loudest two seconds in is not
+described by attack/early/mid windows at all. Flagged, not chased. (Worth
+noting they have the same shape as §33's unrooted envelope swell.)
+
+**A fallback is two different things and counting them together hides both.**
+A row with no detected onset is either a **silent note** (correct — there is
+nothing to find) or a **detector miss** (wrong — windows before the note), and
+they are identical in the file unless the level is checked. Separated: one
+program showed `45 = 45 silent + 0 missed` (a genuinely silent program,
+correctly handled) and another `17 = 0 silent + 17 missed` (a real fault). One
+number would have concealed both.
+
+**Never pipe a long-running hardware script into `head`.** SIGPIPE killed one
+mid-run and left the panel inside `EditKeyMap` — whose soft row carries
+`Delete` and `Save`. Backing out safely means pressing **only** `Exit`, and
+answering the save prompt (`Rename | Cancel | Yes | No`) with `No`. Redirect
+to a file and read the file.
+
+**A window artefact produces a plausible number on a healthy note, and no
+flag can catch it.** Three keys of a drum kit measured 2.96 / 3.84 / 4.49 dB of
+velocity swing where the other thirteen gave 8.75-15.64, and were reported as
+possibly degenerate. They are not: those three samples are 55-80 ms long and
+the `early` window opens at 100 ms, so the sample had finished before the
+window started. The same captures, read on other statistics:
+
+    key    PEAK swing   attack sw   early sw   v127 over floor
+     37      15.06        17.98       2.96          78.7 dB
+     41      15.48        15.53       3.84          77.1 dB
+     45      15.89        16.70       4.49          78.2 dB
+     all 16  13.58-15.89                            72.3-87.6 dB
+
+**This is invisible to the silent-versus-missed separation above**, which only
+inspects rows where onset detection *failed*. Here detection succeeded, the
+note was 78 dB over the floor, and the number was simply a measure of something
+else. The only defence is more than one statistic over the same capture —
+which is why the grid records peak plus four RMS windows rather than the one
+window originally asked for. **The question was answered from stored data in
+seconds; a single-window grid would have needed a reload and a re-run**, by
+which time the wrong claim would have been in a table.
+
+The same fault crossed three sessions in a different costume the same day: a
+peer reported keys as "silent" meaning "silent in the window I scored", the
+qualifier was lost in the summary, and this session then matched that against a
+*different* window and manufactured a conflict between two true statements.
+**A summary crossing a session boundary loses the condition that makes it
+true.** State the condition, or state a raw number.
+
+**A screen read can come back as something that is not a screen.** A script
+asserting on `rows(b)[0]` failed with:
+
+    AssertionError: Panel(button_events=[ButtonEvent(event_type=Down,
+                    button=Button.Edit, alpha_wheel_clicks=63)])
+
+`get_screen_text()` had returned a **panel-event message** — the K2000
+reporting button activity, most likely a physical press at the panel — where
+every script in this project assumes a string. It failed loudly and before
+touching anything, which is what the assertion was for, but the assumption is
+worth naming: **the reply to a screen request is not guaranteed to be a screen
+reply**, and a script that indexes it without checking will fail somewhere
+less obvious than an assert. It is also a concrete reason not to drive the box
+while someone is at the front panel.
+
+**Measured rig characteristics, for anyone setting a threshold against them.**
+
+    noise floor        -90.7 dBFS typical, worst silent window -83.7
+    inter-capture bleed none: a v127 note followed by a capture with no note
+                       played reads at or below the silent floor
+    repeatability      back-to-back  swing 0.004 dB, tilt 0.009 dB/oct, shape 0.082 dB
+                       after 2700 s  swing 0.081 dB, tilt 0.017 dB/oct, shape 0.058 dB
+
+The drift swing is one note: v127 moved +0.089 dB while the other four
+velocities sat at 0.008-0.019, and `shape` went *down* over the interval,
+which is not what a drifting box looks like. Peak takes a single sample and is
+the least averaged statistic in the ladder — see §49.
+
