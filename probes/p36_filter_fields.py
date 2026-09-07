@@ -139,7 +139,10 @@ def current_field(bridge):
     flat results were nearly reported as measurements. The message table had the
     answer the whole time.
     """
-    return (bridge.client.get_current_parameter_name().strip().rstrip(":"),
+    # Some labels are padded with internal spaces before the colon to align
+    # the value column across a page (e.g. "Depth :", "Src1  :") -- strip
+    # after removing the colon, not before, or the padding survives.
+    return (bridge.client.get_current_parameter_name().replace(":", "").strip(),
             bridge.client.get_current_parameter_value().strip())
 
 
