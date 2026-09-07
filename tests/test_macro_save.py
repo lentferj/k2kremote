@@ -25,7 +25,14 @@ class FakeBridge:
                 self._outer = outer
 
             def get_current_parameter_name(self):
-                return "CurrentDisk"
+                # PADDED, deliberately. The K2000 pads short labels with
+                # spaces before the colon, and current_disk() shares
+                # normalise_param_label() with the probe precisely because the
+                # two had drifted with only one of them tested
+                # (RESOLUTION_NOTES §62). A bare "CurrentDisk" is handled
+                # identically by the old buggy expression and the new one, so
+                # it exercises nothing.
+                return "CurrentDisk :"
 
             def get_current_parameter_value(self):
                 return self._outer._drive

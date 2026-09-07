@@ -57,8 +57,13 @@ class FakeK2000Bridge:
         # is checked, adding a field leaves 907 raising KeyError, which
         # device_op swallows into a "read failed" status and the test then
         # fails on a missing row instead of on this guard
+        # ...and filtered by object type, for the same reason the row count
+        # is: refresh_fields() only ever reads offsets registered for the
+        # selected type, so a future Keymap or Setup entry must not make this
+        # guard demand Program data for it
         for idno, data in self._data.items():
-            missing = set(o for _t, o in k2kfields.KNOWN_FIELDS) - set(data)
+            missing = set(o for t, o in k2kfields.KNOWN_FIELDS
+                          if t is ObjectType.Program) - set(data)
             assert not missing, (
                 f"fake bridge has no data for offsets {missing} on {idno}")
         self.patches = []
