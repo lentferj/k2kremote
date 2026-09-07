@@ -43,6 +43,7 @@ import time
 
 from probes.hw import connect
 from k2000.definitions import Button
+from k2kremote.midi_bridge import normalise_param_label
 
 DIGITS = {n: getattr(Button, f"Number{n}") for n in range(10)}
 SOFT = [Button.SoftA, Button.SoftB, Button.SoftC,
@@ -139,10 +140,9 @@ def current_field(bridge):
     flat results were nearly reported as measurements. The message table had the
     answer the whole time.
     """
-    # Some labels are padded with internal spaces before the colon to align
-    # the value column across a page (e.g. "Depth :", "Src1  :") -- strip
-    # after removing the colon, not before, or the padding survives.
-    return (bridge.client.get_current_parameter_name().replace(":", "").strip(),
+    # Padded labels ("Depth :", "Src1  :") are normalised by one shared rule
+    # -- see midi_bridge.normalise_param_label for why the order matters.
+    return (normalise_param_label(bridge.client.get_current_parameter_name()),
             bridge.client.get_current_parameter_value().strip())
 
 

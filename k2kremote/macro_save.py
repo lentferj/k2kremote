@@ -53,6 +53,7 @@ from typing import List, Optional
 
 from k2000.definitions import Button
 from k2kremote import text_entry
+from k2kremote.midi_bridge import normalise_param_label
 
 #: Soft keys, left to right.
 _SOFT = (Button.SoftA, Button.SoftB, Button.SoftC,
@@ -158,7 +159,8 @@ def current_disk(bridge) -> Optional[str]:
     cursor is walked until the *instrument* names the field.
     """
     for _ in range(8):
-        name = bridge.client.get_current_parameter_name().strip().rstrip(":")
+        name = normalise_param_label(
+            bridge.client.get_current_parameter_name())
         value = bridge.client.get_current_parameter_value().strip()
         if name == "CurrentDisk":
             return value

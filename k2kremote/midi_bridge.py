@@ -191,6 +191,22 @@ def _delete_quiet(port) -> None:
 _BACKEND_ERROR: Optional[str] = None
 
 
+def normalise_param_label(raw: str) -> str:
+    """The field name from `get_current_parameter_name()`, comparable.
+
+    The K2000 pads short labels with spaces BEFORE the colon so the value
+    column lines up down a page -- `Depth :`, `Src1  :`, `Pad   :`. Stripping
+    whitespace before removing the colon therefore leaves the padding on, and
+    a caller matching against `"Depth"` never matches and walks past its own
+    field in silence. Remove the colon first, strip after.
+
+    Found live on 2026-08-31 when `goto_field(bridge, "Depth")` returned
+    having gone nowhere and the edit that followed landed on a neighbouring
+    parameter and read back cleanly. See RESOLUTION_NOTES §35.
+    """
+    return raw.replace(":", "").strip()
+
+
 def midi_backend_error() -> Optional[str]:
     """Why enumeration failed last time, or None if the backend is fine."""
     return _BACKEND_ERROR
