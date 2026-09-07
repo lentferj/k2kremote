@@ -5850,3 +5850,89 @@ same day, with the first instance already written up in this file. **A lesson
 in the notes is not a check in the procedure.** The check is: when a field
 does not respond, confirm you are reading the field you are writing before
 theorising about why; and with two candidate offsets, watch both.
+
+## 65. Four refuted mechanisms, and two more mapped offsets (2026-09-07)
+
+The matrix work continued across three card crossings (MATRIX13/14/15). What
+is worth keeping is mostly the negative results.
+
+### Two more Program offsets
+
+    OUTPUT Gain, upper wire   offset 270   byte = 5 - dB/6, six steps 0..30 dB
+    OUTPUT Gain, lower wire   offset 254   (descending: 0 dB is byte 5)
+    AMPENV Rel1 level         offset 138   the percentage directly, 33 -> 33
+
+**A RAM object write outside the editor survives a program change**, where a
+panel edit does not — the editor's buffer is discarded when the harness sends
+its next program change. So an edit that has to survive an automated capture
+must go through `patch_object_bytes` with the editor closed, not through the
+panel. `DNAK ObjectCurrentlyBeingEdited` is returned if the editor is open, so
+the two are mutually exclusive and the ordering is forced.
+
+### A wire asymmetry that was real and inaudible
+
+One build shipped every program with mismatched wire gains — upper 6 dB, lower
+12 dB. Isolated against the fixed build with nothing else changing:
+
+    n=24 notes   median -0.034 dB   mean +0.003 dB
+    BASIC E.P (the one reliably reproducing program)   max |d| 0.049 dB
+
+Zero. **The two wires do not sum for this material** — only one carries
+signal. Still worth fixing: an inaudible wrong value becomes audible the
+moment a program uses both wires, which is exactly what a PANNER does.
+
+The defect had survived every check on the converter side because **its reader
+reads only one of the two fields its writer writes**, so the round trip was
+perfectly self-consistent while the machine had one wire 6 dB louder. **A field
+written in two places and read in one cannot be caught by a round trip.** It
+needed an instrument outside the loop.
+
+### The note-swap: four mechanisms, all refuted
+
+§64's displaced capture attracted four explanations and every one failed:
+
+    recording overran into the next program   refuted by file length: 43.75 s
+                                              against 43.85 predicted for ONE
+                                              cycle at that gap
+    the gap override reached one thing        refuted by two other routes
+      and not another                         through the identical override
+                                              with exactly four events
+    a non-terminating amplitude envelope      refuted twice, and the premise
+                                              was wrong -- the panel shows
+                                              Rel1 33% then Rel2 0%
+    the harness sent extra note-ons           refuted by the same script at the
+                                              same gap on a different bank
+                                              producing a clean capture
+
+**The condition, as far as it is established: the old bank AND the long gap,
+neither alone.** At the short gap the extra event would fall 2.45 s before the
+next commanded note, in silence and detectable, and it is not there — so the
+gap is part of the condition, not merely what reveals it. Left unexplained
+rather than given a fifth story; it is a property of a superseded build and
+the current one has three independent clean captures, including one through
+the suspect path.
+
+**`Rel3: User` on the AMPENV page is not distinctive.** The Musician's Guide
+says of ENV2/ENV3 that "the only differences are that you can program an
+amount for Rel3" — so the amp envelope's Rel3 level is not programmable and
+reads `User` on every K2000 program. It was briefly treated as a converter
+signature.
+
+### An onset guard shorter than the note
+
+A spurious-event check counted onsets with a 1.5 s guard against a 2.0 s hold,
+so a single note could register twice and a clean four-note capture reported
+eight events. **The check written to catch spurious events contained the
+artefact it was built to detect.** Guard must exceed `HOLD`.
+
+The same artefact had been flagged in a manual count hours earlier and the
+lesson was not carried into the code it was about — the second instance in two
+days of §64's rule that a lesson in the notes is not a check in the procedure.
+
+### Card handling
+
+A card crossing left the K2000 on **"Problem mounting disk"**, and once that
+dialog is dismissed the Disk page looks normal apart from reading `Not found`
+where the volume name belongs. Cycling `CurrentDisk` away and back forces a
+remount. Anything that assumed the card was present would have loaded nothing
+and blamed the bank.
