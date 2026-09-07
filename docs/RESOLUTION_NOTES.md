@@ -5759,3 +5759,94 @@ Same bug, opposite symptoms: one claimed health that was absent, the other a
 conflict that was absent. Neither is legible as a process-detection failure at
 the point of impact. Check a background job **by pid**, and exclude your own
 ancestors.
+
+## 64. Run-to-run variance, a displaced capture, and the OUTPUT Gain enum (2026-09-07)
+
+All four matrix routes captured a second time, hours apart, each behind a
+verified RAM clear and bank reload. The diff is the first measurement of
+run-to-run variance this rig has ever had.
+
+### The rig's noise floor
+
+    route   n    mean |d|   p95      max     what sits above the floor
+    E4     40    0.033 dB*  0.04*    0.26*   * excluding note 55, see below
+    MPC    43    0.095 dB   0.47     1.43    one note, bleed the 8 s gap removed
+    S3     24    0.254 dB   1.50     2.04    five of six electric pianos
+    S1     24    0.049 dB   0.05     0.84    one note on P-BASS SLAP
+
+**~50 note-pairs at or under 0.05 dB.** Nothing benign in 131 pairs exceeded
+0.3 dB, so 0.05 dB is the floor and 0.3 dB is the threshold above which a
+difference means something. Three distinct phenomena sit above it, each with
+an identified cause — which is a decomposition rather than a variance
+estimate, and lets each row be read on its own terms.
+
+**S3 reproduced §55's five-of-six electric-piano instability by a completely
+different route**, months later, with `BASIC E.P` clean again at 0.024 dB.
+Nothing about this method was chosen to look for it.
+
+### One capture run was displaced by a whole program
+
+On the E4 route, note 55 differed between runs by up to 6.3 dB while notes
+36/43/48 in the same files agreed to 0.03 dB. Spectrally, **run 1's program N
+was identical (cosine 1.000) to run 2's program N-1** — a one-program offset,
+interior programs only.
+
+Resolved by replaying the route with the note order reversed
+(`--notes 55,36,43,48`):
+
+- note 55 played **first** still matched run 1 at 1.000 for all ten programs
+- note 48 played **last** matched run 1 at 1.000 for all ten
+
+**So it is neither the note nor the slot: one capture run is simply wrong.**
+Run 1 and the reordered run agree; the 8 s-gap run has its note-55 audio
+displaced. The instrument is exonerated — it played the same sound with the
+note in two different sequence positions.
+
+**A correction to the measurement that found it.** The displacement was first
+reported using zero-lag correlation, at 0.9982. That measure is worthless on
+periodic audio: applied to note 48 — which reproduces to 0.03 dB — it returns
+-0.19, -0.66, +0.58, +0.96 for four programs, because a few milliseconds of
+window drift flips its sign. The control was sitting in the same files.
+**Establish a similarity measure on something known to be identical before
+using it as evidence that two things differ.** Redone lag-tolerantly and
+spectrally the finding got stronger, not weaker.
+
+### OUTPUT Gain: a descending 6 dB enum
+
+    U wire gain -> Program offset 270      L wire gain -> Program offset 254
+
+    byte = 5 - dB/6      steps 0, 6, 12, 18, 24, 30 dB      byte 5..0
+
+The byte counts **down** as gain goes up, and 0 dB is the maximum byte value.
+A converter writing dB straight in, or treating 0 as "no gain", gets the
+loudest setting for the quietest request. Typing 36 clamps to 30.
+
+Measured by sweeping each wire through all six steps with the other held
+constant, on MXKRSRC program 200, restored byte-identical after every run —
+edit-buffer only, discarded with `No`, the RAM object never modified.
+
+The factory bank then decodes with no assumption: organs `5,5` = 0 dB/0 dB,
+the 12-string family `3,3` = 12 dB/12 dB. With `F4 AMP Adjust` (-4..-7 dB on
+organs, -2..+6 on 12-strings) that is ~22 dB of deliberate family separation
+in the source, on two program-scope fields a converter had never read.
+
+### Watching one of two candidate offsets
+
+The Gain sweep initially showed a flat byte: U Gain moved through all six
+values and offset 254 never budged. Three mechanisms were written and tested
+to explain it — the edit buffer flushes on `ENTER`, no, on cursor-leave, no,
+the object dump lags the panel by seconds — and each was refuted. "The dump
+lags a panel edit" was minutes from being reported as a finding.
+
+**The byte was flat because U Gain lives at 270.** One wire was being edited
+and the other watched. Nothing lagged; every hypothesis was an explanation for
+an artefact of reading the wrong offset. Printing **both** candidates on each
+step resolved it at once: the one that moves identifies itself, and the one
+that does not is the control.
+
+This is the same failure as §61's LFO sweep — 260 steps of a moving panel
+against a motionless byte that belonged to a different LFO — hit again the
+same day, with the first instance already written up in this file. **A lesson
+in the notes is not a check in the procedure.** The check is: when a field
+does not respond, confirm you are reading the field you are writing before
+theorising about why; and with two candidate offsets, watch both.
