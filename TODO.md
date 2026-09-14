@@ -713,3 +713,30 @@ read) don't touch ALLTEXT — but `refresh.py`'s live mirror, the disk browser,
 and the macro editor all *do* depend on it, and none of them currently
 cross-check against a second read path. A wrong-but-well-formed screen read is
 worse than a crash: nothing about it announces itself. See RESOLUTION_NOTES §29.
+
+## Does a short-release envelope re-cycle under sustain?
+
+**Status:** open, designed, not run. Blocked on: the K2000 answering at all —
+it has been silent on every ESI sub-port since the 2026-09-11 reboot, with the
+host side proved good (§ in RESOLUTION_NOTES; universal identity request out
+and back on the same interface via the E4XT), so this is a bench check on the
+instrument's power or cables.
+
+mpc2emu's KRZ writer emits a release shape with Rel2 and Rel3 both zero in time
+*and* level whenever the source release is under about 27 ms — the point where
+the time quantiser stops distinguishing it from zero. Their own comment argues
+that shape is unreachable, and the argument is sound in seconds and wrong in
+bytes: it reasons about a float while the machine sees a quantised byte. It
+affects **20.3 % of Jan's MPC corpus** (1,387 of 6,847 XPM keygroups carry
+`VolumeRelease` = 0, which their law maps to 1.005 ms).
+
+That shape is the documented trigger for their `§KRZDBLZERO`, whose symptom is
+the envelope looping back to Att1 **while the key is held**.
+
+**The test, two programs differing only in release — 5 ms and 50 ms, both held
+long — and whether the short one re-cycles under sustain.** It is decisive for
+a question we cannot currently separate: §64/§65 measured a full re-articulation
+**1.15 s after note-off**, which is a different timing, so these may be one
+mechanism or two. The test tells us which.
+
+Does not need a card crossing; the programs can be built in RAM.
