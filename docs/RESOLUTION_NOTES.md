@@ -6146,3 +6146,33 @@ calls `close()` alone rather than `deactivate()` then `close()`.
 Rig at `~/temp/k2k_fw/envrig.py`, results at `~/temp/k2k_fw/looptest.json`.
 Program 199 verified back at `Mode:Natural` afterwards and RAM still empty:
 panel edits only, discarded on exit, nothing saved.
+
+### The double-null release shape does nothing on its own
+
+Same rig, same hour. Two subjects on ROM program 199 identical but for
+`Rel2`'s time, `Loop: Off`, note held 4 s with the capture running 3.5 s past
+note-off:
+
+    subject           onsets   during hold   after note-off
+    double-null            1             1                0
+    Rel2 has time          1             1                0
+
+One onset each, the attack. Nothing under sustain, nothing after release.
+
+**The positive control is what makes that a result.** The same detector, same
+envelope, same rig, an hour earlier, counted **61 onsets** with `Loop: seg1F`.
+A re-cycle would have been seen. Without that control this is "we looked and
+found nothing", which is worth very little.
+
+**And it separates a confound that had been in every observation of the
+phenomenon.** mpc2emu's re-cycle rule was drawn entirely from output of their
+*old* writer, which put a floored attack-time byte into byte 0 — and 3 is
+`seg3F`. So the degenerate release shape and an active loop flag were present
+*together* in every capture the rule came from, and nobody had separated them
+because byte 0 was not known to be the loop flag until 2026-08-31. Separated,
+**the shape alone does nothing**; the loop flag is the mechanism.
+
+Scope: one envelope, panel-built on a ROM program, `Loop: Off`, sustain 0 %.
+The original subject was a converted program off a card, and a panel
+reconstruction of a file's shape is not the same object — the same caution
+§64/§65 needed.
