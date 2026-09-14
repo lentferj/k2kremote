@@ -797,3 +797,27 @@ The six-subject loop-flag sweep above is still the right instrument and is
 still unrun — but it should now be run **on two different envelope shapes**, or
 it will only re-measure one shape's constant.
 
+
+## The field registry cannot hold two meanings for one offset
+
+**Status:** open, with a concrete case in hand (§69).
+
+Offset `210 + 16k` is the first parameter of DSP slot `k`, and what it means is
+selected by the block-type byte at `209 + 16k`: on program 42 offset 242 is the
+PANNER's `Adjust` in percent, and on a program whose F3 is a filter the same
+offset is `Coarse` in Hz. Both are verified against the panel. `KNOWN_FIELDS`
+is `Dict[(ObjectType, offset), Field]`, so it can carry exactly one of them,
+and F3 already carries the panner.
+
+§69 added a `gate` to `Field`, which is enough to stop a wrong decode but not
+enough to offer the right one — a gated entry whose gate fails says "not
+decoded", where it could say "this is a PANNER, here is its Adjust".
+
+**What it needs:** the value side becomes a list of gated interpretations,
+first matching gate wins, with an ungated entry allowed last as the default.
+`describe_field()` picks; `monitor_tui`'s field pane and its patch modal both
+key off `KNOWN_FIELDS[(type, offset)]` and would follow. Then F2/F3/F4 Coarse
+can be registered beside the panner without either displacing the other.
+
+Not urgent: the gate already prevents the confident-wrong reading, which was
+the defect. This is about coverage.

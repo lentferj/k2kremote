@@ -129,3 +129,53 @@ def test_panner_neighbours_are_deliberately_not_decoded():
     # tested in between. Offsets recorded in the notes, not decoded here.
     for off in (244, 245, 247, 249, 250, 252):
         assert k2kfields.describe_field(ObjectType.Program, off, b"\x0a") == "0a"
+
+
+def test_f1_coarse_matches_every_panel_reading():
+    # §69: each pair was read off the device's own Coarse: field on
+    # 2026-09-14, the first and last by typing an out-of-range number and
+    # letting the K2000 clamp -- which is what pins the endpoints.
+    for byte, hz in ((256 - 48, 16), (256 - 26, 58), (9, 440),
+                     (24, 1047), (75, 19912), (79, 25088)):
+        out = k2kfields.describe_field(ObjectType.Program, 210,
+                                       bytes([byte]), 50)
+        assert out == f"{byte:02x} (F1 Coarse: {hz} Hz)"
+
+
+def test_f1_coarse_rounds_the_way_the_panel_does():
+    # 1046.5 Hz shows as 1047 on the LCD; Python's round() gives 1046
+    # (half-even), which would put the tool one Hz off the instrument it is
+    # supposed to be mirroring.
+    assert "1047 Hz" in k2kfields.describe_field(
+        ObjectType.Program, 210, bytes([24]), 50)
+
+
+def test_f1_coarse_refuses_bytes_outside_the_proven_clamps():
+    for byte in (80, 100, 127, 256 - 49, 256 - 60):
+        out = k2kfields.describe_field(ObjectType.Program, 210,
+                                       bytes([byte]), 50)
+        assert "unmapped" in out
+
+
+def test_f1_coarse_is_not_decoded_for_a_non_frequency_block():
+    # The failure this gate exists for: ROM Program 1 carries SINE (type 23)
+    # in F1 and byte 0 at offset 210, which the cutoff law renders as a tidy,
+    # confident, WRONG "262 Hz" -- the panel's F3 page reads 2794 Hz.
+    out = k2kfields.describe_field(ObjectType.Program, 210, bytes([0]), 23)
+    assert "not decoded" in out
+    assert "262" not in out
+
+
+def test_f1_coarse_states_its_condition_when_the_gate_byte_is_unknown():
+    # A caller that cannot supply the block type gets the number WITH the
+    # condition attached, never bare -- an unqualified decode is
+    # indistinguishable from a verified one.
+    out = k2kfields.describe_field(ObjectType.Program, 210, bytes([24]))
+    assert "1047 Hz" in out and "only if" in out
+
+
+def test_every_verified_freq_block_type_is_one_the_panel_confirmed():
+    # Names are not evidence: PARA TREBLE and STEEP RESONANT BASS are in this
+    # set because their Coarse: reading was checked against the law, and
+    # LOPASS/HIPASS are absent because theirs was not.
+    assert set(k2kfields.FREQ_BLOCK_TYPES) == {9, 14, 37, 50}

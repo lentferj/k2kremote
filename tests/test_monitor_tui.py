@@ -49,10 +49,15 @@ class FakeK2000Bridge:
         # field pane fail to populate and every later assertion fails on a
         # missing cell rather than on what it meant to test. Values chosen so
         # 906 decodes and 907 falls outside a formula's proven range.
+        # 209 is not a registered field; it is the BLOCK-TYPE byte that
+        # offset 210's entry is gated on, and refresh_fields() reads it
+        # too, so a fake without it fails the read rather than the assert.
         self._data = {906: {215: b"\x28", 199: bytes([79]), 261: bytes([36]),
-                            242: bytes([37])},
+                            242: bytes([37]),
+                            209: bytes([50]), 210: bytes([24])},
                       907: {215: b"\x05", 199: bytes([50]), 261: bytes([0]),
-                            242: bytes([256 - 32])}}
+                            242: bytes([256 - 32]),
+                            209: bytes([50]), 210: bytes([100])}}
         # every canned program must answer every known offset: if only 906
         # is checked, adding a field leaves 907 raising KeyError, which
         # device_op swallows into a "read failed" status and the test then

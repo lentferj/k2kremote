@@ -313,9 +313,21 @@ class MonitorTuiApp(App):
             return
 
         def op(bridge):
-            return {offset: bridge.read_object_bytes(self._obj_type, idno,
-                                                     offset, field.size)
-                   for offset, field in relevant}
+            out = {}
+            for offset, field in relevant:
+                out[offset] = (bridge.read_object_bytes(
+                    self._obj_type, idno, offset, field.size), None)
+                if field.gate is not None:
+                    # A gated field's meaning depends on another byte (the
+                    # DSP block type). Fetch it too rather than render the
+                    # value with an "only if" the user then has to check by
+                    # hand -- the whole point is that an unchecked decode
+                    # here looks exactly like a verified one.
+                    gate_off = field.gate[0]
+                    gate = bridge.read_object_bytes(self._obj_type, idno,
+                                                    gate_off, 1)
+                    out[offset] = (out[offset][0], gate[0])
+            return out
 
         self.device_op(op, self._fields_loaded)
 
@@ -325,9 +337,10 @@ class MonitorTuiApp(App):
             return
         table = self.query_one("#fields", DataTable)
         table.clear()
-        for offset, raw in sorted(result.items()):
+        for offset, (raw, gate_byte) in sorted(result.items()):
             field = k2kfields.KNOWN_FIELDS[(self._obj_type, offset)]
-            decoded = k2kfields.describe_field(self._obj_type, offset, raw)
+            decoded = k2kfields.describe_field(self._obj_type, offset, raw,
+                                               gate_byte)
             table.add_row(str(offset), field.name, decoded, key=str(offset))
         self.notify_status(f"object {self._selected_idno}: "
                            f"{len(result)} known field(s)")

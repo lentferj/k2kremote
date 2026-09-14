@@ -54,6 +54,13 @@ class Field:
     #: raw bytes -> decoded value, or None if out of the formula's proven
     #: range (see module docstring).
     decode: Callable[[bytes], Optional[int]]
+    #: `(offset, predicate, why)` for a field whose meaning depends on
+    #: ANOTHER byte -- the DSP block-type byte, in the one case that needs
+    #: it. An ungated entry at such an offset is not merely imprecise, it
+    #: prints a confident wrong number: Program 1 carries `SINE` in F1 and
+    #: byte 0 at offset 210, which the cutoff law renders as a tidy
+    #: "261.6 Hz" for a block that has no cutoff at all.
+    gate: Optional[Tuple[int, Callable[[int], bool], str]] = None
 
 
 def _env2_filfreq_depth_ct(raw: bytes) -> Optional[int]:
@@ -134,6 +141,46 @@ def _panner_adjust_pct(raw: bytes) -> Optional[int]:
     return b if -100 <= b <= 100 else None
 
 
+#: DSP function codes whose block's FIRST parameter is the `Coarse:`
+#: frequency -- each one checked against the panel's own reading, not
+#: assumed from the name (RESOLUTION_NOTES §69).
+FREQ_BLOCK_TYPES: Dict[int, str] = {
+    9: "PARA TREBLE",            # prog 3 F1, byte 59 -> panel "B 8 7902Hz"
+    14: "STEEP RESONANT BASS",   # prog 42 F1, byte -48 -> panel "C 0 16Hz"
+    37: "LOPAS2",                # prog 1 F3, byte 41 -> panel "F 7 2794Hz"
+    50: "4POLE LOPASS W/SEP",    # CUTCAL bank F1, 11 programs + both clamps
+}
+
+
+def _f1_coarse_hz(raw: bytes) -> Optional[int]:
+    """Program offset 210 -> the `Coarse:` frequency the panel displays, in Hz.
+
+    The byte is a **signed semitone index with 0 = C4**, and the law is
+    `Hz = 440 * 2**((s-9)/12)` -- `s = 9` is A4 = 440 Hz exactly, which is
+    what the -9 in the exponent is. Verified against the device's own
+    `Coarse:` field, 2026-09-14:
+
+        typed 1     -> panel "C 0 16Hz"       byte -48   law    16.4 Hz
+        CUT 000     -> panel "A#1 58Hz"       byte -26   law    58.3 Hz
+        typed 440   -> panel "A 4 440Hz"      byte   9   law   440.0 Hz
+        CUT 050     -> panel "C 6 1047Hz"     byte  24   law  1046.5 Hz
+        CUT 100     -> panel "D#10 19912Hz"   byte  75   law 19912.1 Hz
+        typed 99999 -> panel "G 10 25088Hz"   byte  79   law 25087.7 Hz
+
+    The first and last are the field's own **clamps** -- typing an
+    out-of-range number and letting the device refuse it is what pins the
+    endpoints -- so the proven range is exactly -48..79 and anything
+    outside it decodes to `None`.
+
+    The panel rounds to whole Hz (1046.5 shows as `1047`), so this rounds
+    half-up to match what the user is looking at, not Python's half-even.
+    """
+    b = raw[0] - 256 if raw[0] > 127 else raw[0]
+    if not -48 <= b <= 79:
+        return None
+    return int(filter_cutoff_byte_to_hz(raw[0]) + 0.5)
+
+
 #: Only offsets independently confirmed by DUMP-diffing two panel-driven
 #: states go here -- see the module docstring for why this list is short.
 KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
@@ -152,6 +199,15 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
         notes="RESOLUTION_NOTES §47/§62; signed, 1 dB per unit, +-96 dB",
         decode=_amp_veltrk_db,
     ),
+    (ObjectType.Program, 210): Field(
+        name="F1 Coarse", size=1, unit="Hz",
+        notes="RESOLUTION_NOTES §69; signed semitones, 0 = C4, "
+              "proven -48..79 (both are the field's own clamps). "
+              "Only a frequency when the F1 block type at 209 is one.",
+        decode=_f1_coarse_hz,
+        gate=(209, lambda t: t in FREQ_BLOCK_TYPES,
+              "the F1 block type at offset 209 is a frequency function"),
+    ),
     (ObjectType.Program, 242): Field(
         name="F3 POS Adjust", size=1, unit="%",
         notes="RESOLUTION_NOTES §56/§57/§62; signed, 1 % per unit, +-100 %",
@@ -160,7 +216,8 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
 }
 
 
-def describe_field(obj_type: ObjectType, offset: int, raw: bytes) -> str:
+def describe_field(obj_type: ObjectType, offset: int, raw: bytes,
+                   gate_byte: Optional[int] = None) -> str:
     """``"28"`` normally, ``"28 (ENV2->FilFreq Depth: 1200 cents)"`` when the
     offset is in :data:`KNOWN_FIELDS` and its formula covers this byte. Note
     ``raw.hex()`` prints the byte in hex, not decimal -- byte ``0x58`` (88
@@ -171,6 +228,20 @@ def describe_field(obj_type: ObjectType, offset: int, raw: bytes) -> str:
     field = KNOWN_FIELDS.get((obj_type, offset))
     if field is None:
         return hexed
+    if field.gate is not None:
+        _, allows, why = field.gate
+        if gate_byte is None:
+            # Say the condition out loud rather than decode on the hope that
+            # it holds -- an unqualified number here is indistinguishable
+            # from a verified one, which is the whole failure this gate
+            # exists to prevent.
+            value = field.decode(raw)
+            shown = ("unmapped for this byte" if value is None
+                     else f"{value} {field.unit}")
+            return f"{hexed} ({field.name}: {shown} -- only if {why})"
+        if not allows(gate_byte):
+            return (f"{hexed} ({field.name}: not decoded -- "
+                    f"{why} does not hold, byte {gate_byte})")
     value = field.decode(raw)
     if value is None:
         return f"{hexed} ({field.name}: unmapped for this byte)"
@@ -182,14 +253,20 @@ def filter_cutoff_byte_to_hz(b: int) -> float:
     signed semitone value of `b` (two's-complement over a signed byte).
 
     Verified to 0.08% against the device's own panel `Coarse:` field across
-    11 presets during the CUTCAL session (RESOLUTION_NOTES, 2026-08-22) --
-    the *law* is solid. **The RAM offset holding this byte within a live
-    Program object was never mapped**: CUTCAL set and read it entirely via
-    the panel's F1 FRQ page, never via DUMP. Apply this only to a byte
-    whose location you already know (e.g. by reading the panel yourself,
-    the way CUTCAL did) -- there is deliberately no `KNOWN_FIELDS` entry
-    that would auto-apply this to some offset while browsing, because that
-    offset has never been confirmed.
+    11 presets during the CUTCAL session (RESOLUTION_NOTES, 2026-08-22).
+
+    **The offset was mapped 2026-09-14** (RESOLUTION_NOTES §69): the
+    block's first parameter byte, `210 + 16*k` for DSP slot `k`, sitting
+    immediately after that block's type byte at `209 + 16*k`. `F1` is in
+    :data:`KNOWN_FIELDS` as a gated entry; the other three slots are not,
+    because offset 242 already holds `F3 POS Adjust` for a PANNER block and
+    one offset cannot carry two unconditional meanings -- see TODO.md.
+
+    This bare function stays, for a byte whose slot you know but whose
+    block type you have not checked. **The law is only a frequency when
+    the block is a frequency function** (:data:`FREQ_BLOCK_TYPES`); applied
+    blind it returns a tidy, wrong number, as it does for Program 1's
+    `SINE` in F1.
     """
     s = b - 256 if b >= 128 else b
     return 440.0 * (2.0 ** ((s - 9) / 12.0))

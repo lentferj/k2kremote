@@ -6281,3 +6281,90 @@ form of that check is cheaper than re-deriving the instrument — before
 believing a negative, feed the detector something it must fire on. §68's
 control programs exist for exactly that reason, and they are why the
 double-null null is worth anything.
+
+## 69. The filter cutoff's offset, and the byte next to the block type (2026-09-14)
+
+`filter_cutoff_byte_to_hz()` carried the one law this project trusts most —
+`Hz = 440 * 2**((s-9)/12)`, verified to 0.08% against the device's own
+`Coarse:` display during CUTCAL — together with a docstring saying, in as many
+words, that **nobody had ever mapped which byte of a live Program object holds
+it**. CUTCAL set and read it entirely through the panel's F1 FRQ page, never
+through DUMP, so the registry deliberately had no entry: a conversion that
+cannot be pointed at a byte cannot decorate a browser.
+
+Jan loaded the CUTCAL bank to 204ff. Eleven programs `CUT 000`-`CUT 100` that
+differ in one parameter are the instrument that closes it — DUMP all eleven,
+diff, and the offsets that vary are the candidates
+(`probes/p45_cutoff_offset.py`, read-only).
+
+    2 of 272 offsets vary across the set
+      offset 189   MONOTONIC   [204, 205, ... 214]
+      offset 210   jumbled     [230, 240, 250, 4, 14, 24, 34, 45, 55, 65, 75]
+
+**The monotonic one was the decoy and the jumbled one was the answer.** Offset
+189 tracks the program id exactly — it is the keymap pointer, and this bank
+ships one keymap per program at matching ids, so the "one-parameter variants"
+premise was false in a way that produced a *prettier* signal than the real
+field. Checked against ROM programs: 1, 2, 3 and 199 all carry 1 there, and
+program 42 carries 151. Not an id.
+
+Offset 210 reads jumbled only because it is **signed**: −26, −16, −6, 4, 14,
+24, 34, 45, 55, 65, 75, a clean ladder of ten semitones per step. §62's lesson
+arriving a third time.
+
+### Pinned against the panel, endpoints included
+
+    typed 1     -> panel "C 0 16Hz"       byte -48   law    16.4 Hz
+    CUT 000     -> panel "A#1 58Hz"       byte -26   law    58.3 Hz
+    typed 440   -> panel "A 4 440Hz"      byte   9   law   440.0 Hz
+    CUT 050     -> panel "C 6 1047Hz"     byte  24   law  1046.5 Hz
+    CUT 100     -> panel "D#10 19912Hz"   byte  75   law 19912.1 Hz
+    typed 99999 -> panel "G 10 25088Hz"   byte  79   law 25087.7 Hz
+
+The byte is a **signed semitone index with 0 = C4**; `s = 9` is A4 = 440 Hz
+exactly, which is what the `−9` in the exponent has always been. **The first
+and last rows are the field's own clamps** — type an out-of-range number and
+let the device refuse it, and the refusal pins the endpoint. That is why the
+proven range is exactly −48..79 and not a guess with a hedge around it.
+
+Typing into the editor and DUMPing at the same time also re-confirms that a
+dump taken with the editor open reflects the edit buffer. Nothing was saved;
+the editor was left with "No".
+
+### The real structure: block type, then that block's first parameter
+
+Offset 209 is the F1 block-type byte, and the four DSP slots stride by 16 —
+209/225/241/257 — so **`210 + 16k` is the first parameter of slot `k`**, and
+what it *means* depends on the type byte beside it:
+
+    prog  1  F1 SINE(23)                 210=  0        F3 LOPAS2(37)  242= 41 -> 2794 Hz  (panel: F 7 2794Hz)
+    prog  3  F1 PARA TREBLE(9)           210= 59 -> 7902 Hz  (panel: B 8 7902Hz)
+    prog 42  F1 STEEP RES BASS(14)       210=-48 ->   16 Hz  (panel: C 0 16Hz)
+             F3 PANNER(40)               242=-17 ->  -17 %   (§56/§57's entry)
+    prog 204 F1 4POLE LOPASS W/SEP(50)   210=-26 ->   58 Hz  (panel: A#1 58Hz)
+
+**This is why the entry is gated rather than plain.** Program 1 carries `SINE`
+in F1 with byte 0 at offset 210, and the cutoff law renders that as a tidy,
+confident **"261.6 Hz"** for a block that has no cutoff at all — the panel's
+actual filter page reads 2794 Hz, on a different slot. Programs 6 and 199 carry
+`NONE` in F1 and would have decoded just as confidently. An ungated registry
+entry would have been the §51 failure exactly: in range, well-formed,
+plausible, wrong.
+
+So `Field` grew a `gate` — `(offset, predicate, why)` — and `describe_field()`
+takes the gating byte. Without it the decode still renders, but **with its
+condition attached**, because an unqualified number is indistinguishable from a
+verified one. The TUI reads the block-type byte alongside the field rather than
+passing the burden to the user.
+
+`FREQ_BLOCK_TYPES` holds the four types whose `Coarse:` was actually checked
+against the panel — 9 PARA TREBLE, 14 STEEP RESONANT BASS, 37 LOPAS2, 50 4POLE
+LOPASS W/SEP. `LOPASS` and `HIPASS` are **absent on purpose**: their names say
+they belong, and a name is not evidence.
+
+### Only F1 is registered, and the reason is a real limitation
+
+`242 + 16k` wants four entries, but offset 242 already holds `F3 POS Adjust`
+for a PANNER block. **One offset, two meanings, selected by a different byte** —
+and `KNOWN_FIELDS` is a dict keyed by offset, so it can hold one. F1 is
+registered; F2/F3/F4 are recorded here and tracked in TODO.md.
