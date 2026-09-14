@@ -752,19 +752,30 @@ range, 0.1-1.7 %, alternatives excluded) but it characterises the seg3F loop
 the old KRZ writer set by accident, which is fixed. The open question is what
 the fixed overhead *is*.
 
-mpc2emu's hypothesis, with its falsifier attached: the 0.058 s subject carried
-**six of its seven envelope stages at zero time**, so 41.7 ms is 6.95 ms per
-zero-length stage traversed (5.96 ms if all seven cost it) — fixed regardless
-of decay, which is exactly what was measured.
+mpc2emu's hypothesis: the 0.058 s subject carried **six of its seven envelope
+stages at zero time**, so 41.7 ms is 6.95 ms per zero-length stage traversed
+(5.96 ms if all seven cost it) — fixed regardless of decay, which is exactly
+what was measured.
 
-**The test:** rebuild the same subject with a real attack, say 200 ms, leaving
-seven stages but only five at zero time.
+**The test: vary the loop flag, not the envelope.** A first design varied the
+attack instead, and it could not work: "every stage costs" and "it is a timer"
+both predict an unchanged 41.7 ms, so that capture could only have excluded the
+middle case. The writer always emits seven `(level, time)` pairs, so the stage
+*count* cannot be varied that way either.
 
-    per-stage, all stages    period = 0.200 + decay + 41.7 ms
-    per-stage, zero only     period = 0.200 + decay + 34.8 ms
-    a timer                  period = 0.200 + decay + 41.7 ms, unchanged
+Byte 0 of the ENV segment selects `seg1F / seg2F / seg3F` and the bidirectional
+`seg1B / seg2B / seg3B`. **Those traverse different numbers of stages per cycle
+by construction**, and the bidirectional settings roughly double whichever
+count applies. Six subjects, identical but for that one byte:
 
-About 7 ms apart on a ~100 ms period, against 0.1-1.7 % already resolved on
-this rig, so it separates cleanly. **If the overhead stays 41.7 ms with the
-attack added, stage traversal is dead and it is a timer.** File-side to build,
-one capture to read.
+    per-stage, all stages   period scales with the traversed count
+    per-stage, zero only    scales, with a different slope
+    a timer                 FLAT across all six
+
+Flat kills the per-stage family outright; not flat, and the slope separates the
+two variants — **without having to pin down what `segN` means first**, which is
+the property that makes this better than the attack version.
+
+**Those six files deliberately set the byte the old writer set by accident.
+They are the bug on purpose.** Name them so they cannot be mistaken for
+conversion output, and keep them out of any real path.
