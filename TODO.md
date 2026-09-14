@@ -779,3 +779,21 @@ the property that makes this better than the attack version.
 **Those six files deliberately set the byte the old writer set by accident.
 They are the bug on purpose.** Name them so they cannot be mistaken for
 conversion output, and keep them out of any real path.
+
+**Update, 2026-09-14 — the overhead is not a constant across envelope shapes.**
+A `seg1F` program from mpc2emu's writer (`LOOPPOS`, off the Gotek) traverses
+`Att1 0.02 + Att2 0.01 + Att3 0.01 + Dec1 0.30` = 0.34 s and re-cycles at
+**2.378 Hz = 0.4205 s**, measured at 0.054 Hz bins against a peak-to-median of
+6066. That is an overhead of **~80 ms**, twice the 39.8-41.7 ms measured on the
+panel subject, and the difference is far outside the 0.054 Hz resolution.
+
+Both subjects traverse four non-zero-length stages, so **the count of stages
+traversed does not explain it either** — that was already refuted from the
+other direction. The formula still matches to a millisecond *within* one
+envelope shape (§68's sweep), so it is not simply wrong; it does not transfer.
+Whatever the overhead tracks, it is neither a fixed timer nor the stage count.
+
+The six-subject loop-flag sweep above is still the right instrument and is
+still unrun — but it should now be run **on two different envelope shapes**, or
+it will only re-measure one shape's constant.
+
