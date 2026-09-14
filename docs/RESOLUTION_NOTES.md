@@ -5936,3 +5936,71 @@ dialog is dismissed the Disk page looks normal apart from reading `Not found`
 where the volume name belongs. Cycling `CurrentDisk` away and back forces a
 remount. Anything that assumed the card was present would have loaded nothing
 and blamed the bank.
+
+## 66. The firmware settles the function codes — and corrects §60 (2026-09-14)
+
+Jan supplied the K2000 v3.87J OS ROMs (two 512 KB EPROM images, `High`/`Low`).
+They interleave as the even/odd bytes of the 68000's 16-bit bus into a 1 MB
+image with a valid reset vector — SSP `0x00020000`, PC `0x00000012` — and
+internal pointers read `0x0018xxxx` for file offsets `0x08xxxx`, so **the ROM
+is mapped at address 0x100000**. That constant is needed for every address in
+this section; working copy at `~/temp/k2k_fw/k2000_v387j.bin`.
+
+### The dispatch that decides a DSP function name
+
+At address `0x1177A4`:
+
+    movew  sp@(8),d0                      ; the function code
+    cmpiw  #127,d0
+    bhiw   reject
+    moveal #157,a0
+    moveq  #67,d1
+    loop:  addql #1,a0
+           cmpb  pc@(0x1177be,a0:l),d0     ; -> the table at 0x11785C
+           dbls  d1,loop
+    bnew   reject                          ; exact match required
+    addl   d1,d1
+    movew  pc@(0x1177d4,d1:l),d1
+    jmp    pc@(0x1177d4,d1:w)              ; handler: movel #<name ptr>,(a1)
+
+`0x11785C` is an ascending list of the 67 valid codes, terminated `0x7F`. The
+loop exits on the first entry `>= d0` and requires equality, so **every code
+not in that list is rejected** — which is exactly the refusal behaviour §60
+measured from the panel.
+
+**The jump table is indexed by `d1`, which counts DOWN**, so it runs in reverse
+order relative to the code list. Matching it forwards produces nothing, which
+is what defeated the first attempt.
+
+Decoded, the map agrees with **all 65 codes measured on the instrument, with
+zero disagreements**, and adds the two the panel walk never reached. Full table
+at `~/temp/k2k_algs/rom_function_codes.json`.
+
+### §60's "the codes are not a global enumeration" was wrong
+
+That claim was drawn from `NONE` reading 60, 61, 62 and 63 in different blocks
+and `PARA BASS` reading 8 in one and 10 in another. The measurements were
+right; the explanation was not.
+
+**The byte-to-name map IS global and unambiguous. Several names simply have
+more than one code:**
+
+    NONE        0, 60, 61, 62, 63     five distinct codes, one displayed name
+    PARA BASS   8, 10
+    PARA TREBLE 9, 11
+    LOPAS2      37, 69
+
+Different blocks offer different members of those sets, which is what made it
+look per-block. So **a reader can decode any byte with one table** — the thing
+§60 said was impossible. It is the *writer* that has a choice to make, and
+`NONE` in particular has five ways to say the same thing.
+
+Codes 0 and 69 (`NONE` and `LOPAS2`) exist and were never reachable in any
+block walked from the panel.
+
+### What the ROM would not give up
+
+The LFO rate ladder and the OUTPUT gain enum (§61, §65) are **not** stored as
+constant tables — no arrangement of their breakpoints or steps appears in the
+image. They are computed, so confirming those laws still needs either the
+measured ladder or a reading of the formatting code.
