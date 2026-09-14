@@ -6084,3 +6084,65 @@ different method over several days.
 error** — packed data disassembles, a later ISA decodes instructions the CPU
 does not have, and a reverse-indexed table decoded forwards yields a complete
 and entirely wrong map with nothing internal to contradict it.
+
+## 68. The re-cycle overhead is per cycle, not per stage (2026-09-14)
+
+The instrument came back (empty, ROM only) and the queued test ran. Seven
+captures on ROM program 199, amp envelope switched to `User` and set to
+`Att1 0s/100% · Att2 0s/100% · Att3 0.06s/0% · Dec1 0s/0% · Rel1-3 0s/0%`,
+**identical in every capture** — only the `Loop` field differed. A 6 s held
+note each, onsets by rising edge.
+
+    Loop     onsets   period     sd
+    Off           1   --         --      (control: no re-cycle)
+    seg1F        61   0.0998 s   0.0013
+    seg2F        61   0.0998 s   0.0020
+    seg3F         1   --         --
+    seg1B        25   0.2400 s   0.0029
+    seg1B        25   0.2400 s   0.0025
+    seg1B        25   0.2400 s   0.0000
+
+### Per-stage traversal is refuted
+
+`seg1F` loops back to attack segment 1 and `seg2F` to segment 2, so they
+traverse a different number of stages per cycle. **Their periods are identical
+to four decimal places.** The hypothesis under test predicted about 6.95 ms per
+stage; the measured difference is 0.0000 s.
+
+**Nor is it simply a timer**, because `seg1B` is not flat against the forward
+settings — 0.2400 s against 0.0998 s. A bidirectional loop traverses the
+envelope out and back, so the cycle is longer *because the path is longer*.
+
+So: **the overhead is per cycle, and the cycle's length follows the envelope
+path traversed, not the number of segment boundaries crossed.** Forward
+overhead here is 0.0998 - 0.06 = **39.8 ms**, and against the original
+subject's true `Att3` of 0.058 s it is 41.8 ms, which is the recorded 41.7 ms.
+
+### Two incidental findings
+
+**`seg3F` does not re-cycle audibly at all** on this envelope, and that is
+correct rather than surprising: it loops to the start of attack segment 3,
+which runs from 0 % to 0 %. Looping over a stage that never rises produces
+nothing to hear. **A loop setting can be active and silent**, which is worth
+knowing before anyone reads a null as "looping is off".
+
+**The last three rows are the same setting captured three times** — the wheel
+stopped advancing at `seg1B`, so `seg2B` and `seg3B` were not reached. The
+repeat was accidental and is the run's best number: **0.2400 s three times**,
+sd 0.0029 / 0.0025 / 0.0000.
+
+### Two rig faults worth recording
+
+A run killed mid-capture **left a note sounding**, and the next run measured a
+floor of **-30.3 dBFS** and carried on. Every level in that capture would have
+been referenced to a ringing note. `measure_floor()` now refuses anything above
+-60 dBFS and says why.
+
+And closing the JACK client while its process callback was still appending to
+the capture buffer **segfaulted the interpreter** — a crash in the C layer, so
+there is nothing to catch. The teardown now stops the callback, waits, and
+calls `close()` alone rather than `deactivate()` then `close()`.
+
+Rig at `~/temp/k2k_fw/envrig.py`, results at `~/temp/k2k_fw/looptest.json`.
+Program 199 verified back at `Mode:Natural` afterwards and RAM still empty:
+panel edits only, discarded on exit, nothing saved.
