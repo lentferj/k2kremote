@@ -6004,3 +6004,83 @@ The LFO rate ladder and the OUTPUT gain enum (§61, §65) are **not** stored as
 constant tables — no arrangement of their breakpoints or steps appears in the
 image. They are computed, so confirming those laws still needs either the
 measured ladder or a reading of the formatting code.
+
+## 67. The envelopes, and what the manual settled that the ROM would not (2026-09-14)
+
+### The ROM gives the page, not the law
+
+The AMPENV field records sit at file `0x096352` — seven 18-byte entries,
+`Att1 Att2 Att3 Dec1 Rel1 Rel2 Rel3 Loop`, each holding the label, a screen
+column stepping by 5, and a width. They are **display descriptors, not
+parameter laws**. One useful detail falls out: every record has width 4 except
+`Rel3`, which has 5, because that field renders `User` rather than a
+percentage — which is why the amp envelope's Rel3 level is not programmable
+(the Musician's Guide says of ENV2/ENV3 that "the only differences are that you
+can program an amount for Rel3").
+
+Like the LFO rate ladder (§61) and the OUTPUT gain enum (§65), the envelope
+behaviour is computed rather than tabled. **Three laws sought in the image,
+three not there.** Worth recording as a bound on what ROM archaeology gets you
+here: the firmware yields enumerations and layouts readily and continuous laws
+not at all.
+
+### The amp-envelope Loop field, and a refuted mechanism
+
+Manual, AMPENV: seven loop types — `Off`, `seg1F/seg2F/seg3F` forward,
+`seg1B/seg2B/seg3B` bidirectional — with a count of `Inf` or 1 to 31. And:
+
+> "Regardless of the loop type and the number of loops, each note goes into its
+> release section as soon as its Note State goes off."
+
+**So an amplitude-envelope loop cannot produce anything after Note Off.** That
+refutes the leading candidate for mpc2emu's §K2000 envelope re-cycle bug as an
+explanation for the re-articulation measured in §64/§65 — which began about
+**1.15 s after note-off**. Refuted twice over, since the affected programs read
+`Loop: Off` on the panel anyway, the `Inf` beside it being the count that `Off`
+makes irrelevant.
+
+### Five function codes settled from the manual
+
+Asked for a panel pass on five codes whose meaning a converter needed. The
+instrument has been silent since the 2026-09-11 reboot, so the panel was not
+available — the Musician's Guide answered all five, and from a documented
+source rather than an inference:
+
+    35 BAND2    two-pole bandpass, width FIXED at 2.2 octaves; otherwise
+                identical to BANDPASS FILTER
+    36 NOTCH2   two-pole notch, width fixed at 2.2 octaves, same relation to
+                NOTCH FILTER
+    52 HIPAS2   two-pole highpass; HIPASS attenuates low frequencies more at
+                the same cutoff
+    70 LPCLIP   one-pole, "programmed just like LOPASS"; the input is
+                multiplied by 4 before the filter, which is what clips
+    57 LPGATE   lowpass whose "cutoff frequency is controlled by the AMPENV" --
+                high at 100 %, low as the envelope decays or releases
+
+All five take a real frequency parameter. The two that would have been easiest
+to get wrong are LPCLIP and LPGATE, and both are filters for reasons that are
+not the naming symmetry that suggests it.
+
+### An entropy pre-flight for firmware work
+
+eosed established that the E4XT OS images are compressed end to end, with the
+decompressor in the sampler's boot ROM rather than the file — and a
+disassembler pointed at that produces **plausible garbage rather than an
+error**. Their check, run here for contrast:
+
+    K2000 ROM   mean 5.00 bits/byte   98.7 % of 256-byte windows below 6.0
+    EOS  image  mean 7.19             1.6 %
+
+A test that fires one way is a detector; one that separates both ways is a
+discriminator, and the pair is what makes either number mean anything.
+
+**But the ordering matters: entropy first because it is cheap, and behavioural
+agreement because it is the only conclusive check.** Entropy would have saved
+the attempt had it failed; it could not have shown the attempt had succeeded.
+What did that was §66's table reproducing 65 hardware measurements taken by a
+different method over several days.
+
+**The failure mode of all of this work is a plausible wrong answer, not an
+error** — packed data disassembles, a later ISA decodes instructions the CPU
+does not have, and a reverse-indexed table decoded forwards yields a complete
+and entirely wrong map with nothing internal to contradict it.
