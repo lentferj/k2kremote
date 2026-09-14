@@ -6201,3 +6201,60 @@ way. A shared handler would have been evidence; separate handlers are not
 counter-evidence. **Worth checking which direction a cheap test can actually
 run before spending on it**, especially when the alternative was a card
 crossing.
+
+### The file-path run, and a detector that manufactured its own peak
+
+A bank built by mpc2emu's writer and loaded off the Gotek — four programs,
+`NULLRUN` (double-null), `NULLPAD` (Rel3 padded one grid step), `RELREAL` (a
+real 50 ms release) and `LOOPPOS` (byte-identical to `NULLRUN` except byte 0 =
+`seg1F`). All sustain at 87 %, `Dec1 0.30 s`.
+
+    prog      sustain    mod peak   x median
+    LOOPPOS   -46.8 dB    2.40 Hz        437
+    NULLRUN   -49.7 dB   20.00 Hz        971
+    NULLPAD   -49.7 dB   20.00 Hz        722
+    RELREAL   -49.7 dB   20.00 Hz        868
+
+**The three Loop-Off programs agree to 0.00 dB and 0.00 Hz**, so the
+double-null is indistinguishable from both counter-examples on the file path as
+well as on the panel. The control separates by 2.9 dB and an entirely different
+modulation frequency.
+
+**The first pass reported the control as dead.** The onset detector from the
+loop sweep needs the level to fall below a gap before it re-arms, and these
+programs sustain at 87 % — so a `seg1F` loop modulates a held level instead of
+firing bursts out of silence, and all four counted one onset. **An instrument
+carried from a case where it worked into one where it cannot fire**, which is
+the fourth instance of that shape in two days. What caught it was four
+identical peak levels: **identical numbers are a smell.**
+
+**And the `20.00 Hz` common to the three is an artefact of the analysis, not a
+property of the audio.** Neither of the two offered explanations was right — it
+is not the sample's loop (that is at 0.51 Hz) and not the search band's top
+edge (the band ran to 60 Hz). Block-RMS framing samples the carrier at the
+frame rate and aliases it down: **a pure 220 Hz tone with no amplitude
+modulation whatsoever reproduces the effect synthetically, and the spurious
+peak MOVES when the frame length changes** — 40.00 Hz at 5 ms frames, 59.83 Hz
+at 4 ms and 8 ms.
+
+That does not weaken the null, it states it in the detector's own terms: a
+high-frequency carrier-derived peak is what this detector reports **when there
+is no real modulation to find**. Re-run with a 20 s hold and a 0.4-10 Hz band,
+at 0.054 Hz bins:
+
+    LOOPPOS   2.378 Hz   period 0.4205 s   x6066 median
+    NULLRUN   9.946 Hz                     x43   median
+
+A factor of 140 in peak-to-median between them.
+
+### The 41.7 ms overhead is not fixed across envelope shapes
+
+`LOOPPOS` traverses `Att1 0.02 + Att2 0.01 + Att3 0.01 + Dec1 0.30` = 0.34 s
+and re-cycles every **0.4205 s**, so its overhead is **~80 ms** — twice the
+41.7 ms measured on the panel subject, whose traversal was a single 0.06 s
+stage with three zero-length ones before it (overhead 39.8 ms).
+
+§68's own sweep matched to a millisecond within one envelope shape, so the
+formula is not simply wrong. **It does not transfer across shapes**, and
+whatever the overhead depends on, it is not the count of stages traversed
+(that was refuted) and not a constant either. Open.
