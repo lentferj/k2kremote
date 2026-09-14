@@ -740,3 +740,31 @@ a question we cannot currently separate: §64/§65 measured a full re-articulati
 mechanism or two. The test tells us which.
 
 Does not need a card crossing; the programs can be built in RAM.
+
+## Is the 41.7 ms re-cycle overhead per-stage or a timer?
+
+**Status:** open, designed, not run. Blocked on the same bench check as the
+short-release test above, and sits behind it — that one is about a live defect,
+this is about a fixed bug's mechanism.
+
+`period = decay + ~41.7 ms` was measured well (three points over a 25x decay
+range, 0.1-1.7 %, alternatives excluded) but it characterises the seg3F loop
+the old KRZ writer set by accident, which is fixed. The open question is what
+the fixed overhead *is*.
+
+mpc2emu's hypothesis, with its falsifier attached: the 0.058 s subject carried
+**six of its seven envelope stages at zero time**, so 41.7 ms is 6.95 ms per
+zero-length stage traversed (5.96 ms if all seven cost it) — fixed regardless
+of decay, which is exactly what was measured.
+
+**The test:** rebuild the same subject with a real attack, say 200 ms, leaving
+seven stages but only five at zero time.
+
+    per-stage, all stages    period = 0.200 + decay + 41.7 ms
+    per-stage, zero only     period = 0.200 + decay + 34.8 ms
+    a timer                  period = 0.200 + decay + 41.7 ms, unchanged
+
+About 7 ms apart on a ~100 ms period, against 0.1-1.7 % already resolved on
+this rig, so it separates cleanly. **If the overhead stays 41.7 ms with the
+attack added, stage traversal is dead and it is a timer.** File-side to build,
+one capture to read.
