@@ -6258,3 +6258,26 @@ stage with three zero-length ones before it (overhead 39.8 ms).
 formula is not simply wrong. **It does not transfer across shapes**, and
 whatever the overhead depends on, it is not the count of stages traversed
 (that was refuted) and not a constant either. Open.
+
+### A check that cannot fail
+
+Four separate instruments failed the same way in one day, across two projects,
+and **none of the four produced a wrong value** — each produced a value that
+could only ever have come out one way:
+
+- a scan keyed on a single tag, on data where the tag varied
+- a guard shorter than the note it was counting
+- a 5 ms analysis window on a 33 Hz carrier
+- an onset detector that re-arms below a gap, on programs sustaining at 87 %
+
+Every one of them was an instrument carried from a case where it worked into a
+case where it *could not fire*, and every one reported a clean negative. A
+detector with no path to a positive result is indistinguishable from a
+detector reporting a null, and the reading looks exactly as it should.
+
+**What caught the fourth was four identical peak levels** (−41.7/−41.8 dB
+across four different programs): identical numbers are a smell. The general
+form of that check is cheaper than re-deriving the instrument — before
+believing a negative, feed the detector something it must fire on. §68's
+control programs exist for exactly that reason, and they are why the
+double-null null is worth anything.
