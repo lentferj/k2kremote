@@ -6176,3 +6176,28 @@ Scope: one envelope, panel-built on a ROM program, `Loop: Off`, sustain 0 %.
 The original subject was a converted program off a card, and a panel
 reconstruction of a file's shape is not the same object — the same caution
 §64/§65 needed.
+
+### Pole counts, and a test that could only have refuted
+
+The Guide's DSP-function contents listing enumerates the filters by pole count
+directly, which settles a family of codes at once:
+
+    TWO-POLE NOTCH                    code  4  NOTCH FILTER
+    TWO-POLE NOTCH, FIXED WIDTH       code 36  NOTCH2
+    DOUBLE NOTCH WITH SEPARATION      code 56
+    TWO-POLE BANDPASS                 code  3  BANDPASS FILT
+    TWO-POLE BANDPASS, FIXED WIDTH    code 35  BAND2
+    TWIN PEAKS BANDPASS               code 55
+
+with each entry's own heading repeating it — "Two-pole Notch Filter (NOTCH
+FILTER)" — and the body reinforcing it a third time. **Every one of these is
+two-pole; the only four-pole entries in the list are the `W/SEP` pair.**
+
+**The ROM route offered for this could only have refuted, never established.**
+The proposal was that if codes 4 and 36 shared a dispatch handler they would
+share a pole count. They do not share one — §66's table gives each its own
+entry and its own name pointer — but *separate* handlers imply nothing either
+way. A shared handler would have been evidence; separate handlers are not
+counter-evidence. **Worth checking which direction a cheap test can actually
+run before spending on it**, especially when the alternative was a card
+crossing.
