@@ -7883,3 +7883,76 @@ one. Left for Jan to decide rather than queued.
 
 304 is left at **Dec1 12000**, which measures 1.355 s against the source's
 1.385 — 98 %, good enough for the README clip that started this.
+
+## 84. No constant exists — the conversion is per-sample (2026-09-19)
+
+§83 left the decay factor moving: **2.99 → 3.49 → 3.76 → 3.97** as points
+accumulated, read there as "the estimate still moving". It was not converging
+on anything. **It was tracking how much of each fall the sample was doing.**
+
+### The controlled pair that refutes it
+
+Jan had a pair built and loaded at 900/901: **one envelope** — decay 2.000 s,
+sustain 0, every field identical — and **two samples**. `DECFLAT`'s never falls
+5 dB across its length; `DECFALL`'s is an EP decaying ~5 dB/s. The only
+difference between the programs is which sample plays.
+
+    program    MPC t30   K2000 @ Dec1 2000   Dec1 needed   factor
+    DECFLAT     1.805 s       0.640 s          5.98 s       2.99
+    DECFALL     1.370         0.495            7.04         3.52
+
+**A constant factor requires those two to be equal. They differ by 18 %**,
+against 23 % predicted by the sample-dependent model. No fitting, no residual
+to argue about — one comparison ends it.
+
+**And the row that makes it trustworthy is `MPC DECFLAT: declared 1.805,
+measured 1.805`** — an envelope law measured on *noise* reproducing exactly on
+a sample it had never seen. The same model that predicts correctly four times
+is the one saying a constant cannot work.
+
+**Why**: the MPC's decay is convex and the K2000's is linear, so when a sample
+does much of the early falling, the two envelopes are compared in a window
+where the MPC's is still slow. The matching point moves with the sample's
+contour. **2.99 was correct — for noise, which is the material it was measured
+on.**
+
+### The README example, corrected
+
+Per-program conversions computed from each program's own contour:
+
+      MPC (the source)     1.385 s     --
+      E4XT conversion      1.310      94.6 %
+      AKAI conversion      1.365      98.6 %
+      K2000 as shipped     0.755      54.5 %
+      K2000 at Dec1 13500  1.385     100.0 %
+
+From half the source's length to the closest of the three conversions.
+**Not exact**: at a 5 ms hop a single crossing carries ~±0.4 %, so the honest
+statement is "agrees within the measurement's resolution", on one capture.
+
+### The rule that would have bitten the implementation silently
+
+A prediction on 900 missed by 5.8 % where 304's missed by 0.3 % and 1.1 %. The
+difference was not the model — 304's contour came from **its own playback**,
+900's from the WAV at native rate on a transposed note.
+
+> **A sample's contour measured off the file is not the contour the instrument
+> plays.** Transposition resamples it, so every rate in dB/s scales with the
+> playback ratio.
+
+Same class as §83's fixed-dB window: a quantity measured through one path used
+to predict another. **And the miss was in the INPUT, not the model** — which
+matters, because treating it as model error would have put a fudge factor into
+the writer to cover a bad contour.
+
+### What is left
+
+304 sits at **Dec1 13500 in RAM**. Writing that into the bank on disk is one of
+the three carve-outs and is Jan's alone. 900 and 901 want their contours
+re-derived from their own playback before any of this is implemented.
+
+**The measurement the whole result rests on was `Dec1 = 60000`** (§83): at 60 s
+the envelope contributes 1.66 dB/s, so ~88 % of the fall is the sample and the
+contour is *measured* rather than solved for. Without it the constant 2.99
+would have shipped, correct on noise and wrong on every program whose sample
+decays.
