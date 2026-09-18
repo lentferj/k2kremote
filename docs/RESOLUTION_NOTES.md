@@ -7138,3 +7138,36 @@ anyone examining its position or its applicability.
 **And §75's own lesson, broken within the hour**: the output-gain offsets
 254/270 were blind-written into 204, where they land in the `GAIN` block's body
 rather than on an output wire. An offset is only an address inside a layout.
+
+### A correction is itself a claim
+
+After a power-down the K2000's RAM bank 2 came back with **0 objects**, where a
+verified bank had been left. This session reported "the programs did not come
+back" to mpc2emu as a finding; mpc2emu propagated it into a retraction of a
+documented claim within ten minutes.
+
+**The counter-argument was already written in the note being retracted.**
+It had been investigated once before, on 2026-08-31, and the conclusion
+recorded then was explicit: *"don't read a post-power-cycle empty RAM state as
+evidence of that without confirming whether a cleanup was done first"* — Jan
+routinely runs `Master -> Delete -> Everything` after a power cycle, because
+anything referencing loaded sample RAM is broken anyway. **A cleanup and a flat
+battery produce an identical `DIRBANK` result**, and nothing observable from
+this side distinguishes them.
+
+So the reading had two explanations and was reported as one. Neither session
+opened the file it was about to edit.
+
+> **A correction is itself a claim and needs the same check as any other
+> assertion.** "You were wrong about X" is the hardest thing to refuse, which
+> is exactly why it should be the easiest thing to verify — and the cheapest
+> possible check here was re-reading our own note before overwriting it.
+
+What survives is narrower than either the finding or the retraction, and is
+what both notes now carry: **an empty bank after a power cycle is unsurprising
+and uninformative about the cause — ask, do not infer.** And operationally,
+regardless of cause: **never stage RAM contents on one evening for a
+measurement on the next.** Re-read the bank at the start of every session and
+treat anything left there as gone until `DIRBANK` says otherwise. Both sessions
+had planned the other way, which is what made the exchange worth having even
+though the finding evaporated.
