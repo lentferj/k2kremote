@@ -7438,3 +7438,117 @@ out a change that would have moved the AKAI's `RELSE1` from 55 to 59 on
 theoretical grounds — 55 being the value Jan had confirmed by ear that
 afternoon. Same shape as §77's retraction: the better-sounding reasoning
 winning over evidence already in hand.
+
+## 79. The release law is affine, and one manipulation beat a third program (2026-09-18)
+
+§78 left a **1.43x** between the release the arithmetic asks for and the one
+the K2000 needs, with no explanation. It resolved into two separate findings,
+and the route there is worth as much as either.
+
+### The branch, and a constant used outside its scope
+
+mpc2emu's `_fill_env` has two branches. Below the 33 % knee both release legs
+aim at silence and **Rel1 carries the whole fall**; above it Rel1 only fades to
+the knee and Rel2 finishes. They map Rel1 to audible fall **4.7x differently**:
+
+    branch       sustain   Rel1 written   -30 dB fall   ratio
+    below-knee      0.00      2.00 s         0.435 s     0.22
+    above-knee      0.63      1.45 s         1.51  s     1.04
+    above-knee      1.00      8.32 s         8.58  s     1.03
+
+So a factor fitted on one branch is wrong on the other by a factor of five, and
+the old 1.9 had been fitted on a *sustaining* program — roughly right above the
+knee, badly wrong below it, which is exactly the case Jan reported.
+
+**And §71's own span has the same defect.** It was measured with Dec1 and
+sustain at 100 % — **above the knee** — so 99.80 dB is that branch's span.
+Applying it below the knee was the same category error in the other direction.
+The constant is not wrong; **its stated scope is.**
+
+### A manipulation instead of a third correlated observation
+
+Both sessions framed the next step as "we need a third program". mpc2emu was
+right that this was wrong: two programs differ in release time, sustain,
+samples **and** Rel2 at once, so a third is one more correlated observation.
+**Rel2 is settable** — so hold everything else fixed and move the one quantity
+the relation is about. Correlation across programs becomes manipulation on one.
+
+Better still, **hold Rel1 fixed too**: the `slope x Rel1` term is then common to
+every reading, so a difference between two Rel2 settings is a difference in
+intercept with **no line fitted, no slope assumed, and no extrapolation into
+the noise floor.** Every argument of the preceding two hours — two-point fits,
+which dB depth, fitted-versus-measured — was downstream of estimating a slope
+nobody needed.
+
+    Rel1 8300 ms throughout, Rel2 swept, t(-30 dB):
+
+    Rel2    measured   predicted    miss     role
+     500     8.235      8.235        --      fit point
+    1000     8.330      8.344      -0.014    out of sample
+    1500     8.460      8.453      +0.007    out of sample
+    2080     8.580      8.580        --      fit point
+    3000     8.770      8.781      -0.011    out of sample
+
+**Proportional across a 6x range**, three out-of-sample misses straddling zero
+at max 0.014 s against an sd of 0.005.
+
+**A saturation mechanism proposed here is refuted on the terms set for it in
+advance.** The claim was that Rel2 stops contributing once −30 dB arrives
+before Rel2 ends; mpc2emu worked out that this puts the crossover below 1500,
+and 1500 landed +0.007 s from prediction. Written down before the last capture:
+if 3000 lands on the line the mechanism is **wrong**, not "it saturates above
+3000" — which would be moving the goalposts to wherever the data is not.
+
+### The control that was never fitted
+
+    Rel2 500 -> 3000        coefficient
+      -10 dB                   -0.0121      <- flat, and never used in any fit
+      -20 dB                   +0.0689
+      -30 dB                   +0.2165
+
+**Rel2's influence grows with measurement depth**, and the −10 dB row — above
+the knee, where Rel2 should not reach at all — stays flat across the whole 6x
+range. An out-of-sample control on a parameter no fit ever saw is worth more
+than the five-point line it sits beside. It also answers, with a measurement
+rather than an argument about floor guards, the standing worry that the whole
+effect was −30 dB sitting in the mud.
+
+**And it killed an earlier claim of structure.** With one depth the intercept
+matched a quarter of each program's Rel2 to three digits — and across three
+depths the intercept is −0.021 / +0.157 / +0.520, so **"intercept = Rel2/4" was
+a statement about the depth that happened to be chosen.** The physical story
+survives; the coefficient does not.
+
+### The knee was already measured
+
+An inference then put the knee at **−15.3 dB** against the writer's
+`_REL_KNEE_PCT = 33.0` at ~−24.8 — a 9.5 dB disagreement shaping every
+sustaining program written. §71's level curve settles it without touching the
+instrument: 50 % → −18.06 dB, 25 % → −28.10, 12 % → −38.13, 6 % → −48.17,
+**10.04 dB per halving**, so 33 % interpolates to **−24.08 dB from either
+neighbour, agreeing to 0.00.**
+
+The writer is right; the inference is broken, and it rests on dB-linearity
+within a segment.
+
+> **A fit that agrees with itself and disagrees with a direct measurement of
+> one of its parameters is telling you about its form, not its inputs.**
+
+Same shape as the Rel2/4 artefact one level up: there the coefficient was an
+artefact of the depth chosen, here the knee is an artefact of the form assumed.
+Both times the arithmetic was perfectly self-consistent.
+
+### Two smaller things that cost something
+
+**A noise figure carried across programs.** ±3 % was quoted from Sangre —
+sustain 0, 3.4 s decay, so its note-off level genuinely jitters with timing —
+onto a program at sustain 1.0 with a 30 s decay whose four repeats give
+sd 0.005 s. **The effect is 68 sigma and a borrowed conservative figure very
+nearly had it reported as unconfirmed.** Erring conservative is not
+automatically safe: here it would have cost a real result rather than prevented
+a wrong one.
+
+**And a table entry asserted without checking.** "8320 is an exact table entry,
+so the comparison is clean on both sides" — it is not one; above 5000 ms the
+step is 100 ms. The comparison survived only because 8300 is what the program
+already held. Said while pressing mpc2emu about exactly that habit.
