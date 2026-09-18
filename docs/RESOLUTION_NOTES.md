@@ -6918,3 +6918,70 @@ hand-picked values. Swept over 793 `(depth, Kw)` pairs the worst errors are
 *ratio* at the points that happened to be chosen. **A number that reads as
 precision and is coincidence.** They put the swept figures in the docstring
 rather than the flattering ones.
+
+## 74. The HOB filter block's byte map (2026-09-15)
+
+mpc2emu could not rank two "assumed" K2000 constants because they could not
+histogram the fields, and their attempt to find `KeyTrk` by corpus position
+gave "10.1 % of 43,424 blocks out of `seg[3]`" — **flagged as a guess rather
+than sent as a reason to spend bench time**, because §72 had just shown the
+byte order is not the page order.
+
+Same method: one distinctive byte at a time into the F1 block, the `F1 FRQ`
+page read back and diffed against an all-zero baseline. Block base is
+`209 + 16k` (§69), so `seg[j]` is offset `209 + 16k + j`. **The type byte
+itself is deliberately not swept** — changing it changes which page exists.
+
+    seg[ 1]  210  Coarse       seg[ 7]  216  DptCtl
+    seg[ 2]  211  Fine         seg[ 8]  217  MinDpt
+    seg[ 3]  212  KeyTrk       seg[ 9]  218  MaxDpt
+    seg[ 4]  213  VelTrk       seg[10]  219  Src2
+    seg[ 5]  214  Src1         seg[11]  220  Pad
+    seg[ 6]  215  Depth        seg[12..14] nothing on this page
+
+**Their `seg[3]` guess was right**, and their `Src1`/`DptCtl`/`Src2` at 5/7/10
+are confirmed.
+
+### The same displacement as CAL, in a different segment
+
+The page reads `Coarse, Fine, KeyTrk, VelTrk, Pad` down the left and
+`Src1, Depth, Src2, DptCtl, MinDpt, MaxDpt` down the right. Memory reads
+
+    Src1, Depth, DptCtl, MinDpt, MaxDpt, Src2
+
+— `Src2` last in memory, third on screen, **exactly as in `CAL`** (§72), and
+`Pad` last of all. So it is not a quirk of one segment: **the K2000 stores the
+second modulation source after its own depth fields, on both pages.** Anyone
+inferring either layout from the display gets `Src2` and `DptCtl` wrong in the
+same way twice.
+
+### Four different curves inside eleven bytes
+
+Probe byte 33, decoded by what the panel showed:
+
+    Coarse                 A 6 1760Hz   = 440*2**((33-9)/12)   (§69's law)
+    Depth/MinDpt/MaxDpt        500 ct   = ENV2_FILFREQ_CT[33]   NOT the pitch curve
+    VelTrk                     500 ct   = same
+    KeyTrk                  66 ct/key   = 2 x the byte
+    Pad                          6 dB   = ?
+
+`LFO_PITCH_CT[33]` is **46 ct**, an order of magnitude out — so the filter
+block's depth fields use the `ENV2->FilFreq` curve and the pitch page's use the
+LFO-pitch one. Two curves, same field names, different segments. A converter
+that picks one by field name rather than by segment is wrong by 10x on
+whichever it guesses second.
+
+### And the byte before each block type is defended
+
+Offset **224** refused to be zeroed — the byte immediately before F2's type
+byte at 225 — exactly as **208** did before F1's at 209. Twice is a pattern:
+there is something at `209 + 16k - 1` that is not the block's to write, and
+`patch_object_bytes`' read-back check is what caught both rather than reporting
+a write the device had silently overridden.
+
+**A note on the first attempt, which found nothing and was right to.** It ran
+on program 202, whose F1 block type is **62 = `NONE`** — no filter, so no
+`Fn FRQ` page at all. The sweep refused to diff a page it could not reach
+instead of reporting fifteen "no change" rows, which is what an unguarded
+version would have produced: fifteen confident negatives from a page that was
+never open.
