@@ -7060,3 +7060,81 @@ while a panel sweep was being set up to map it point by point.
 Jan asked whether this project had a firmware image, which it does and has used
 since §66. **Having the tool is not the same as reaching for it**: the ROM
 answered in one search what the sweep would have spent an hour approximating.
+
+## 76. Velocity to attack time: the law, and three machines with three anchors (2026-09-15)
+
+`ENVCTL Att VelTrk` is `0x20`[4] (§75), and its multiplier comes from ROM
+`0x1FC404`. What the byte *does* needed measuring, because "the multiplier
+applies at full velocity" is an assumption about the **anchor**, and mpc2emu
+had already found the AKAI anchoring at velocity 64 and the E4XT at 127.
+
+Rig: `F4 AMP VelTrk` zeroed so velocity cannot change loudness — every capture
+then has the same plateau and any difference is timing alone. AMPENV Loop
+forced Off (204 and 202 ship `seg3F / Inf`, which is §68's re-cycle). A **User**
+envelope, since ENVCTL does not affect a Natural envelope's attack. Attack read
+as the ramp's own duration, 20-80 % fit extrapolated to both ends so fixed
+latency cancels (§71).
+
+    control (VelTrk 0)   vel   1: 2029.0 ms    vel 64: 2030.3    vel 127: 2027.7
+    VelTrk +8 (2.000x)   vel   1: 2014.3       vel 32: 1697.9    vel  64: 1428.3
+                         vel  96: 1204.4       vel 127: 1013.3
+
+**`t(1)/t(127) = 1.988` against `M = 2.000`.** And the shape is exponential:
+
+    vel             32      64      96     127
+    log2(t1/tv)   0.246   0.496   0.742   0.991
+    (v-1)/126     0.246   0.500   0.754   1.000
+
+**`t(v) = t(nominal) / M**((v-1)/126)`**, anchored at velocity 1 and reaching
+the full multiplier exactly at 127. Confirmed in the other direction with
+`M = 0.470`: measured ratios 0.8307 / 0.6850 / 0.5656 / 0.4721 against
+0.8305 / 0.6856 / 0.5659 / 0.4700. **Span = M both ways.**
+
+So on this machine the span mpc2emu carries — `t(1)/t(127)` — **is** the
+displayed multiplier, with no conversion at all.
+
+**Three machines, three anchors:** K2000 at velocity 1, AKAI at 64, E4XT at
+127. Not one pair agrees, and assuming an anchor rather than measuring it is
+wrong on two of three with a silent failure — the routing still sounds like
+velocity affecting attack, just with the wrong end of the keyboard pinned.
+
+### The anchor that moved, and did not
+
+The negative run put `t(1)` at **1681 ms** where the control had said 2029,
+which would have meant the programmed time lands at a different velocity
+depending on direction. It does not. **A control run at the identical hold and
+identical analysis windows gives 1676.4 / 1682.4 / 1683.2 ms** — the negative
+run's `t(1)` matches its own control exactly, and velocity 1 is the anchor in
+both directions.
+
+**The 17 % was my analysis geometry**, and the mechanism is worth the line: the
+long-hold version estimated the plateau from `t > t[-1] - 1.4`, and on a
+7.8-second capture that window **contains the release**. A plateau estimated
+too low makes the extrapolated ramp too short, by the same factor on every
+rung — which is exactly why the ratios stayed perfect while the absolute
+numbers moved. **Take absolute attack times from the short-hold geometry
+(2029 ms for a 2000 ms table entry, against §71's `k` predicting 2022); take
+ratios from either.**
+
+### Three process failures, one of them new in kind
+
+**The subject.** The first attempt ran on program 204 — `CUT 000`, whose 4-pole
+lowpass sits at **58 Hz**, so a note at key 48 is almost entirely removed. The
+plateau came out 1.5 dB above the floor and the estimator reported attack times
+of **592 seconds**. mpc2emu's framing is better than "check your subject":
+**the property that qualified it disqualified it.** 204 is the right subject
+for panel and DUMP work *because* it has a filter block, and the wrong one for
+audio *because* of where that filter sits.
+
+**The guard that was skipped, then mis-sequenced.** `Rig.prove()` exists to
+catch exactly a dead audio path, and was not called. Added, it was then called
+**before** the program was selected, so it tested the previous run's leftover
+program and condemned a path that was fine. **A precondition check has to run
+after the preconditions are established** — §71's restore-to-baseline lesson,
+broken in the opposite direction inside a day. mpc2emu's general form:
+*the check ran, so it felt checked* — the mechanism existing is what stops
+anyone examining its position or its applicability.
+
+**And §75's own lesson, broken within the hour**: the output-gain offsets
+254/270 were blind-written into 204, where they land in the `GAIN` block's body
+rather than on an output wire. An offset is only an address inside a layout.
