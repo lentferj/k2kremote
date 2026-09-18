@@ -821,3 +821,22 @@ can be registered beside the panner without either displacing the other.
 
 Not urgent: the gate already prevents the confident-wrong reading, which was
 the defect. This is about coverage.
+
+## Pitch measurements below ~100 cents need a harmonic source
+
+**Status:** open, bounded, not needed by anything current.
+
+§73 withdrew an apparent threshold in the Src2 pitch wire because `RELREAL`'s
+sample is not one harmonic series — its strongest low partials are 93 and 112
+cents apart — and every pitch estimator tried assumes a single pitched source.
+Three of them disagree with each other inside their own validity ranges below
+about 100 cents.
+
+**What it needs:** a program built on a genuinely harmonic source (a sine, or a
+single-cycle sample) rather than a pad, then the same sweep. Nothing in the
+conversion work depends on it: the byte-to-cents curve is panel-confirmed
+across the full range with no audio at all, and every audio result that stands
+was taken at 100 cents or more.
+
+Do not reuse the existing captures — the problem is in the material, not the
+analysis, so no amount of re-analysis will settle it.

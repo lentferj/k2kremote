@@ -6752,3 +6752,169 @@ refusing rather than reporting a write that had been silently overridden.
 
 **Two control-source codes, from the same screens:** `1 = MWheel` (the baseline
 value of `DptCtl` in this bank) and `45 = Bal Ctl` (the probe value).
+
+## 73. The keymap page's bytes, and Coarse adds to Xpose (2026-09-14)
+
+§72 left mpc2emu with a live question: they read `cur.transpose = CAL[1]`, and
+§72 had found `CAL[0..14]` driving nothing on the PITCH page. Either `CAL[1]`
+is the keymap `Xpose` — in which case they read transpose correctly and simply
+never read `Coarse`, an additive fix — or it is something else and everything
+written back carries the error.
+
+Same method, on the KEYMAP page:
+
+    178  CAL[1]   Xpose          188  CAL[11]  KeyMap id, high byte
+    180  CAL[3]   KeyTrk         189  CAL[12]  KeyMap id, low byte
+    181  CAL[4]   VelTrk         191  CAL[14]  AltSwitch
+
+**`CAL[1]` is `Xpose`.** Probe 7 reads `7ST`. Their transpose was always right.
+
+Three by-products:
+
+**The keymap pointer is two bytes, 188/189.** Probe 7 at 188 gave
+`999 Not Found` and at 189 gave `7 Elec Jazz Guitar`. That also retires §69's
+decoy: 189 stepping 204, 205 ... 214 across the CUTCAL bank was a keymap id's
+LOW byte, and a reader taking 189 alone breaks above id 255.
+
+**`AltSwitch` took code 7 and displayed `Volume`, the same name code 7 reads in
+`Src2`** — the control-source table is shared across pages.
+
+**The control-source codes ARE MIDI CC numbers**, at least through the first
+block: `0 OFF, 1 MWheel, 2 Breath, 3 MIDI03, 4 Foot, 5 PortTim, 6 Data,
+7 Volume, 8 Balance, 9 MIDI09, 10 Pan, 11 Express, 12-15 MIDI12-15, 16 Ctl A,
+17 Ctl B`, plus `45 Bal Ctl`. The unnamed entries are literally `MIDInn`, and
+`MWheel` is 1 because it is CC 1.
+
+### They add
+
+Six rungs, pitch measured against the (0,0) capture so the sample's own tuning
+cancels:
+
+    Xpose 12  Coarse  0   +11.97 st        Xpose 0  Coarse  7    +7.04 st
+    Xpose  0  Coarse 12   +11.97 st        Xpose 7  Coarse  0    +6.99 st
+    Xpose 12  Coarse 12   +23.98 st
+
+**Total transposition = `Xpose` + `Coarse` = `CAL[1]` + (`CAL[17]` −
+`CAL[15]`).** The two single-field rungs were the carried known: each had to
+land on +12 alone, or the rig was not measuring pitch and the joint rung would
+have meant nothing.
+
+### Two estimator failures in one measurement
+
+**A single-peak pitch estimator was the wrong instrument and it announced it
+with a negative frequency.** An unclamped parabolic vertex on a flat
+autocorrelation peak pushed the lag negative, and `log2(f/ref)` threw rather
+than returning a plausible number — which is the lucky half. It is also wrong
+in principle: a peak-picker follows whichever partial is loudest, so a change
+in which harmonic dominates reads as a pitch change, and **octave errors are
+exactly the size of the effect being measured**. An estimator that can confuse
++12 with 0 cannot answer a question whose hypotheses differ by 12.
+
+Replaced with a log-frequency spectrum cross-correlation, where pitch is a pure
+shift and the whole harmonic series votes.
+
+**And that one was biased toward zero.** The (12,12) rung came back as
+`-0.00 semitones` — **a suspiciously round number**, and neither hypothesis
+predicted it. The correlation did have a peak at +23.98, at r = 0.386 against
+lag 0's 0.528. **An unnormalised cross-correlation loses overlap as the lag
+grows** — two octaves costs 27 % of a 7.32-octave grid — so the residual
+same-sample similarity at lag 0 beat the true peak. Scoring each lag on its own
+overlap (a proper normalised cross-correlation) puts every rung right, with
+(12,12) at +23.98, r = 0.589 against 0.528.
+
+Same family as §71's regression attenuation: **the estimator had a preferred
+answer built into its geometry**, and it produced it confidently.
+
+### DptCtl scales between MinDpt and MaxDpt, and Dpt is not in it at all
+
+The last field question on the PITCH page, and it decides whether the MPC's
+wheel-gated vibrato survives conversion or gets approximated. `Src2` was set to
+`Foot` (code 4) held at a fixed CC 4 rather than a constant `ON`, which turns
+the wire's contribution into a **static** pitch offset — so nothing has to
+estimate a modulation depth. `Dpt` 500 ct, `MinDpt` 100 ct, `MaxDpt` 300 ct,
+three distinct values off the ROM table.
+
+    Src2=Foot CC4=0,   DptCtl OFF     +0.00 st     <- carried known
+    Src2=Foot CC4=127, DptCtl OFF     +0.99 st     = MinDpt
+    DptCtl=MWheel  wheel   0          +0.99 st     = MinDpt
+    DptCtl=MWheel  wheel  64          +1.97 st     (predicted 2.00)
+    DptCtl=MWheel  wheel 127          +3.00 st     = MaxDpt
+    Dpt=0ct  DptCtl=MWheel wheel   0  +0.99 st     <- unchanged
+    Dpt=0ct  DptCtl=MWheel wheel 127  +3.00 st     <- unchanged
+
+**`DptCtl` scales the `Src2` depth linearly between `MinDpt` and `MaxDpt`, and
+`Dpt` belongs to the `Src1` wire only.** The decisive rung is the last pair:
+changing `Dpt` from 500 ct to 0 with everything else held moves the reading by
+nothing at all. That is a difference rather than an inference across rungs, so
+no clamping argument can rescue the alternative — with only endpoints to
+compare, both hypotheses fit.
+
+So the idiom converts exactly, with no approximation: `Src2 = LFO1`,
+`MinDpt = D*(1-Kw)`, `MaxDpt = D`, `DptCtl = MWheel`.
+
+**And one fact for READING the 4,770 existing layers that use this:** with
+`DptCtl` **OFF**, the wire sits at **MinDpt**, not MaxDpt. A layer with
+`DptCtl` off and `MinDpt != MaxDpt` sounds at its minimum, and a reader that
+takes `MaxDpt` as the depth overstates every one of them.
+
+The 64-wheel rung lands at 197 ct against a linear prediction of 200, which is
+under two bins of the estimator's 4.3-cent resolution — linear within what this
+measurement can see, and not evidence of a curve.
+
+### The small-depth "threshold" — withdrawn, and what it cost
+
+Alongside the curve confirmation, the audio read **zero pitch shift** for
+declared depths below 75 cents and exactly the declared value above, with the
+step reproducible at byte 40 across an interleaved re-run. It was tempting, it
+was stable, and **it is not a result.**
+
+Three estimators were applied to the same captures and two of them contradict
+the third inside their own stated validity:
+
+    byte 40, declared 75 ct
+      log-spectrum correlation      75.1 ct   (matches the panel)
+      low-partial tracking, +-150c   0.0 ct   (window covers 75 c easily)
+
+A fourth and fifth had already failed earlier: a nearest-peak tracker whose
++-2.5 % window was **narrower than the shift it was chasing**, so it re-found
+the same partial and reported ~0 for a known 300 cents; and an independent
+harmonic-sum `f0`, which latched onto subharmonics and returned −122 ct for a
+known +100.
+
+**The material is why.** The reference capture's strongest low partials are
+149.9, 158.2, 187.4, 199.9, 249.8, 281.2, 349.8 and 375.0 Hz — 149.9 and 158.2
+are 93 cents apart, 187.4 and 199.9 are 112 apart. **That is not one harmonic
+series.** Every one of these estimators assumes a single pitched source, and
+`RELREAL`'s sample does not provide one.
+
+So the honest position is that **pitch shifts below about 100 cents cannot be
+measured on this material at all**, and the apparent threshold is an artefact
+of two estimators' valid ranges meeting near there — not a property of the
+machine. The claim is withdrawn.
+
+What survives untouched, because none of it depends on the audio or on small
+shifts: the panel-confirmed byte-to-cents curve (§73), the DptCtl scaling at
+100/200/300 cents, and the transpose arithmetic at 7, 12 and 24 semitones.
+Measuring the small end properly needs a program built on a genuinely harmonic
+source — a sine, or a single-cycle sample — not this bank's pad.
+
+**And the general lesson is not "use a better estimator".** Five failed here in
+one sitting, each with a different mechanism, and the synthetic control that
+vindicated one of them (a resampled copy of the reference, which it read to
+within 1 cent at 10 cents) **could not see the problem, because resampling
+preserves whatever inharmonicity the source already had.** A constructed signal
+only tests what it varies.
+
+**The companion rule**, from mpc2emu, and it is the sharper half: *a control
+proves the estimator handles the variation you introduced, and says nothing
+about the properties you copied.* Four of the five failures here were caught by
+a known-good rung sitting in the same table, and the fifth only by a different
+method disagreeing. **None was caught by the synthetic control.**
+
+**And one more shape of the same disease, from their side of the same
+evening:** their round trip preserved the wheel gate to `0.0000` on four
+hand-picked values. Swept over 793 `(depth, Kw)` pairs the worst errors are
+0.0294 and 0.0667 — the quantisation of `MinDpt` and `MaxDpt` cancels in their
+*ratio* at the points that happened to be chosen. **A number that reads as
+precision and is coincidence.** They put the swept figures in the docstring
+rather than the flattering ones.
