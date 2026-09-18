@@ -6985,3 +6985,78 @@ on program 202, whose F1 block type is **62 = `NONE`** — no filter, so no
 instead of reporting fifteen "no change" rows, which is what an unguarded
 version would have produced: fifteen confident negatives from a page that was
 never open.
+
+## 75. Offsets are not addresses — the segment stream, and what the "defended" bytes were (2026-09-15)
+
+Every offset this project has recorded — 199, 228, 241, 262, 263, and now 117 —
+is an address **inside program 204's layout**. mpc2emu went to calibrate against
+one of them and found the same field at **seventeen distinct byte positions
+across 6,575 corpus programs**; 204 happens to be the modal layout, which is
+why "their 228 is our 204" worked exactly once. The segment stream before the
+HOB blocks varies with what a program contains.
+
+So the portable form is **(segment tag, body index)**. Walking program 204:
+
+    0x1a @ 104   0x1b @ 108   0x20 @ 112   0x21 @ 128   0x22 @ 144
+    0x23 @ 160   0x40 @ 176   0x50 @ 208   0x51 @ 224   0x52 @ 240   0x53 @ 256
+
+Tag byte, then the body. `0x21`-`0x23` and `0x50`-`0x53` carry 15; `0x40`
+carries 31. Converting what this project already had:
+
+    199 -> 0x40[22]   LFO1->Pitch Depth      262 -> 0x53[5]   F4 AMP Src1
+    228 -> 0x51[3]    F2 RES KeyTrk          263 -> 0x53[6]   F4 AMP Depth
+    241 -> 0x52[0]    F3 block type          117 -> 0x20[4]   ENVCTL Att VelTrk
+
+§72's `CAL[k]` **is** `0x40[k]`, and §74's `seg[j]` **is** `0x50[j]`, so both
+maps were already structural and only the anchors were not.
+
+### The "defended" bytes were segment tags
+
+Offsets 208 and 224 refused writes during the CAL and HOB sweeps, and 112
+refused during the ENVCTL sweep. This project recorded that twice as "the byte
+before each block-type byte is defended by the device" and called it a pattern
+without a mechanism. **They are the tag bytes** — `0x50`, `0x51` and `0x20`.
+Not defended parameters: the structure itself, which is why the device would
+not keep a zero there.
+
+The observation was right and the model was wrong for two days, and it took a
+question about address spaces to produce the explanation. `patch_object_bytes`'
+read-back check is what refused each one rather than reporting a write the
+device had silently overridden.
+
+**Writing a tag has effects beyond its own byte.** The refused write at 108
+(`0x1b`) also cleared `0x20`'s three `Source` bytes, which the sweep then
+restored incidentally as it passed each one — visible in the run as `Source:
+OFF` trailing off across successive rows. **Do not probe tag bytes**; sweep
+bodies only, and take the segment map first.
+
+### ENVCTL, in full
+
+`0x20`, body 15 bytes. `VelTrk` exists only on the `Att` row, which matches the
+manual's "velocity tracking is hard-wired to the attack sections":
+
+    [2] Att Adjust   [3] Att KeyTrk   [4] Att VelTrk   [5] Att Source   [6] Att Depth
+    [7] Dec Adjust   [8] Dec KeyTrk                    [9] Dec Source  [10] Dec Depth
+   [11] Rel Adjust  [12] Rel KeyTrk                   [13] Rel Source  [14] Rel Depth
+
+Located by setting the field from the panel and dumping with the editor open,
+so nothing was saved. **`1.000x` is byte 0, and returning to it produced an
+empty diff against baseline** — "is neutral really neutral" answered by
+observation rather than inference.
+
+### The multiplier is the E24 series, and the ROM had it all along
+
+    ROM 0x1FC404, 256 entries, signed-byte index, thousandths, 0.018x .. 50.000x
+
+    -7: 0.500    0: 1.000   +5: 1.500   +8: 2.000   +15: 4.000   +23: 8.000
+
+    1.0 1.1 1.2 1.3 1.4 1.5 1.6 1.8 2.0 2.2 2.5 2.7 3.0 3.3 3.6 4.0 ...
+
+**E24 preferred numbers, 24 steps per decade.** A doubling is
+`24*log10(2) = 7.22` steps, which is exactly why +8 doubles and x4 lands on +15
+rather than +16 — an asymmetry recorded here as "not quite the obvious one"
+while a panel sweep was being set up to map it point by point.
+
+Jan asked whether this project had a firmware image, which it does and has used
+since §66. **Having the tool is not the same as reaching for it**: the ROM
+answered in one search what the sweep would have spent an hour approximating.
