@@ -840,3 +840,31 @@ was taken at 100 cents or more.
 
 Do not reuse the existing captures — the problem is in the material, not the
 analysis, so no amount of re-analysis will settle it.
+
+## A positional segment helper, so a value search cannot find a tag again
+
+**Status:** open, small, and it has already cost real data once.
+
+Program-object segments are addressed by walking to a known position, never by
+searching for a tag byte's value. A value search for `0x21` matched program
+303's Rel1 **level** byte — 33 % is 0x21 — invented a second layer there, and a
+write landed inside the ENV2 segment that follows (§75, §77, and the 2026-09-18
+repair). mpc2emu hit the identical error read-only on the same file format
+within the same hour, getting 67 hits in PCM data.
+
+**The rule was already written down twice and broken inside a day. A rule in a
+notes file protects the next reader; only an assertion in the code protects the
+next run.**
+
+**What it needs:** one helper, next to the field registry, that takes an object
+type and its size and returns the segment map — for a Program, AMPENV at
+`128 + 224*k` with the layer count from the size, ENV2 at `+16`, ENV3 at `+32`,
+CAL at `size-96`, HOB `0x50..0x53` at `size-64` stepping 16 — **and asserts the
+tag byte at every position it returns**. Every probe and script that currently
+walks an object by hand uses it instead.
+
+Two properties it must have, both from how the failure actually happened:
+* it asserts rather than returns, so a wrong layout stops the run instead of
+  producing a plausible offset;
+* the layer count comes from the object size, not from counting matches, since
+  counting matches is the bug.
