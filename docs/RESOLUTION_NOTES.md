@@ -7711,3 +7711,100 @@ next.
 
 > **Recorded as: reachable, ~5x, method understood, constant not derived.**
 > A better place to stop than a number.
+
+## 82. Dec1 is a time-to-target, and a settle criterion that read long (2026-09-19)
+
+§81 left the decay conversion with a method but no constant. The missing piece
+was whether `Dec1` is a **time** (reach the target in Dec1 seconds, whatever the
+span) or a **rate** (a fixed dB/s, so the time scales with the span). A scalar
+conversion is only safe if it is a time.
+
+### The subject had to be proven before it could be used
+
+Jan loaded CUTCAL to 600ff, giving `CalNoise` — the material class mpc2emu had
+measured the MPC on. Program 600 was **not** usable as-is:
+
+* its F1 is a 4-pole lowpass at **58 Hz** (it is `CUT 000`, the bottom of the
+  ladder), which removes essentially all of a noise source;
+* its AMPENV carries **loop byte 3** — §45's "sustained" came from a **looping
+  envelope**, which is exactly what a decay measurement must not have.
+
+So `620 NOISFLAT`: a copy with the filter opened to 25088 Hz, the loop Off, and
+a flat held envelope. **Then the material was checked rather than assumed**,
+because if the flatness had come from the loop, turning it off would leave a
+decaying subject — the contamination that produced §81's wrong 5.3x:
+
+    held note, loop OFF, 0.6-6.0 s:  mean -24.68 dBFS, drift 0.00 dB, sd 0.098
+
+### Fix the time, vary the target
+
+With `Dec1` fixed at 4000 ms and only its target LEVEL varied, the two readings
+do not overlap — and the spans come from §71's level curve, so they were
+predicted before the captures:
+
+    target    span      TIME predicts    RATE predicts
+     50 %   18.06 dB        4.0 s           0.72 s
+     25 %   28.10 dB        4.0 s           1.13 s
+      0 %   99.37 dB        4.0 s           4.0 s   <- not discriminating alone
+
+**Measured 4.38 s and 4.59 s. Time machine, decisively.**
+
+### The residual was the criterion, not the machine
+
+4.38 → 4.59 as the span grew looked like `t = Dec1 + 0.021·span`, which at full
+span predicts 6.09 s against 4.00 — a 50 % error at exactly the sustain-0 end
+where the conversion has to live. mpc2emu declared both numbers before the last
+capture.
+
+**The 0 % point is not the same experiment as the other two**: 50 % and 25 %
+land on a plateau, 0 % lands on *silence*, so a settle criterion fires when the
+fall reaches the noise floor rather than when the envelope arrives. That biases
+the reading **long** — toward confirming the residual. Flagged before the
+number, with the alternative of fitting the straight part instead.
+
+Refitted that way, window −5 to −50 dB with its lowest point still 23.4 dB
+above the floor:
+
+    target   span     slope dB/s    span/slope
+     50 %   18.18      4.504          4.036 s
+     25 %   27.96      7.015          3.986 s
+      0 %   99.37     25.167          3.948 s
+
+**3.95 to 4.04 s against a nominal 4000 ms, flat across a 5.5x range of span.**
+The drift was the criterion firing late as the envelope approached its plateau
+asymptotically — and it had been biting at **all three** points, not only at
+0 % as expected.
+
+> Run on the settle criterion alone, 0 % would have read near 6 s and
+> **confirmed the residual, with r² and a straight line behind it.**
+
+### Three independent checks that came free
+
+Multiplying each slope by the nominal 4.0 s recovers the span by a route
+sharing nothing with how these constants were originally measured — noise
+source, slope fit, different session, different analysis:
+
+    50 %   18.02 dB   against §71's  18.06   (0.2 %)
+    25 %   28.06 dB   against §71's  28.10   (0.14 %)
+     0 %  100.67 dB   against §71's  99.80   (0.9 %)  and mpc2emu's 99.37 (1.3 %)
+
+§71's AMPENV level curve is confirmed three times over, and the release span
+gets its **first independent check** — the constant a conversion was about to
+be written against.
+
+### Two things about how numbers go wrong
+
+**A table whose rows measure different quantities reads as a trend.** "Sustain
+0 → 0.52x wrong, sustain 0.63 → 0.99x correct" looked like a clean gated
+pattern and named the whole investigation. But at sustain 0.63 the envelope's
+span is ~4 dB, so a 30 dB fall is mostly the **sample** — one row measures the
+envelope and the other measures the material. Neither number is wrong. Putting
+them in one table made them a trend.
+
+**A stored figure is a snapshot of a chain that can change; one computed at the
+moment of use cannot go stale.** mpc2emu twice reported program 304 sitting at
+Dec1 13000 ms when a live DUMP said 3360 — traced to a **conversation
+compaction** carrying it forward as a fact, true when written. A summary is the
+most dangerous kind of cache because it reads as memory rather than as a cached
+value. §77's reading of §58 as corroboration is the same failure with a live
+instrument standing right there.
