@@ -6500,3 +6500,191 @@ recoverable, and the program is now byte-for-byte identical to it. Cleanup also
 has to leave the editor first: a SysEx restore is refused while editing
 (`DNAK ObjectCurrentlyBeingEdited`), so the `finally` block that skips that
 step reports success and changes nothing.
+
+## 71. The release span, and two ways a beautiful fit measures the wrong thing (2026-09-14)
+
+mpc2emu's `KRZ_RELEASE_SPAN_DB = 99.37` had never been measured — it came from
+comparing this machine's *displayed* release against another machine's
+displayed release, which is two conversions of an unmeasured span rather than
+one measurement of a real one. Every KRZ release they write divides by it.
+
+**Measured: 100.32 ± 0.09 dB**, or 101.5 dB if the ROM time table's
+milliseconds are 1.1 % long (see `k` below). Against 99.37 that is 1-2 % high,
+which is inaudible — **the value of the measurement is the model, not the
+number.**
+
+### The design, and why time-to-silence could not be used
+
+The proposed method was `span = slew × time-to-silence`. The rig cannot do the
+second half: interface floor −92.2 dBFS, note peak −37.4 dBFS, so **54.8 dB of
+usable range**. Raising the program's OUTPUT gain from +6 to +30 dB recovered
+the full 24 dB (peak −13.4 dBFS, **78.8 dB**) with the tail still sitting on
+the *interface* floor rather than the K2000's own noise — so the instrument is
+quieter than the converter and the limit is a physical input-gain knob. A floor
+ADDS to a tail, so a time-to-silence reads short and a span built on it reads
+small, with a known sign. Not reportable.
+
+**Measure the span as a SLOPE instead.** If it is a fixed property then
+`slew = span / T` for every release time T, so fit slew at several T and
+regress against 1/T: the span is the slope, the intercept is a free diagnostic
+for a fixed overhead, and **nothing ever needs to see the bottom.**
+
+    500 ms  201.216 dB/s   span 100.61      3000 ms   33.459 dB/s   span 100.38
+   1000 ms   99.669 dB/s   span  99.67      4000 ms   25.101 dB/s   span 100.40
+   2000 ms   50.099 dB/s   span 100.20      5000 ms   20.060 dB/s   span 100.30
+
+    slew = 100.550/T - 0.181     R^2 = 0.999974  (all six)
+    long four: span 100.320 +- 0.092 dB, intercept +0.066 dB/s
+
+**The intercept is zero, so there is no fixed overhead in the release** — a
+real contrast with §68's re-cycle, whose overhead is large and does not even
+transfer across envelope shapes.
+
+### Two bad fits, and they failed differently
+
+**An error in the x-axis is invisible to per-point fit quality.** Two rungs
+came out as outliers (83.6 and 87.8 dB) and they had **the smallest residuals
+of the six** — 0.38 and 0.33 dB. The cause was mine: bytes 128 and 153 were
+labelled 2500 and 3500 ms by interpolating the table's step instead of reading
+it, and the step changes from 20 ms to 40 ms per index at byte 103. The true
+times are 3000 and 4000, and with them those rungs join the others.
+mpc2emu's formulation is the keeper: **goodness of fit is evidence about the
+model given the axes, never about the axes.**
+
+**Selecting points by their LEVEL and then regressing level on time is
+regression attenuation.** The first linearity check split the fall into 5 dB
+bands and reported 19.43 dB/s at the top falling to 11.36 at the bottom, which
+reads exactly like a curve. It is not. Noise decides band membership, so the
+fitted slope is dragged toward zero, harder the narrower the band. Demonstrated
+on a synthetic fall of **exactly** 20.00 dB/s with 0.35 dB of ripple and no
+curvature whatsoever:
+
+    select on LEVEL  -5..-10 dB: 18.75      select on TIME 0.25-0.50 s: 20.54
+    select on LEVEL -25..-30 dB: 18.13      select on TIME 1.25-1.50 s: 19.01
+    select on LEVEL -45..-50 dB: 18.86      select on TIME 2.25-2.50 s: 20.06
+
+Re-done in the right coordinate — 0.4 s time slices — the same rung reads
+**20.26, 20.25, 20.30, 20.30, 20.32, 20.26, 20.07 dB/s from −7 dB to −55 dB,
+flat to 0.3 % over 48 dB**, then 18.7, 10.8, 1.8 as it meets the floor. So the
+release is straight in dB, and the earlier "bend" was the instrument, not the
+machine. The `-10..-50` ladder window was attenuated too, just mildly (20.04
+against 20.3), because 40 dB is a wide net.
+
+**The two failures are not the same.** A wrong x-axis leaves the fit pristine
+and moves the answer; a selection-biased window corrupts the axis being fitted
+*on*, so no amount of care about labels would have caught it.
+
+### k: is a ROM table's millisecond a real millisecond?
+
+Setting T from the table at `0x1FBA04` and confirming it against the panel
+proves nothing — **the panel may simply be reading the table out**, and a
+constant factor would leave every rung consistent and the span wrong by exactly
+that factor. Nothing inside the experiment can see it.
+
+**The attack breaks it, because an attack ENDS at full level, which is visible,
+where a release ends below the floor, which is not.** Fit the amplitude ramp
+between 20 % and 80 %, extrapolate to 0 and to the plateau, take the
+difference: **both ends carry any fixed latency equally, so it cancels** and no
+note-on timestamp is needed.
+
+    table 1000 ms -> ramp 1.0132 s        table 4000 ms -> ramp 4.0438 s
+    table 2000 ms -> ramp 2.0294 s        table 5000 ms -> ramp 5.0624 s
+    duration = 1.0113 x table + 0.0033 s    R^2 = 0.999996
+
+**k = 1.011** — the table's milliseconds are real to about 1 %. The ramp is
+linear in amplitude to 1.7 % of plateau, and that residual is also what could
+bias k, so it is worth 1 %, not four digits.
+
+A first attempt at k measured "90 % of plateau" against the table and got
+0.8662. That is an artefact of the criterion, not the machine: **the criterion
+fires at 90 % of the way up a ramp, so its slope is k × 0.9 and nothing inside
+it separates the two.**
+
+### Sustain 0 is not a mute here
+
+eosed found the E4XT's sustain 0 reading 22.6 dB below their own noise floor,
+which points at a mute rather than an envelope bottom. On the K2000, sustain 0
+with a 1 s decay falls smoothly from −17.5 dBFS to **−90.0 dBFS against a
+−92.0 floor**, with no discontinuity and no cutoff. At 2 dB of margin that
+cannot distinguish a true zero from something below the floor, and it should
+not be read as showing one. It does show there is no cliff — so "level 0 is a
+mute" is a property of that machine, not of envelope generators.
+
+### The AMPENV level percent, and a knee that is real
+
+Falling out of the decay work: an AMPENV level **percent is not an amplitude
+ratio**. Setting 25 % puts the sustain 28 dB below full, not the 12.04 dB a
+linear reading gives. mpc2emu's writer already converts through a fitted
+curve rather than a ratio, so the open question was only whether the **knee at
+the bottom of that curve** — ten dB per halving all the way down and then
+twenty-one for the last one — was the machine or the fit.
+
+**It is the machine.** Measured against a level-100 % capture, so the sample's
+own contour, the output gain, the interface gain and the velocity all divide
+out:
+
+    pct   measured   mpc2emu's law   per halving
+    50     18.06         18.07
+    25     28.10         28.03           10.04
+    12     38.13         37.96           10.04
+     6     48.17         47.99           10.03
+     3     68.80         69.01           20.64
+     0     73.14           --             (floor control, 4.3 dB margin)
+
+**Every point within 0.21 dB, including the knee.** Their curve was right and
+is now measured.
+
+Two instrument notes, because the first attempt at this measured nothing and
+said so:
+
+**3 %, 1 % and 0 % came back at −88.49, −88.40 and −88.59 dBFS** — within
+0.2 dB of each other. That is not a law flattening out, it is three readings
+of the noise floor, and **0 % is the control that names it**: a level of zero
+cannot be 47.8 dB down *and* be the same number as 3 %. Two causes, both
+mine — the OUTPUT gain had been restored to +6 dB along with the rest of the
+baseline, throwing away the 24 dB that made the earlier runs work, and the
+floor was not being subtracted.
+
+**Subtract the floor in POWER, not in dB.** It adds to the signal, so an
+uncorrected reading near it is high and the drop reads low. At the 3 % rung
+the correction is 0.87 dB on a 7.4 dB margin, which is the difference between
+20.6 and 19.8 dB for that last halving.
+
+The 2 % rung is not reportable: it reads 67.78 dB, *less* drop than 3 %, on an
+8 dB margin. Monotonicity failing is the signal that the point is noise.
+
+### Two free known-answer tests, and one rule about preconditions
+
+Both of tonight's saves came from the same cheap move, and neither was planned
+as a check.
+
+**The intercept recovered a quantity that was never supplied.** The decay
+corner fit returned `corner = 0.9948 x table + 0.3115 s`, and the capture takes
+a **300 ms pre-roll** before sending note-on. The fit handed back 311.5 ms:
+0.300 that was known and 11.5 ms of real MIDI-plus-audio latency that was not.
+Nothing in the model was told about the pre-roll — it tests the whole chain,
+clock included, not just the fit.
+
+**The 0 % rung named a floor that looked like a law.** Three readings within
+0.2 dB of each other are indistinguishable from a curve flattening out, and
+nothing *inside* the sweep can separate them. A rung whose answer is known a
+priori can: a level of zero cannot be 47.8 dB down and also be the same number
+as 3 %.
+
+**So: put a quantity into the experiment whose value you already know and let
+the fit or the sweep hand it back.** It costs one rung or one extra term, it
+needs no extra hardware, and it catches the class of error that care does not —
+the same family as §68's control programs and §70's "search the ROM for numbers
+you already measured".
+
+**And one rule, from the cause rather than the catch.** A restore-to-baseline
+that was entirely *correct* left the next measurement silently running 24 dB
+quieter, because that measurement depended on a non-baseline setting (the
+raised OUTPUT gain) and **inherited** it rather than re-establishing it. The
+good behaviour is what set the trap, and it springs on the run *after*.
+
+> **A measurement must assert its own preconditions, not assume the previous
+> run's state survived.**
+
+Cheap to obey: every script that needs a non-default setting writes it at the
+top, next to the baseline it will restore at the bottom.
