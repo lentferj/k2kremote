@@ -7552,3 +7552,72 @@ a wrong one.
 so the comparison is clean on both sides" — it is not one; above 5000 ms the
 step is 100 ms. The comparison survived only because 8300 is what the program
 already held. Said while pressing mpc2emu about exactly that habit.
+
+## 80. Rig hygiene: a leaked JACK client takes the machine down (2026-09-18)
+
+s3ked wedged this machine's jackd twice in one evening and it took the rig down
+for every session. The cause is worth carrying because `~/temp/k2k_fw/envrig.py`
+had the identical defect and had survived a month of use.
+
+**A constructor that raises after `activate()` leaks the client.** The rig did
+
+    self.client.activate()                       # registered and running
+    for src, dst in zip(CAPTURE, self.ins):
+        self.client.connect(src, dst)            # can raise
+
+with nothing between them. Its two *checked* failures called `close()` first,
+so it read as defended — but a `connect()` that **raises** walks out with the
+client registered and activated, the half-built object discarded, and **no
+reference left to close it.** To jackd, a client whose owner has died and one
+that is merely busy are the same thing: it keeps writing to the socket,
+`jack_lsp` times out for everyone, and **killing the owning process does not
+clear it.**
+
+Verified rather than assumed, by pointing `CAPTURE` at a port that does not
+exist:
+
+    constructor failed as intended: JackErrorCode: Error connecting ...
+    ports still registered by the failed client: none -- no leak
+
+### Catch `BaseException`, and the reason the wrong version survives
+
+The error that path actually raises is `JackErrorCode`, which **is** an
+`Exception`. So `except Exception` handles every failure anyone meets while
+testing, and fails only on `KeyboardInterrupt` or `SystemExit` — a harness
+timeout, a Ctrl-C, a hung probe — **which is exactly how this failure arrives.**
+
+> **A guard that is correct against every observed failure and wrong against
+> the unobserved one is indistinguishable from a correct guard** — until the
+> day it isn't.
+
+Teardown also needs `getattr` guards, because it now runs from the
+constructor's own failure path where `self.out` does not exist yet: an
+`AttributeError` there would abandon the client *and* mask the original error.
+
+### Two more of the same family
+
+**An unbounded queue.** `capture()` set the enqueue flag with no `try/finally`,
+so a timeout mid-capture left the RT callback appending until memory ran out.
+Now `finally`-guarded, and it sends **all-notes-off on every exit path
+including the failing one** — a note left sounding reads as a noise floor on
+the *next* run, which cost a whole measurement on 2026-09-04.
+
+**No xrun detection**, and this one reaches work already reported. A dropout
+silently **shortens** a capture, and §71's release span, §73's envelope-time
+law and §76's velocity law are all timings that assume contiguous frames. None
+is withdrawn — four repeats at identical settings gave sd 0.005 s — but the
+distinction matters:
+
+> **"the repeats agreed" is weaker evidence than "no xruns occurred".**
+
+Repeats agreeing rules out *random* dropouts. It says nothing about a dropout
+that recurs at the same point in every capture, which would be perfectly
+repeatable and perfectly wrong. There is now a counter and a per-capture
+warning.
+
+### Protocol
+
+**Say `RIG IS MINE` before touching audio or MIDI, `RIG IS FREE` when done,
+including on failure.** Adopted after s3ked's three collisions in one day —
+this session had been running long unattended captures all week and announcing
+nothing, which is the same exposure that simply had not collided yet.
