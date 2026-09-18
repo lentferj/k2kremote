@@ -7367,3 +7367,74 @@ carrying the literal prediction *"Adjust +50% moved the image 0.01 dB while
 centred — even the STATIC offset is inaudible unspread"* — the control, its
 result and the diagnosis, in a file they had edited twice that night. **Two
 sessions, two copies of the answer, neither opened.**
+
+## 78. Two contaminated spans, and a 1.43x that is not a machine constant (2026-09-18)
+
+Jan heard `Sangre`'s release as too short on the K2000 against the MPC source
+and the two other conversions. Measured on one metric — **seconds from note-off
+to a 30 dB fall**, because per-capture curve fits over different windows are
+not comparable:
+
+    MPC One (source)     0.420 s
+    AKAI S3000XL         0.420 s     <- matches the source exactly
+    K2000 Rel1 0.840     0.225 s     <- 1.87x fast
+    K2000 Rel1 1.420     0.295 s
+    K2000 Rel1 2.000     0.410 s     <- 2.03 s would be exact
+
+So the K2000 needs **1.43x** the Rel1 the arithmetic asks for
+(`99.37 / rate` = 1.420 s). The question is whether that factor is a property
+of the machine or of this program.
+
+### It is not Dec1
+
+Set Dec1 from 3.36 s to 10 s, which moves the decay state at note-off a long
+way — the note-off level rose 6.3 dB, so the write demonstrably took — and the
+30 dB time moved **3.7 %**, 0.410 to 0.425 s. A prediction written down before
+the capture said a real contributor should move it *"large and obvious, not a
+few percent"*. It did not. It also is not zero, which is the awkward outcome:
+**Dec1 contributes a little and explains nothing.**
+
+### And the machine is not the problem either — §71's intercept says so
+
+The suspicion was that `KRZ_RELEASE_SPAN_DB` had been measured on a
+purpose-built subject with no decay of its own, and so under-predicts on real
+material. The subject was purpose-built. But §71 regressed slew against 1/T
+over six release times and **the intercept came out at +0.066 dB/s** against
+slews of 20 to 200 — and a sample contributing its own decay would add a
+near-constant dB/s to every rung and appear exactly there. It did not. **On
+that subject the 99.80 dB is the envelope's span, not an artefact.**
+
+### Two contaminated numbers on opposite sides
+
+Which leaves the material — and mpc2emu's own `MPC_RELEASE_SPAN_DB = 38.3`
+**was measured on Sangre.** So the samples' decay is inside that 38.3, and
+inside the K2000's apparent requirement too, in the other direction.
+
+> **Two contaminated constants on opposite sides is how you get a factor that
+> looks like a machine property and is not one.**
+
+Fitting a shared sample-decay term reconciles them at around 23 dB/s and
+predicts 2.14 s against the 2.03 measured — which mpc2emu declined to claim,
+correctly: a free parameter fitted to the same three points it then predicts.
+
+The clean fix is to re-measure the MPC's span the way §71 measured the K2000's
+— decay-free subject, several release settings, regress and check the
+intercept — making it the envelope's span rather than one program's. That needs
+MPC bench time and is Jan's call.
+
+### Two things worth keeping
+
+**The K2000's envelope times are a quantised table, not a continuum**
+(ROM 0x1FBA04, exported to `~/temp/k2k_tables/envelope_times_ms.json`). Any
+prediction that divides by a *requested* time carries the quantisation error;
+`1.420 s` happening to be an exact entry was luck. Steps run 2, 3, 5, 10, 20,
+40, 100, 500, 1000, 5000 ms — **and the first four change within the first five
+indices, so a table reconstructed from the step rule is right in the middle and
+wrong at both ends.** A rule that describes most of a table is not the table.
+
+**And a theoretical conversion that is more principled than an empirical one is
+still worse if the empirical one was fitted to the real thing.** mpc2emu backed
+out a change that would have moved the AKAI's `RELSE1` from 55 to 59 on
+theoretical grounds — 55 being the value Jan had confirmed by ear that
+afternoon. Same shape as §77's retraction: the better-sounding reasoning
+winning over evidence already in hand.
