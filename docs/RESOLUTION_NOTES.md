@@ -6688,3 +6688,67 @@ good behaviour is what set the trap, and it springs on the run *after*.
 
 Cheap to obey: every script that needs a non-default setting writes it at the
 top, next to the baseline it will restore at the bottom.
+
+## 72. The PITCH page's byte map, and why position-matching could not find it (2026-09-14)
+
+mpc2emu needed the `CAL` segment's PITCH-page fields to carry modwheel-gated
+vibrato across conversion paths. They had tried the corpus: 42,932 CAL
+segments, three positions holding valid control-source codes, and a
+co-occurrence test that **refuted** the obvious reading — `CAL[23] = MWheel`
+appeared on 57.1 % of layers where `CAL[21]` was `OFF` and only 17.4 % where it
+was set, backwards for a field gating `CAL[21]`'s depth.
+
+Asked the machine instead. `CAL[k]` is Program offset **177+k**. Write one
+distinctive byte at a time over SysEx (which the editor refuses, so it happens
+outside it), read the whole PITCH page, diff against an all-zero baseline. Only
+one byte moves per read, so a changed cell **names** the field rather than
+suggesting it.
+
+    offset  CAL    field          offset  CAL    field
+     192     15    Coarse (-)      199     22    Depth
+     194     17    Coarse (+)      200     23    DptCtl
+     195     18    Fine            201     24    MinDpt
+     196     19    KeyTrk          202     25    MaxDpt
+     197     20    VelTrk          203     26    Src2
+     198     21    Src1            207     30    FineHz
+
+`CAL[0..14]`, `[16]`, `[27]`, `[28]`, `[29]` drive nothing on this page.
+
+### The byte order is not the page order, and that is the whole answer
+
+The screen reads `Src1, Depth, Src2, DptCtl, MinDpt, MaxDpt`. **Memory reads
+`Src1, Depth, DptCtl, MinDpt, MaxDpt, Src2`** — `Src2` is third on screen and
+*last* in the segment. Both corpus anomalies fall straight out:
+
+* `CAL[23]` really is `DptCtl`, so their guess was right. It gates the **Src2**
+  wire's depth range, not `Src1`'s depth — which is why it correlates with
+  `CAL[26]` and looked backwards against `CAL[21]`.
+* `CAL[27]` is zero wherever `CAL[26]` is a source because **`Src2` is not
+  followed by its depth**: its depth is the `MinDpt`/`MaxDpt` pair that comes
+  *before* it.
+
+Neither is a quirk of the data. Position-based inference assumed the layout
+mirrors the display, and on this page it does not.
+
+### Coarse is the difference of two bytes
+
+Two offsets moved `Coarse`, with opposite signs at the same probe value, so
+it was worth three more writes rather than a guess:
+
+    192=45 194= 0 -> -45ST      192= 0 194=45 -> 45ST
+    192=12 194= 0 -> -12ST      192= 0 194=12 -> 12ST
+    192=45 194=45 ->   0ST      192=211 194=0 -> 45ST
+
+**`Coarse = (byte194 - byte192)` as an 8-bit subtraction read signed.** A
+parser that reads only one of them gets the transposition wrong whenever the
+other is non-zero — worth a corpus count on how often `CAL[15]` is set.
+
+### Two more facts from the same pass
+
+**Offset 208 is defended by the device.** Writing 0 to it reads back `0x50`; it
+sits between the CAL segment and the F1 block-type byte at 209 and is not
+`CAL`'s to write. `patch_object_bytes`'s read-back check is what caught it,
+refusing rather than reporting a write that had been silently overridden.
+
+**Two control-source codes, from the same screens:** `1 = MWheel` (the baseline
+value of `DptCtl` in this bank) and `45 = Bal Ctl` (the probe value).
