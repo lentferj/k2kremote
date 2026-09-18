@@ -6368,3 +6368,135 @@ they belong, and a name is not evidence.
 for a PANNER block. **One offset, two meanings, selected by a different byte** —
 and `KNOWN_FIELDS` is a dict keyed by offset, so it can hold one. F1 is
 registered; F2/F3/F4 are recorded here and tracked in TODO.md.
+
+## 70. The display tables, read out of the ROM — and what they corrected (2026-09-14)
+
+§66 used the firmware to settle the DSP function codes. The same image answers
+a whole class of open questions, because **the numbers the K2000 shows are
+lookup tables, not formulas**, and the tables are in there.
+
+The method is the one that keeps this honest: never search the ROM for
+"the LFO table". Search it for **numbers this project has already measured off
+the panel**, and let the match say where the table is. Then read the table out
+and check it back against the instrument.
+
+### The filter cutoff — §69's clamps were the table's own length
+
+Searching for `440, 466, 494, 523` — four consecutive semitones from A4 — hits
+once, at ROM **0x1FC276**. Walking outward, the table runs **0x1FC204 to
+0x1FC303, exactly 128 entries**, and every one equals the CUTCAL law rounded
+**half-up**:
+
+    index = signed byte + 48,  byte -48 .. 79  ->  16 .. 25088 Hz
+
+**So the clamps §69 pinned by typing out-of-range values are the table's first
+and last rows.** Two independent routes, same two numbers. And the rounding is
+half-up, not Python's half-even — 1046.5 Hz shows as `1047`, which §69 had
+already had to special-case by hand.
+
+### The LFO rate — §61's ceiling was the WHEEL's, not the field's
+
+The rate ladder is at **0x1FB404**, and every one of §61's 185 panel rows
+matches. The five "segments" are the table's own step changes, at exactly the
+bytes the sweep found: steps of 1, 5, 10, 20 and 50 hundredths beginning at
+bytes 0, 20, 36, 126 and 176.
+
+**But the table is 256 entries, not 185.** §61 says "byte 184 is the ceiling —
+the wheel will not move past it. The reachable range is 0-184, not 0-255."
+Written by SysEx, which the wheel cannot do:
+
+    byte 176 -> 20.00 Hz        byte 185 -> 24.50 Hz
+    byte 184 -> 24.00 Hz        byte 186 -> 25.00 Hz
+    wheel +1 from 184 -> 24.00  byte 200, 255 -> 25.00 Hz
+
+The wheel stop is real and §61 reported it correctly. **The field is not
+limited by it**: a file can carry 24.50 and 25.00 Hz, and the device displays
+and uses them. Bytes 186-255 all saturate at 25.00, so the meaningful range for
+a writer is 0-186.
+
+### The two depth fields are BIPOLAR, and were half-decoded
+
+§30 had `ENV2->FilFreq` depth as `(byte-28)*100` over bytes 34-124 plus byte
+127, with everything else returning "unmapped" because the dense low region
+existed only in a chat transcript. The ROM has the whole thing at **0x1F9604**:
+256 entries, **symmetric about zero, ±10800 cents**, indexed by a **signed**
+byte. `LFO1->Pitch` depth is the same shape at **0x1FA204**, ±7200 cents.
+
+Fourteen bytes checked back against the panel, all exact:
+
+    ENV2->FilFreq (215)              LFO1->Pitch (199)
+      10 ->    20ct                    20 ->    20ct
+     246 ->   -20ct                   236 ->   -20ct
+      58 ->  3000ct                   100 ->  3300ct
+     198 -> -3000ct                   156 -> -3300ct
+     127 -> 10800ct                   133 -> -7200ct
+     128 -> -10800ct                    0 ->     0ct
+     129 -> -10800ct
+       0 ->     0ct
+
+**The old decoder called the entire negative half "unmapped for this byte".**
+Not wrong — it refused rather than guessed, which is what it was built to do —
+but blind to half of every one of these fields. Both now decode all 256 bytes
+from `k2kremote/k2kromtables.py`.
+
+### What this is and is not
+
+The tables are in the repository as numbers, with their ROM addresses recorded
+so anyone can go back to the bytes. **The firmware is Young Chang / Kurzweil's
+and is not redistributed**; what is committed is the same fact a panel sweep
+produces one row at a time, obtained in one pass instead of 256.
+
+Also found, not yet identified: a 40-entry pointer array at **0x10897E** into a
+family of 256-entry tables at 0x1F9604 + k*0x200 — among them ±6000, ±2400,
+±500, ±332, 10..32000 and a 0..25000 that has 20 at index 10 and 300 at index
+55, which are exactly the AMPENV times of §68's subject. Mapping parameters to
+tables needs the parameter descriptors, which have not been found.
+
+### The pattern worth keeping
+
+Every one of these was a **partial** answer that looked complete enough to stop
+at: a law with a proven sub-range, a ladder with a ceiling, a formula with the
+awkward end hedged. None of them was wrong. Each was the part of the table the
+panel could reach — and in the LFO's case, what the panel could reach was set
+by a wheel stop that has nothing to do with what the field can hold.
+
+### What the sign was worth downstream
+
+mpc2emu counted their corpus against this the same evening:
+
+    LFO1 -> Pitch routings in 669 files:   1,941
+    carrying a NEGATIVE byte (>= 128):       415   = 21.4%, across 87 files
+
+**And the failure was not "a large positive" as predicted here — it was the
+maximum.** Every negative byte fell past their `min(b, 123)` clamp, returned
+the table's 7200-cent ceiling, and was then taken as full one-sided depth. **A
+gentle -10 cent vibrato converted to six octaves of it**, on a fifth of every
+LFO-to-pitch routing they carry. Fixed in their `7bfe7da`; zero voices now read
+full depth and the median came out at 0.0044.
+
+Two things worth keeping from how that landed.
+
+**The magnitude table is what made a sign fix safe.** Raw 156 is signed -100
+and their table's entry 100 is 3300, against the -3300 ct measured here — so
+the sign could be corrected knowing the magnitudes underneath it were right.
+**A sign fix applied to a wrong magnitude table looks identical from the
+outside**: small negatives stay small, the mirror is symmetric, the ceiling is
+respected, and every number is still wrong.
+
+**The neighbouring field was already right.** Their `ENV2->FilFreq` is
+sign-extended at both call sites, with a comment recording why — an envelope
+that sweeps the corner *down* read as one that sweeps it up is a different
+patch. So the general warning sent over ("if your parser reads these unsigned")
+was half wrong: someone had already got that one right, and the field beside it
+never got the same treatment. **The gap was not knowledge, it was reach.**
+
+### One more restore failure, and the fix
+
+A run was killed by its own timeout with a scratch byte still written and the
+editor still open. The next run read *that* byte as "the original" and
+faithfully restored it. **A pre-test dump is the only trustworthy baseline** —
+`cutdiff.json` from §69 had all 272 bytes of program 204, so the true value was
+recoverable, and the program is now byte-for-byte identical to it. Cleanup also
+has to leave the editor first: a SysEx restore is refused while editing
+(`DNAK ObjectCurrentlyBeingEdited`), so the `finally` block that skips that
+step reports success and changes nothing.

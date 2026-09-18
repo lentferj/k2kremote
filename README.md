@@ -859,6 +859,7 @@ GPL, and the MIT terms continue to apply to the files in `k2000/`.
 | `text_entry.py` / `name_cursor.py` | Naming model from the Kurzweil K2vx manual; button codes from the vendored `k2000.definitions.Button` (MIT) | GPL-2.0-or-later | Original code |
 | `macfile.py` | Macro semantics from the Kurzweil K2vx manual ch. 13; `PRAM` container framing from mpc2emu's `docs/KRZ_FORMAT.md` §2; verified against a real `BOOT.MAC` (see [`docs/MAC_FORMAT.md`](docs/MAC_FORMAT.md)) | GPL-2.0-or-later | Original code |
 | `k2image.py` / `cli.py` | Original work — FAT16 read direction for K2000 volumes, and the macro command-line tool | GPL-2.0-or-later | Original code |
+| `k2kromtables.py` | The numbers the K2000 displays, read out of the display tables in its v3.87J OS ROM and spot-checked back against the panel. **The firmware itself is Young Chang / Kurzweil's and is not redistributed here** — only these measured values, which a panel sweep produces one row at a time | GPL-2.0-or-later | Original code |
 | `mpc2emu_link.py` | Optional bridge to the author's sibling [mpc2emu](https://github.com/lentferj/mpc2emu) project (`parsers/krz_parser.py`, `writers/fat16.py`) | GPL-2.0-or-later | Original code |
 
 ---

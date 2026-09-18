@@ -41,6 +41,8 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple
 
 from k2000.definitions import ObjectType
+from k2kremote.k2kromtables import (ENV2_FILFREQ_CT, FILTER_COARSE_HZ,
+                                     LFO_PITCH_CT, LFO_RATE_CHZ)
 
 
 @dataclass(frozen=True)
@@ -64,35 +66,42 @@ class Field:
 
 
 def _env2_filfreq_depth_ct(raw: bytes) -> Optional[int]:
-    """`hob_f1[6]`, Program RAM offset 215. `ct = (byte-28)*100` holds
-    exactly for byte 34-124 (RESOLUTION_NOTES §30); byte 127 = 10800ct
-    (9.000 octaves) confirmed by single-clicking there directly. Bytes
-    0-33 and 125-126 are known to exist and be monotonic but their exact
-    values were only ever recorded in a chat transcript, not committed
-    here -- return None rather than interpolate a number nobody verified."""
-    b = raw[0]
-    if b == 127:
-        return 10800
-    if 34 <= b <= 124:
-        return (b - 28) * 100
-    return None
+    """`hob_f1[6]`, Program RAM offset 215 -- cents, **signed**, +-10800.
+
+    Was a formula over part of the range (`(byte-28)*100` for byte 34-124,
+    plus byte 127) with everything else returning `None`, because the dense
+    region and the negative half had only ever been written down in a chat
+    transcript. §70 read the whole table out of the OS ROM instead
+    (0x1F9604, 256 entries, symmetric) and checked eight bytes of it back
+    against the panel, negatives included:
+
+        byte  10 ->    20ct     byte 246 (-10) ->   -20ct
+        byte  58 ->  3000ct     byte 198 (-58) -> -3000ct
+        byte 127 -> 10800ct     byte 128 (-128) -> -10800ct
+
+    Every byte now decodes. **The field is bipolar** -- the old decoder
+    called the whole negative half unmapped."""
+    return ENV2_FILFREQ_CT[raw[0]]
 
 
 def _lfo1_pitch_depth_ct(raw: bytes) -> Optional[int]:
-    """`cal[22]`, Program RAM offset 199. `ct = byte` holds exactly for
-    byte 0-20 (RESOLUTION_NOTES §30, "1:1 up to byte 20"); byte 79 = 1200ct
-    and byte 123 = 7200ct (6.000 octaves, the ceiling) are individually
-    confirmed spot values. Bytes 21-78 and 80-122 are known to be
-    monotonic but not by an exact recorded formula -- None, same reasoning
-    as the filter depth field above."""
-    b = raw[0]
-    if b == 79:
-        return 1200
-    if b == 123:
-        return 7200
-    if 0 <= b <= 20:
-        return b
-    return None
+    """`cal[22]`, Program RAM offset 199 -- cents, **signed**, +-7200.
+
+    Same story as the filter depth above: §30 had 1:1 up to byte 20 and two
+    spot values, §70 has the ROM's own table (0x1FA204) with the panel
+    agreeing at byte 20, -20, 100, -100 and -123 (RESOLUTION_NOTES §70)."""
+    return LFO_PITCH_CT[raw[0]]
+
+
+def _lfo1_mnrate_hz(raw: bytes) -> Optional[str]:
+    """`LFO1 MnRate`, Program RAM offset 91 -- Hz, to two decimals.
+
+    The ROM table (0x1FB404) is **256 entries, not the 185 rows §61's panel
+    sweep could reach**: byte 184 is where the WHEEL stops (24.00 Hz), and
+    bytes 185 and 186 give 24.50 and 25.00, with 186-255 all 25.00.
+    Confirmed on hardware by writing the byte over SysEx, which the wheel
+    cannot do -- so a FILE can carry a rate the front panel cannot dial."""
+    return f"{LFO_RATE_CHZ[raw[0]] / 100:.2f}"
 
 
 def _amp_veltrk_db(raw: bytes) -> Optional[int]:
@@ -178,7 +187,7 @@ def _f1_coarse_hz(raw: bytes) -> Optional[int]:
     b = raw[0] - 256 if raw[0] > 127 else raw[0]
     if not -48 <= b <= 79:
         return None
-    return int(filter_cutoff_byte_to_hz(raw[0]) + 0.5)
+    return FILTER_COARSE_HZ[b + 48]
 
 
 #: Only offsets independently confirmed by DUMP-diffing two panel-driven
@@ -186,18 +195,27 @@ def _f1_coarse_hz(raw: bytes) -> Optional[int]:
 KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
     (ObjectType.Program, 215): Field(
         name="ENV2->FilFreq Depth", size=1, unit="cents",
-        notes="RESOLUTION_NOTES §30; exact for byte 34-124 and byte 127",
+        notes="RESOLUTION_NOTES §30/§70; ROM table 0x1F9604, signed, "
+              "all 256 bytes, +-10800 cents",
         decode=_env2_filfreq_depth_ct,
     ),
     (ObjectType.Program, 199): Field(
         name="LFO1->Pitch Depth", size=1, unit="cents",
-        notes="RESOLUTION_NOTES §30; exact for byte 0-20, 79, 123",
+        notes="RESOLUTION_NOTES §30/§70; ROM table 0x1FA204, signed, "
+              "all 256 bytes, +-7200 cents",
         decode=_lfo1_pitch_depth_ct,
     ),
     (ObjectType.Program, 261): Field(
         name="F4 AMP VelTrk", size=1, unit="dB",
         notes="RESOLUTION_NOTES §47/§62; signed, 1 dB per unit, +-96 dB",
         decode=_amp_veltrk_db,
+    ),
+    (ObjectType.Program, 91): Field(
+        name="LFO1 MnRate", size=1, unit="Hz",
+        notes="RESOLUTION_NOTES §61/§70; ROM table 0x1FB404, all 256 bytes, "
+              "0.00-25.00 Hz. The wheel stops at byte 184 (24.00); SysEx "
+              "and files reach 185 (24.50) and 186+ (25.00).",
+        decode=_lfo1_mnrate_hz,
     ),
     (ObjectType.Program, 210): Field(
         name="F1 Coarse", size=1, unit="Hz",

@@ -54,10 +54,12 @@ class FakeK2000Bridge:
         # too, so a fake without it fails the read rather than the assert.
         self._data = {906: {215: b"\x28", 199: bytes([79]), 261: bytes([36]),
                             242: bytes([37]),
-                            209: bytes([50]), 210: bytes([24])},
+                            209: bytes([50]), 210: bytes([24]),
+                            91: bytes([46])},
                       907: {215: b"\x05", 199: bytes([50]), 261: bytes([0]),
                             242: bytes([256 - 32]),
-                            209: bytes([50]), 210: bytes([100])}}
+                            209: bytes([50]), 210: bytes([100]),
+                            91: bytes([186])}}
         # every canned program must answer every known offset: if only 906
         # is checked, adding a field leaves 907 raising KeyError, which
         # device_op swallows into a "read failed" status and the test then
@@ -153,9 +155,10 @@ async def test_patch_writes_through_patch_object_bytes():
         assert await _wait_for(pilot, lambda: len(bridge.patches) == 1)
         obj_type, idno, offset, data = bridge.patches[0]
         # rows are sorted by offset ascending (_fields_loaded); cursor_row 0
-        # is offset 199 (LFO1->Pitch Depth), not 215.
+        # is the LOWEST registered Program offset, which is 91 (LFO1 MnRate)
+        # since §70 added it -- it was 199 before.
         assert (obj_type, idno, offset, data) == (ObjectType.Program, 906,
-                                                   199, bytes.fromhex("50"))
+                                                   91, bytes.fromhex("50"))
         assert await _wait_for(pilot, lambda: len(app.screen_stack) == 1)
 
 

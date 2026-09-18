@@ -23,11 +23,20 @@ def test_describe_field_env2_filfreq_depth_ceiling():
     assert out == "7f (ENV2->FilFreq Depth: 10800 cents)"
 
 
-def test_describe_field_env2_filfreq_depth_unmapped_below_the_formula_range():
-    # byte < 34 is known to exist and be monotonic, but the exact value was
-    # only ever recorded in a chat transcript -- must not fabricate one.
+def test_env2_filfreq_depth_decodes_the_dense_region_the_formula_missed():
+    # This byte used to report "unmapped": below 34 the values were known to
+    # exist but had only ever been written down in a chat transcript. §70 has
+    # the ROM's own table, so every byte decodes now.
     out = k2kfields.describe_field(ObjectType.Program, 215, b"\x05")
-    assert out == "05 (ENV2->FilFreq Depth: unmapped for this byte)"
+    assert out == "05 (ENV2->FilFreq Depth: 10 cents)"
+
+
+def test_env2_filfreq_depth_is_bipolar():
+    # The whole negative half was invisible to the old decoder. Panel-checked
+    # at these bytes on 2026-09-14 (§70).
+    for byte, ct in ((246, -20), (198, -3000), (128, -10800), (129, -10800)):
+        out = k2kfields.describe_field(ObjectType.Program, 215, bytes([byte]))
+        assert out == f"{byte:02x} (ENV2->FilFreq Depth: {ct} cents)"
 
 
 def test_describe_field_decodes_lfo1_pitch_depth_in_the_exact_range():
@@ -42,9 +51,26 @@ def test_describe_field_lfo1_pitch_depth_spot_values():
         == "7b (LFO1->Pitch Depth: 7200 cents)"
 
 
-def test_describe_field_lfo1_pitch_depth_unmapped_between_spot_values():
+def test_lfo1_pitch_depth_decodes_between_the_old_spot_values():
     out = k2kfields.describe_field(ObjectType.Program, 199, bytes([50]))
-    assert out == "32 (LFO1->Pitch Depth: unmapped for this byte)"
+    assert out == "32 (LFO1->Pitch Depth: 150 cents)"
+
+
+def test_lfo1_pitch_depth_is_bipolar():
+    # Panel-checked 2026-09-14 (§70): byte 236 = -20, 156 = -3300, 133 = -7200.
+    for byte, ct in ((236, -20), (156, -3300), (133, -7200)):
+        out = k2kfields.describe_field(ObjectType.Program, 199, bytes([byte]))
+        assert out == f"{byte:02x} (LFO1->Pitch Depth: {ct} cents)"
+
+
+def test_lfo1_mnrate_reaches_past_the_wheel_stop():
+    # §61 read the ceiling off the panel as byte 184 = 24.00 Hz because the
+    # wheel will not move past it. The ROM table has 256 entries and SysEx
+    # writes reach them; confirmed on hardware 2026-09-14 (§70).
+    for byte, hz in ((46, "2.00"), (184, "24.00"), (185, "24.50"),
+                     (186, "25.00"), (255, "25.00")):
+        out = k2kfields.describe_field(ObjectType.Program, 91, bytes([byte]))
+        assert out == f"{byte:02x} (LFO1 MnRate: {hz} Hz)"
 
 
 def test_describe_field_only_applies_to_the_right_object_type():
