@@ -7808,3 +7808,78 @@ compaction** carrying it forward as a fact, true when written. A summary is the
 most dangerous kind of cache because it reads as memory rather than as a cached
 value. §77's reading of §58 as corroboration is the same failure with a live
 instrument standing right there.
+
+## 83. The sample's contour, and a qualification of §81 (2026-09-19)
+
+§82 measured the envelope law cleanly on `CalNoise`, which has no decay of its
+own. Applying it to a real program needed the **sample's** contribution, and
+every estimate of that had been drifting: §81 saw an implied sample rate climb
+**7.46 → 13.78 dB/s** across a Dec1 sweep on program 304, and tonight's pair
+gave **10.6 → 13.3** on the same program. Two sweeps, same direction — recorded
+in §81 as a property of the material.
+
+**Measure it instead of solving for it.** At `Dec1 = 60000 ms` the envelope
+contributes **1.656 dB/s**, so ~88 % of the fall is the sample. Subtracting the
+envelope leaves the contour directly:
+
+    -5..-10 dB   12.84 dB/s      -20..-25   16.86
+    -10..-15     10.39           -30..-35   19.18
+    -15..-20     10.69           -40..-45   24.66
+
+### It accelerates — so §81's drift is at least partly an artefact
+
+A fit window fixed in **dB** spans more *seconds* when the envelope is slower,
+so it reaches further into a steepening tail and **the apparent sample rate
+rises for that reason alone.**
+
+> **§81's 7.46 → 13.78 and tonight's 10.6 → 13.3 are not two independent
+> sightings of a material property.** They are at least partly one fixed-dB
+> window moving through a curve.
+
+§81 is qualified accordingly. The finding there — that the implied rate was not
+constant — stands; the reading that it was the material rather than the
+instrument does not.
+
+**And a sign argument made here was unsound.** It was argued that a longer
+window reaching into a decaying tail should make the apparent sample rate
+**fall**, and therefore that the chord-across-a-bend explanation was ruled out.
+That assumes the sample **decelerates**. It accelerates — as the MPC's own amp
+envelope does, 11.9 → 15.9 → 29.9 dB/s — so the chord produces the same sign as
+the drift. The observation was consistent with both explanations and
+discriminated between neither. (mpc2emu's correction, and they flagged it
+*before* the capture that settled it.)
+
+### With the contour measured, the additive model closes
+
+    Dec1      predicted   measured    error    implied span
+     3.36 s     0.639 s     0.755 s   -15.4 %     78.8 dB
+    10.00       1.251       1.255      -0.3 %     98.7
+    12.00       1.341       1.355      -1.1 %     96.1
+    60.00       1.665       1.665       0.0 %     99.5   <- contour came from here
+
+**10 s and 12 s were predicted from a contour measured at 60 s and never fitted
+to them — to 0.3 % and 1.1 %, recovering the 99.37 dB span to within 1 %.** The
+strongest agreement anything produced that night, and the first end-to-end check
+of the envelope span on real material rather than on noise.
+
+It fails at 3.36 s, wanting a 79 dB span. The likely cause is the contour's own
+first band, which reads a ragged 43 dB/s: at Dec1 3.36 the −30 dB point lands at
+0.755 s, early, where that band dominates, and overstating the sample's early
+fall predicts too fast — the right sign and roughly the right size. §82's 620
+result argues the same way: at Dec1 4000, also short, the span came out
+100.67 dB on material with **no** sample decay, so a short Dec1 is not itself
+the problem.
+
+### The constant was not written, and the reason is the reason
+
+As points accumulated the implied factor read **2.99 → 3.49 → 3.76 → 3.97**.
+
+> **That spread is not noise; it is the estimate still moving.**
+
+All four came from one program and one sample. The release factor was
+calibrated on one program, shipped, and was 2.6x wrong on the next — so the
+honest next step is a **second sustain-0 program**, not a fifth point on this
+one. Left for Jan to decide rather than queued.
+
+304 is left at **Dec1 12000**, which measures 1.355 s against the source's
+1.385 — 98 %, good enough for the README clip that started this.
