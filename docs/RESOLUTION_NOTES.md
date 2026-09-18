@@ -7621,3 +7621,93 @@ warning.
 including on failure.** Adopted after s3ked's three collisions in one day —
 this session had been running long unattended captures all week and announcing
 nothing, which is the same exposure that simply had not collided yet.
+
+## 81. The decay has the release's bug, and the sample is in both machines (2026-09-19)
+
+§79 fixed the release. The **decay** carries the same seconds-versus-span error,
+and three separate release investigations that evening walked straight past it.
+
+At **sustain 0** what falls during the held note is the decay, not the release.
+Against the MPC source, time to fall 30 dB:
+
+    source 1.53 s     E4XT 1.38     AKAI 1.39     K2000 0.80
+
+The encoded value is not the problem: the bank holds Dec1 **3.36 s** against the
+source's 3.3508, correct to 0.3 %. The source's decay reaches −30 dB at 1.53 s,
+implying a span of **65.7 dB**; those seconds are then written to a machine
+whose decay crosses **99.37 dB**.
+
+### The exemption was stated, and that is why nobody re-checked it
+
+eosed's note read: *"the DECAY deliberately gets no such field: it ends at the
+sustain level, which both machines agree on, so its seconds are sound."* **That
+is correct for sustain > 0 and wrong at sustain 0**, where the decay ends at
+silence and inherits the release's problem exactly:
+
+    sustain 0.00  ->  0.52x   WRONG
+    sustain 0.63  ->  0.99x   correct
+    sustain 1.00  ->  never falls 30 dB while held
+
+> **An unstated precondition invites a check; a stated deliberate choice
+> forbids one.** (mpc2emu's formulation, and the best sentence of the week.)
+
+The word doing the damage is *deliberately* — it records that the exemption was
+considered and chosen. Same family as §80's guard that is correct against every
+observed failure, and §78's constants whose **scope** was wrong rather than
+their value. **Three of that night's four findings were in things already
+written down, all of them written carefully.**
+
+**And the method note is the durable part:** every release protocol measures the
+fall AFTER note-off, and at sustain 0 the decay falls BEFORE it — inside the
+part of the capture everyone discards as "the held note". **The bug was in the
+data being thrown away**, so the discard rule was where to look, not the
+analysis.
+
+### Output is sample x envelope, so the dB rates ADD
+
+A sweep of Dec1 bent hard — slope 0.122 s per 1000 ms on the first leg, 0.065
+on the second — and mpc2emu read the saturation as the sample's own contour
+setting a floor, noting a contradiction: the K2000 at 1.14 s was *faster* than
+the MPC's 1.55 two seconds of Dec1 past where it should have stopped mattering.
+
+**The sign was backwards.** Output is sample x envelope, so in dB the two falls
+**add**: a decaying sample makes the total fall FASTER, never slower. The
+sample's own 30 dB time is an **upper bound** on t30 — the asymptote approached
+as Dec1 grows and the envelope stops contributing. Both machines sitting below
+it is expected, not anomalous.
+
+That turned the next capture into a prediction: if both machines play the same
+contour, the MPC's 1.55 s is itself bounded by the sample's time, so the K2000's
+asymptote is **at least 1.55 and the target is reachable.** Measured at Dec1
+13000: **1.40 s, still climbing.**
+
+    Dec1(s)  t30(s)   envelope   implied SAMPLE rate
+     3.36    0.81      29.57         7.46 dB/s
+     5.00    1.01      19.87         9.83
+     7.00    1.14      14.20        12.12
+    13.00    1.40       7.64        13.78
+
+    asymptote ~2.18 s; target 1.55 is below it, so reachable
+    Dec1 needed ~17.8 s = 5.3x the source's 3.35 s
+
+**The implied sample rate is not constant (7.5 → 13.8), which a pure product
+model requires.** It converges rather than drifts, so the envelope term
+`99.37/Dec1` is the approximate part rather than the sample term — and 2.18 s is
+worth "about two seconds", not three digits.
+
+### What the fix should match — and why no constant was derived
+
+If the fixed component and the bend are both the sample, and **the sample is in
+both machines**, then fitting Dec1 until the totals match is compensating an
+envelope for material the other machine already has. The quantity that should
+match is each machine's **envelope contribution**, `30/t30 − rate_sample`.
+Testable the moment anyone varies the MPC's decay — which needs Jan at the MPC,
+since that capture only ever existed at one setting.
+
+**mpc2emu declined to write 5.3x into the converter**, on one program, one
+sample, and a model whose own residual drifts 85 %. That is the release
+factor's mistake in a new stage: right on its calibration program, wrong on the
+next.
+
+> **Recorded as: reachable, ~5x, method understood, constant not derived.**
+> A better place to stop than a number.
