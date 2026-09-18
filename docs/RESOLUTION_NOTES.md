@@ -7171,3 +7171,199 @@ measurement on the next.** Re-read the bank at the start of every session and
 treat anything left there as gone until `DIRBANK` says otherwise. Both sessions
 had planned the other way, which is what made the exchange worth having even
 though the finding evaporated.
+
+## 77. The capture path is mono — and §58 said why (2026-09-17)
+
+mpc2emu's LFO→pan depth is written as a plain fraction of the target's rail,
+a convention never measured on any machine. On the E4XT it produced **39.21 dB
+of pan swing against the MPC original's 5.11**. The K2000 writer does the same
+thing (`round(depth * 50)`), so a depth ladder was built here to calibrate it.
+
+### The ladder
+
+ROM 199 is `1 Grand Piano` on algorithm 1 — **not** the sine it was remembered
+as. Built explicitly instead: **algorithm 2** (`PITCH / 2POLE LOWPASS / PANNER
+/ AMP`, the panner in slot `0x52`), **keymap 163 `Sine Wave`** for a mono
+sustaining source, `F1 Coarse` opened to 25088 Hz so the filter colours
+nothing, **LFO1 at 0.20 Hz** (byte 20), PANNER `Src1` = LFO1. Six objects
+written to RAM 200-205 by SysEx `Write` (0x09), differing only in the depth
+byte: 2, 4, 6, 10, 20, 50.
+
+Two things the build cost, both worth keeping:
+
+**The algorithm number is the wiring, not the functions.** The ALG page's
+cursor opens on a **block**, not on `Algorithm`, so typing 2/13/24/26 there
+sets the block's *function* — which is why "13" came back as `PARAMETRIC EQ`,
+function code 13, while the algorithm never left 1. And **a block silently
+ignores a function code it does not offer**, so typing 40 for PANNER under
+algorithm 1 looked exactly like the panel ignoring the keypress.
+
+**Bank select: the K2000 obeys BOTH `CC0` and `CC32`**, bank = `id // 100`.
+Two notes disagreed, each was evidence only of what its author had tried, and
+the device settled it in one round — *the arbiter for a disagreement about a
+machine is the machine*. A bare program change with no bank select lands on
+the current bank: `PC 0` selected `100 Cheeze`.
+
+### The full control-source table
+
+128 codes, read off the panel one at a time, because LFO1 was not in the
+30-75 window guessed from §73's "the low block is MIDI CC numbers":
+
+    0-31     MIDI CC numbers       1 MWheel  2 Breath  4 Foot  7 Volume  10 Pan
+    32-63    per-voice + clocks   33 MPress  36 Bi-Mwl  40 LFO2  47 A Clk4
+    64-95    switches, more CCs   64 Sustain  65 PortSw  75 LegatoSW  91 FX Depth
+    96-127   the MODULATORS      100 AttVel 110 ASR1 112 FUN1 **114 LFO1**
+                                 120 AMPENV 121 ENV2 **127 ON**
+
+**The CC block is real and it is a trap**: the modulators sit at the top,
+above a second scattering of raw `MIDInn` entries. `127 = ON` is the constant
+source hunted for unsuccessfully across two earlier sessions.
+
+Duplicates repeat §66's pattern from the DSP function table: `ASR2` at 38 and
+111, `FUN2` at 39 and 113, `LFO2` at 40 and 116, `LFO2ph` at 41 and 117. And
+**code 40 is `LFO2` as a SOURCE and `PANNER` as a FUNCTION** — one byte, two
+namespaces.
+
+### The result: zero modulation at every depth, and why that was not the answer
+
+All six captured cleanly — fundamental 261.6 Hz, second harmonic −76 dB, so
+the sine was sounding at the right pitch — and the balance never moved:
+`L/R` −0.235 dB at every depth, swing 0.00 dB across a 25x range.
+
+**mpc2emu refused to report it, and that refusal is the result.** Six programs
+failing identically is a worse story than one path carrying the same signal
+twice, and **a reading in which nothing changed is indistinguishable from a
+measurement that was never connected.**
+
+The positive control, measured here with L and R read **separately** (the
+rig's own `capture()` returns `(L+R)/2`, averaging the two channels in
+question):
+
+    centre   0%   L -20.30  R -20.07   L-R -0.24 dB   corr +1.0000
+    hard L -100%  L -19.92  R -19.68   L-R -0.24 dB   corr +1.0000
+    hard R +100%  L -21.68  R -21.45   L-R -0.24 dB   corr +1.0000
+
+**Identical balance at hard left, hard right and centre, correlation +1.0000.**
+The capture path is mono. Confirmed against the other three rigs, which show
+5.74 / 45.23 / 29.90 dB of balance variation against the K2000's **0.01**.
+
+**And the absolute level DOES move with `Adjust`** — which is what makes this a
+diagnosis instead of a null. §58 established a month ago that the K2000's
+PANNER is **one wire in, two wires out**, summing to inaudible at centre. What
+reaches the capture is that sum: panning shifts the summed level by a dB and
+can never shift the balance. The mechanism was on record; no question had yet
+needed the two wires separated.
+
+### What it costs, and the general form
+
+**Nothing already measured is in doubt.** Every K2000 measurement this project
+has ever taken — spans, envelope times, filter corners, the velocity law — is
+a LEVEL measurement, which a mono path serves perfectly.
+
+> **The rig we trust is a map of the questions we have already asked.**
+
+The same shape as the guards being a map of the mistakes already made, one
+layer down. A property nobody knew the rig had, exposed by the first question
+that required two independent channels.
+
+**One more instance of the ratio trap, from mpc2emu's side:** their first
+stereo test read the K2000 as "STEREO, 15.95 dB" because it ran over the whole
+capture, including onset and decay frames where both channels sit near the
+floor and their ratio is noise. Restricted to the steady window: 0.01 dB. **A
+ratio of two small numbers is a reading that is not there** — and it nearly
+contradicted a positive control.
+
+**And tags are positional, not searchable by value.** The first read-back of
+the ladder reported `keymap=0` for all six, having found the `0x40` CAL tag by
+scanning for a byte equal to 64 — which matches data. Anchored from the
+object's end instead (`0x53` at size−16, CAL at size−96, asserted), all six
+read keymap 163. Third time in one session that hunting a structure by its
+value found something earlier and wrong.
+
+### RETRACTED: the capture path is not mono — the wires were unspread
+
+**§77's conclusion is withdrawn. The K2000 capture path is stereo.** The
+balance moves as soon as the PANNER's two output wires are spread:
+
+    before: 0x52 body[2]=0x00 (pan +0)  body[14]=0x00 (pan +0)
+    after :           =0x70 (pan +7)            =0x90 (pan -7)
+
+    LFO running, Adjust 0   balance mean  +5.51 dB  sd 5.164  p05..p95 15.73 dB
+    static hard LEFT        balance mean +10.59 dB
+    static hard RIGHT       balance mean  +1.90 dB
+
+8.7 dB of static shift and 15.73 dB of modulation, against 0.01 dB before. The
+three-path comparison was a true reading of a **program that could not pan**,
+not of a path that could not carry it.
+
+The missing bytes are in HOB segment `0x52`: **body[2] and body[14], high
+nibble a 4-bit signed pan (−7..+7)**. mpc2emu's trap is worth carrying: `0x90`
+and `0x94` are *both* pan −7, and two wires hard left sum exactly as two
+centred wires do — indistinguishable from the original fault.
+
+**How this went wrong, which is the part worth keeping.**
+
+**§58 was read as corroboration when it was the alternative hypothesis.** This
+project has carried "the PANNER is one wire in, two wires out, and centred
+wires sum to inaudible" for a month. It explains the observation completely
+*without* any mono path. Citing it in support of the wiring conclusion
+converted a missing check into apparent confirmation — **worse than not having
+the note at all**, because a hypothesis that arrives with a mechanism attached
+stops being interrogated.
+
+**And the positive control was not one.** A static `Adjust` sweep exercises the
+panner's *input* stage; the failure was downstream of it, in the output wires.
+So the control could only ever return the same answer whichever hypothesis was
+true.
+
+> **A control is only positive if the effect it induces must traverse the part
+> in question.**
+
+mpc2emu's own file had recorded the result in advance — *"Adjust +50% moved the
+image 0.01 dB while centred — even the STATIC offset is inaudible unspread"* —
+and neither session went looking for it.
+
+**Jan asked "did you check the output setting page".** Two sessions held the
+mechanism in their own notes, agreed with each other, and the question that
+separated the explanations came from the person who had read neither.
+
+What survives from §77: the control-source table, the CC0/CC32 finding, the
+algorithm-versus-function distinction, the positional-tags rule, and the ratio
+trap. What does not: every sentence about wiring.
+
+### The result: 0.372 dB per byte, linear over a 10x range
+
+With the wires spread, the ladder measured:
+
+    byte  2   0.75 dB pp   resid 0.01    0.376 dB/byte
+    byte  4   1.50 dB      resid 0.03    0.374
+    byte  6   2.23 dB      resid 0.04    0.372
+    byte 10   3.69 dB      resid 0.08    0.369
+    byte 20   7.45 dB      resid 0.21    0.372
+    byte 50  35.08 dB      resid 8.08    <- saturated
+
+**0.372 dB/byte, constant to ±0.003 across a tenfold range**, with the LFO
+recovered at 0.201 Hz on every point against the dialled 0.20 — which is the
+sine source and the byte-20 rate setting both confirming themselves.
+
+The K2000 is genuinely linear here where the E4XT was not (0.64 then 1.75 dB
+steps at the equivalent scale), so mpc2emu's 5.11 dB target lands at **byte
+14** as an interpolation the law supports rather than one it merely tolerates.
+Their writer had been emitting **byte 32**, well past where the residual gives
+out.
+
+**The residual column found the unusable region before the swing did, on all
+three machines** — 0.01 at the bottom rising to 8.08 where the law stops. That
+column was mpc2emu's request at the start and it earned its place three times.
+
+Their three pan scales are 0.1563 (E4XT), 0.1563 (AKAI) and **0.4377** here.
+The first two matching had looked like a shared law; the K2000 shows it was two
+rails needing similar reduction from the same wrong starting convention.
+
+**And the retraction's accounting, corrected by mpc2emu:** not more mine than
+theirs. This session had §58 and read it as corroboration; they had
+`§K2PANWIRES` in their own writer, hardware-confirmed twelve days earlier,
+carrying the literal prediction *"Adjust +50% moved the image 0.01 dB while
+centred — even the STATIC offset is inaudible unspread"* — the control, its
+result and the diagnosis, in a file they had edited twice that night. **Two
+sessions, two copies of the answer, neither opened.**
