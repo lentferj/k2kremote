@@ -899,7 +899,7 @@ the real ones.
     R-25  CONFIRMED  fixed  a short listing reports complete=False
     R-26  CONFIRMED  fixed  `ask` waits for a SCREENREPLY, not for any traffic
     R-27  PART        fixed  five of six confirmed; the resume-on-cancel half REFUTED
-    R-28  CONFIRMED  fixed  state read under the lock; _Command widened; `is` -> `==
+    R-28  CONFIRMED  fixed  state read under the lock; _Command widened; `is` -> `==`
     R-29  PART        fixed  eight of nine; the ".iso is never readable" claim REFUTED
     nits  PART        fixed  5 real unused imports (not 15), both zips, B904, both F821
 
