@@ -257,15 +257,15 @@ def test_rename_sends_one_change_with_whole_name_and_safe_newid():
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
                         "stub", timeout=0.5)
-    result = bridge.rename(ObjectType.Program, 300, "Wave Of Mutilation")
+    result = bridge.rename(ObjectType.Program, 300, "Wave Of Mutil")
 
     msg = captured["msg"]
     assert isinstance(msg, Change)
     assert msg.type is ObjectType.Program
     assert msg.idno == 300
     assert msg.newid == 0                      # never relocates / overwrites another id
-    assert msg.name == "Wave Of Mutilation"    # the whole string, in one message
-    assert result == "Wave Of Mutilation"      # device-confirmed name echoed back
+    assert msg.name == "Wave Of Mutil"         # the whole string, in one message
+    assert result == "Wave Of Mutil"           # device-confirmed name echoed back
 
 
 def test_rename_rejects_non_ascii():
@@ -409,9 +409,20 @@ def test_delete_bank_all_types_sends_type_zero():
 def test_object_name_reads_dir():
     from k2000.definitions import ObjectType
 
-    client = SimpleNamespace(dir=lambda t, i: SimpleNamespace(name="CMI VOICES"))
+    # Goes through `_send_and_receive` with the BRIDGE's timeout, not the
+    # vendored `client.dir()` whose hardcoded 1.0 s is the value
+    # DEFAULT_TIMEOUT = 2.5 exists to replace.
+    seen = {}
+
+    def fake(message, timeout):
+        seen["msg"], seen["timeout"] = message, timeout
+        return SimpleNamespace(name="CMI VOICES")
+
+    client = SimpleNamespace(_send_and_receive=fake)
     bridge = MidiBridge(client, "stub")
     assert bridge.object_name(ObjectType.Program, 201) == "CMI VOICES"
+    assert seen["timeout"] == bridge.timeout != 1.0
+    assert type(seen["msg"]).__name__ == "Dir"
 
 
 class _QueuedMidiIn:
@@ -894,3 +905,36 @@ def test_backend_error_clears_once_enumeration_works(monkeypatch):
     monkeypatch.setattr("rtmidi.MidiOut", Fine)
     assert midi_bridge.list_ports() == (["Some Port 1"], ["Some Port 1"])
     assert midi_bridge.midi_backend_error() is None
+
+
+def test_rename_refuses_control_characters_over_long_names_and_a_wrong_echo():
+    """`isascii()` alone was the whole guard.
+
+    Control characters are ASCII — `\n`, `\x1b` and `\x00` all passed — and
+    any length went to the wire while the docstring recorded the firmware's
+    truncation of over-long names as unverified. Real DIRBANK names come back
+    cut at exactly 16 ('Synth-PRO5 Sangr', 'Pad-PRO5 Lunar D'), so the field
+    is 16 and the device does truncate: refusing is honest where guessing what
+    would be stored is not.
+
+    And the INFO reply is presented to the caller as device-confirmed, so it
+    must actually match what was asked for.
+    """
+    from types import SimpleNamespace
+
+    from k2000.definitions import ObjectType
+
+    bridge = MidiBridge(SimpleNamespace(), "stub")
+    for bad in ("with\nnewline", "esc\x1bhere", "nul\x00byte"):
+        with pytest.raises(ValueError):
+            bridge.rename(ObjectType.Program, 300, bad)
+    with pytest.raises(ValueError):
+        bridge.rename(ObjectType.Program, 300, "A" * 17)
+
+    # a reply naming something else is not a confirmation
+    from k2000.messages import Info
+    client = SimpleNamespace(
+        _send_and_receive=lambda m, t: Info(ObjectType.Program, 300, 0, True,
+                                            "SOMETHING ELSE"))
+    with pytest.raises(ValueError):
+        MidiBridge(client, "stub").rename(ObjectType.Program, 300, "Good Name")

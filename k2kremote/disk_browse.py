@@ -98,10 +98,21 @@ def _rows(bridge, tries: int = 5) -> List[str]:
     last = None
     for _ in range(tries):
         try:
-            return bridge.get_screen_text().split("\n")
+            rows = bridge.get_screen_text().split("\n")
         except Exception as exc:                            # noqa: BLE001
             last = exc
             time.sleep(0.8)
+            continue
+        # A SHORT reply is a retry case, not a success. The manual (quoted
+        # above) says a reply under 320 bytes means the screen was mid-redraw
+        # and should be requested again -- but this only ever retried on an
+        # exception, so a short decode was returned and the callers' blind
+        # indexing (`rows[7]`, `rows[3]`, `rows[0]`) raised IndexError in the
+        # middle of a panel flow, with the dialog left open on the device.
+        if len(rows) >= 8:
+            return rows
+        last = ValueError(f"short screen: {len(rows)} rows, expected 8")
+        time.sleep(0.8)
     raise BrowseError(f"the K2000 stopped answering: {last}")
 
 

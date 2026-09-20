@@ -348,8 +348,23 @@ class MacroEditor:
         directory, _, filename = cleaned.rpartition("\\")
         if not filename:
             raise MacError("the path has no file name")
-        if len(filename.encode("latin-1", errors="replace")) > 15:
-            raise MacError(f"{filename!r} is longer than the 15-character field")
+        # Strict, and on BOTH halves. This measured only the filename, and
+        # measured it with errors="replace" -- so a non-latin-1 name passed
+        # the length check by being substituted, and a non-latin-1 DIRECTORY
+        # was never looked at at all. `MacroEntry.serialize` then encodes both
+        # strictly, so the UnicodeEncodeError surfaced at save time, where
+        # `action_save` catches only MacError/OSError: Ctrl+S crashed the TUI
+        # with unsaved work instead of refusing the path when it was typed.
+        for label, part in (("file name", filename), ("directory", directory)):
+            try:
+                encoded = part.encode("latin-1")
+            except UnicodeEncodeError as exc:
+                raise MacError(
+                    f"the {label} {part!r} has characters the K2000 cannot "
+                    f"store (latin-1 only)") from exc
+            if label == "file name" and len(encoded) > 15:
+                raise MacError(
+                    f"{filename!r} is longer than the 15-character field")
         entry.path = directory + "\\"
         entry.filename = filename
         self._touch()

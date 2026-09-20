@@ -278,13 +278,23 @@ class MacroEntry:
         if self._source is not None:
             return self._source
 
-        name = self.filename.encode("latin-1")
+        # Both encodes are strict -- the K2000's fields are latin-1 -- but a
+        # UnicodeEncodeError escaping here reaches callers that catch only
+        # MacError/OSError, so it is re-raised as the documented type. The UI
+        # refuses such a path when it is typed (app.set_full_path); this is
+        # the backstop for every other route into serialize().
+        try:
+            name = self.filename.encode("latin-1")
+            path = self.path.encode("latin-1")
+        except UnicodeEncodeError as exc:
+            raise MacError(
+                f"{self.path + self.filename!r} has characters the K2000 "
+                f"cannot store (latin-1 only)") from exc
         if len(name) >= _NAME_FIELD:
             raise MacError(
                 f"file name {self.filename!r} does not fit the "
                 f"{_NAME_FIELD - 1}-character field"
             )
-        path = self.path.encode("latin-1")
 
         body = (
             name.ljust(_NAME_FIELD, b"\x00")

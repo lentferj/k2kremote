@@ -745,16 +745,48 @@ class MidiBridge:
         whether CHANGE is accepted while a rename dialog is on screen, and how
         the firmware truncates names longer than the 16-char display field.
         """
+        # `isascii()` alone let control characters through -- `\n`, `\x1b` and
+        # `\x00` are all ASCII -- and put unbounded lengths on the wire, while
+        # the firmware's truncation of over-long names is the "Unverified on
+        # hardware" note above. Both are now refused here rather than sent and
+        # hoped about: printable 0x20-0x7E only, and no longer than the 16-char
+        # field the device displays.
         if not name.isascii():
             bad = next(ch for ch in name if not ch.isascii())
             raise ValueError(f"name contains non-ASCII character {bad!r}")
+        bad = next((ch for ch in name if not 0x20 <= ord(ch) <= 0x7E), None)
+        if bad is not None:
+            raise ValueError(
+                f"name contains the non-printable character {bad!r} "
+                f"(0x{ord(bad):02x}); the K2000's name field is printable "
+                f"ASCII 0x20-0x7E")
+        if len(name) > 16:
+            raise ValueError(
+                f"name {name!r} is {len(name)} characters; the field is 16 "
+                f"and the firmware's truncation is unverified, so this "
+                f"refuses rather than guessing what would be stored")
         info = self.client._send_and_receive(
             Change(obj_type, idno, 0, name), timeout or self.timeout)
+        # The INFO reply is presented to the caller as device-confirmed, so
+        # check that it IS this rename's reply and not a stale one, and that
+        # the device kept what was asked for.
+        if info.name != name:
+            raise ValueError(
+                f"the K2000 reports {info.name!r} after being asked to store "
+                f"{name!r} -- not treating that as a confirmed rename")
         return info.name
 
     def object_name(self, obj_type: ObjectType, idno: int) -> str:
         """Current name of an object (DIR → INFO) — the rename tool's preview."""
-        return self.client.dir(obj_type, idno).name
+        # Routed through `_send_and_receive` with this bridge's own
+        # timeout rather than the vendored convenience wrapper, whose
+        # hardcoded 1.0 s is the value DEFAULT_TIMEOUT = 2.5 was raised
+        # to replace. `read_object_bytes`/`patch_object_bytes` were moved
+        # for exactly this reason; these three were left behind, so the
+        # k2kmaced online push could flake on a slow interface.
+        from k2000.messages import Dir
+        return self.client._send_and_receive(
+            Dir(obj_type, idno), self.timeout).name
 
     def list_bank(self, obj_type: ObjectType, bank: int, *, ram_only: bool = True,
                   quiet_for: float = 2.0) -> Tuple[List["Info"], bool]:
@@ -830,7 +862,15 @@ class MidiBridge:
         the object's existence. Use :func:`k2kmaced.online.read_live` for the
         parsed table with the error messages that distinguish these cases.
         """
-        return self.client.dump(ObjectType.MacroTable, MACRO_TABLE_ID).data
+        # Routed through `_send_and_receive` with this bridge's own
+        # timeout rather than the vendored convenience wrapper, whose
+        # hardcoded 1.0 s is the value DEFAULT_TIMEOUT = 2.5 was raised
+        # to replace. `read_object_bytes`/`patch_object_bytes` were moved
+        # for exactly this reason; these three were left behind, so the
+        # k2kmaced online push could flake on a slow interface.
+        return self.client._send_and_receive(
+            Dump(ObjectType.MacroTable, MACRO_TABLE_ID, 0, 2**21 - 1,
+                 EncodingFormat.BitStream), self.timeout).data
 
     def write_macro_table(self, data: bytes, name: str = "Macro"):
         """Replace the live Macro Table object — WRITE (0x09). **This writes.**
@@ -846,7 +886,18 @@ class MidiBridge:
         its code says *why* (1 = the object is open for editing, 5 = RAM full),
         and that is worth surfacing verbatim.
         """
-        return self.client.write(ObjectType.MacroTable, MACRO_TABLE_ID, name, data)
+        # Routed through `_send_and_receive` with this bridge's own
+        # timeout rather than the vendored convenience wrapper, whose
+        # hardcoded 1.0 s is the value DEFAULT_TIMEOUT = 2.5 was raised
+        # to replace. `read_object_bytes`/`patch_object_bytes` were moved
+        # for exactly this reason; these three were left behind, so the
+        # k2kmaced online push could flake on a slow interface.
+        from k2000.definitions import WriteMode
+        from k2000.messages import Write
+        return self.client._send_and_receive(
+            Write(ObjectType.MacroTable, MACRO_TABLE_ID,
+                  WriteMode.WriteToExactIDNumber, name,
+                  EncodingFormat.BitStream, data), self.timeout)
 
     # -- byte-offset field patching (DUMP/LOAD, not WRITE) --------------------
     def read_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
