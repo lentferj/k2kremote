@@ -92,7 +92,7 @@ import re
 import threading
 from collections import deque
 from time import monotonic
-from typing import Callable, Deque, List, Optional, Tuple, Union
+from typing import Any, Callable, Deque, List, Optional, Tuple
 
 from attrs import define, field
 
@@ -235,10 +235,15 @@ def is_destructive_screen(text_rows) -> bool:
         return True
     return _is_confirm_dialog(text_rows)
 
-# Internal command kinds queued ahead of refreshes.
-_Press = Tuple[str, Button]   # ("press", button)
-_Wheel = Tuple[str, int]      # ("wheel", clicks)
-_Command = Union[_Press, _Wheel]
+# Internal command kinds queued ahead of refreshes. Every one is
+# ``(kind, payload)``; the payload's shape is what differs, and the annotation
+# listed two of the nine -- so the type said "press or wheel" while the queue
+# carried panic, type_name, lookup, rename, device_op, plan and refresh too.
+_Command = Tuple[str, Any]
+#: ("press", Button) · ("wheel", int) · ("panic", None) · ("refresh", None)
+#: ("type_name", (str, int)) · ("lookup", (ObjectType, int, callable))
+#: ("rename", (ObjectType, int, str, callable)) · ("device_op", (callable, callable))
+#: ("plan", tuple of commands)
 
 
 @define
@@ -534,8 +539,14 @@ class RefreshWorker(threading.Thread):
             # floor. Done outside the lock and only when no command is queued.
             # Skipped while quiescent (manual pause or a destructive screen) so a
             # front-panel press can't trigger a read into an object rewrite.
-            if (self._mirror_panel and not self._paused and not self._danger
-                    and not self._commands):
+            with self._cond:
+                # Read under the lock that every writer takes. Three separate
+                # unlocked reads are atomic enough today only because CPython
+                # makes them so; the invariant this code actually needs is that
+                # they describe ONE moment.
+                idle = (self._mirror_panel and not self._paused
+                        and not self._danger and not self._commands)
+            if idle:
                 try:
                     if self._bridge.poll_panel():
                         self.note_panel_event()
@@ -787,7 +798,7 @@ class RefreshWorker(threading.Thread):
             return False
         if monotonic() - self._last_graphics_at >= self._graphics_max_age:
             return False  # backstop: read the pixels even though the text is quiet
-        if origin is _SETTLE_ORIGIN and self._settle_retry:
+        if origin == _SETTLE_ORIGIN and self._settle_retry:
             if self._settle_retried:
                 # Second look after a keypress and the text still hasn't moved.
                 # Stop guessing and read the pixel plane: the press may have

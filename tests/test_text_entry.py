@@ -233,3 +233,27 @@ def test_home_cursor_needs_no_screen_reads():
     bridge = _CursorRecorder()          # no get_screen_text at all
     home_cursor(bridge, width=4, settle=0)
     assert len(bridge.presses) == 4
+
+
+def test_a_short_screen_fails_as_name_entry_failed_not_index_error():
+    """ALLTEXT comes back short while the LCD redraws -- ch. 30 says so.
+
+    Indexing straight into those rows raised a bare IndexError out of the
+    middle of typing a name. No caller catches that, and it is indistinguishable
+    from a bug in the typing logic; NameEntryFailed is the documented failure
+    and the one the callers already handle.
+    """
+    class _ShortScreen:
+        def get_screen_text(self):
+            return "\n".join(["short"] * 8)     # 5 columns, not 40
+
+        def press_button(self, button):
+            pass
+
+        def alpha_wheel(self, clicks):
+            pass
+
+    with pytest.raises(te.NameEntryFailed) as exc:
+        te.type_name(_ShortScreen(), "AB", name_row=3, name_col=16,
+                     settle=0.0)
+    assert "came back short" in str(exc.value)

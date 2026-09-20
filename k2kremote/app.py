@@ -256,10 +256,12 @@ def remembered_size() -> Optional[Tuple[int, int]]:
         cols, rows = int(raw[0]), int(raw[1])
     except Exception:
         return None
-    least_cols, least_rows = optimal_size()
     if cols < braille.BRAILLE_COLS or rows < _CHROME_ROWS + 4:
         return None
-    return cols, max(rows, min(least_rows, rows))
+    # `max(rows, min(least_rows, rows))` stood here, which is `rows` for every
+    # value of either: dead arithmetic that read like a clamp. The real floor is
+    # the guard above, which rejects a remembered size rather than growing it.
+    return cols, rows
 
 
 def remember_size(cols: int, rows: int) -> None:
@@ -789,6 +791,13 @@ class DiskBrowserScreen(ModalScreen):
             # raised TypeError and took the whole app down, which is a poor trade
             # for a browser that could simply say it got nothing.
             self._hint.update("the browser returned nothing — esc to close")
+            return
+        if not (isinstance(result, tuple) and len(result) == 2):
+            # Falsy was guarded; the WRONG SHAPE was not, and that unpacks just
+            # as badly. The comment above records that this class of bug took
+            # the app down once, so the guard covers the class, not the case.
+            self._hint.update(f"the browser returned {type(result).__name__}, "
+                              f"not (path, items) — esc to close")
             return
         self._path, self._items = result
         self._index = 0
@@ -1662,16 +1671,25 @@ class MasterFunctionScreen(ModalScreen):
         self._sync_fields()
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        self._reset_hint()  # any edit disarms the pending confirmation
-        if event.input.id == "mastertarget":
-            self._lookup()
+        # Any edit disarms the pending confirmation -- and that is ALL it does.
+        # Looking the object up from here fired a DIR round trip per keystroke,
+        # so typing "201" cost three, each paying the send gap: the Enter/blur
+        # discipline RenameObjectScreen uses (and which this screen already
+        # implements below) exists precisely to avoid that.
+        self._reset_hint()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
         # Move needs a destination: Enter on the id field advances to newid.
         if event.input.id == "mastertarget" and self._func() == "move":
+            self._lookup()
             self.set_focus(self.query_one("#masternewid", Input))
             return
+        # Refresh the name preview as the confirmation is armed. It used to be
+        # refreshed per keystroke, which is a round trip per character; doing it
+        # here keeps the one that matters -- the user sees WHICH object they are
+        # about to delete before the second Enter fires it.
+        self._lookup()
         self._attempt()
 
     def on_descendant_blur(self, event) -> None:
@@ -1857,6 +1875,12 @@ class K2KRemoteApp(App):
         # Why the (manual) pause is engaged, for the unified "⏸ PAUSED · <reason>"
         # badge. The confirm-screen auto-pause is tracked by the worker's `danger`.
         self._pause_reason = "manual"
+        #: True while the pause in effect is one only the *user* may lift: a
+        #: manual `p`, or the auto-pause before a heavy disk op. `resume_mirror`
+        #: refuses those -- a screen that borrowed the wire for a few seconds
+        #: gives it back, it does not get to resume polling a K2000 that is
+        #: mid-SCSI-operation, which is the traffic §9 says locks it up.
+        self._user_held_pause = False
         # Last values pushed to the widgets — readable without poking Textual
         # internals (handy for tests and for resizing).
         self.last_render: str = ""
@@ -1976,7 +2000,8 @@ class K2KRemoteApp(App):
         if self._entry_active:
             if event.key == "escape":
                 event.stop()
-                self._close_entry()
+                # on_key stays synchronous; the close is a coroutine now.
+                self.call_next(self._close_entry)
             return
 
         # Mode leader (under --alt-keys): the key after 'm' selects a mode.
@@ -2015,6 +2040,7 @@ class K2KRemoteApp(App):
         op = self._heavy_op_for(action.button)
         if op is not None:
             self._pause_reason = "disk op"
+            self._user_held_pause = True
             self._worker.set_paused(True)
             self._worker.press(action.button)
             self._set_status(f" {op!r} sent — mirror PAUSED while the K2000 works; "
@@ -2059,19 +2085,22 @@ class K2KRemoteApp(App):
         await self.mount(entry)
         entry.focus()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
         # Only the bottom name-entry overlay; never a submit from another screen's
         # Input (e.g. the rename tool) that bubbled up here.
         if event.input.id != "nameentry":
             return
         target = event.value
-        self._close_entry()
+        await self._close_entry()
         self._dispatch_name(target)
 
-    def _close_entry(self) -> None:
+    async def _close_entry(self) -> None:
+        # Awaited: `Widget.remove()` hands back an awaitable, and this project
+        # supports textual>=0.80 -- a bare call is only reliably enough on the
+        # versions where the removal is already scheduled.
         self._entry_active = False
         for entry in self.query("#nameentry"):
-            entry.remove()
+            await entry.remove()
         self.set_focus(None)
 
     def _dispatch_name(self, target: str) -> None:
@@ -2177,6 +2206,8 @@ class K2KRemoteApp(App):
         """
         if self._worker is None:
             return
+        if self._user_held_pause:
+            return  # the user's own pause, or a disk op: only `p` lifts those
         self._pause_reason = "manual"
         self._worker.set_paused(False)
         self._worker.force_refresh()
@@ -2211,6 +2242,7 @@ class K2KRemoteApp(App):
         paused = not self._worker.paused
         if paused:
             self._pause_reason = "manual"
+        self._user_held_pause = paused
         self._worker.set_paused(paused)
         self._set_status(" PAUSED — mirror frozen; press p before SCSI load/save"
                          if paused else " resumed",

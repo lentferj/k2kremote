@@ -283,7 +283,19 @@ def type_name(bridge, target: str, *, settle: float = 0.55,
         time.sleep(settle)
 
     def shown(col: int) -> str:
-        return bridge.get_screen_text().split("\n")[name_row][name_col + start_col + col]
+        rows = bridge.get_screen_text().split("\n")
+        want = name_col + start_col + col
+        # ch. 30: ALLTEXT can come back short while the screen is redrawing, and
+        # the K2000 also goes quiet mid-operation. Indexing straight into that
+        # raised a bare IndexError out of the middle of typing a name -- a
+        # failure the callers do not catch and cannot tell from a bug in here.
+        if name_row >= len(rows) or want >= len(rows[name_row]):
+            raise NameEntryFailed(
+                f"the screen has no cell at row {name_row}, column {want}: "
+                f"ALLTEXT came back short ({len(rows)} rows, "
+                f"{len(rows[name_row]) if name_row < len(rows) else 0} columns)"
+            )
+        return rows[name_row][want]
 
     for i, ch in enumerate(target):
         _type_char(press, wheel, shown, i, ch, max_passes)

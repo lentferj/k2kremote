@@ -1563,3 +1563,131 @@ def test_timing_help_text_matches_the_shipped_constants(capsys):
             "%s help does not state its actual default of %.0f ms"
             % (label, value * 1000))
     assert "%.0f ms floor" % (SYSEX_FLOOR * 1000) in text
+
+
+class _PauseSpy:
+    """Just enough RefreshWorker for the pause bookkeeping."""
+
+    def __init__(self):
+        self.paused = False
+        self.danger = False
+        self.refreshes = 0
+
+    def set_paused(self, paused):
+        self.paused = paused
+
+    def force_refresh(self):
+        self.refreshes += 1
+
+    def device_op(self, thunk, on_result):
+        pass
+
+    def stop(self, timeout=None):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_resume_mirror_does_not_lift_a_pause_the_user_asked_for():
+    """`p` means "send nothing", and a screen giving the wire back is not an answer.
+
+    The macro screen calls resume_mirror() every time it finishes reading the
+    table, which un-paused a mirror the user had frozen on purpose -- and the
+    same call would resume polling a K2000 that is mid-SCSI-operation, which is
+    the traffic that locks this instrument up (RESOLUTION_NOTES §9).
+    """
+    from k2kremote.app import K2KRemoteApp
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app._worker = _PauseSpy()
+
+        app.action_pause()                     # the user freezes the mirror
+        assert app._worker.paused is True
+
+        app.resume_mirror()                    # a screen hands the wire back
+        assert app._worker.paused is True, "a user's pause was lifted for them"
+
+        app.action_pause()                     # only `p` lifts it
+        assert app._worker.paused is False
+
+        # and an op-pause IS ours to lift
+        app.master_apply("macro save", lambda b: None, lambda r, e: None)
+        assert app._worker.paused is True
+        app.resume_mirror()
+        assert app._worker.paused is False
+
+
+@pytest.mark.asyncio
+async def test_the_name_entry_overlay_is_really_gone_after_escape():
+    """`Widget.remove()` returns an awaitable; a bare call is not a removal.
+
+    Left mounted, the overlay keeps the keyboard and every later key goes into
+    a dead Input instead of the K2000.
+    """
+    from k2kremote.app import K2KRemoteApp
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.press("f9")
+        await pilot.pause()
+        assert len(app.query("#nameentry")) == 1
+
+        await pilot.press("escape")
+        for _ in range(20):
+            await pilot.pause()
+            if not app.query("#nameentry"):
+                break
+        assert len(app.query("#nameentry")) == 0
+        assert app._entry_active is False
+
+
+def test_a_remembered_size_comes_back_as_it_was_stored(tmp_path, monkeypatch):
+    """The height carried a clamp that was algebraically its own input."""
+    from k2kremote import app as appmod
+
+    path = tmp_path / "size"
+    monkeypatch.setattr(appmod, "_size_state_path", lambda: path)
+
+    appmod.remember_size(120, 40)
+    assert appmod.remembered_size() == (120, 40)
+
+    # and a window dragged too small is refused, not grown
+    appmod.remember_size(10, 4)
+    assert appmod.remembered_size() is None
+
+
+@pytest.mark.asyncio
+async def test_the_master_id_field_does_not_ask_the_device_per_keystroke():
+    """Typing "201" cost three DIR round trips, one per character.
+
+    Every one pays the send gap and takes the wire from the mirror, for two
+    answers nobody wanted. RenameObjectScreen looks the id up on Enter and on
+    blur for exactly that reason, and this screen already has both handlers.
+    """
+    from textual.widgets import Input
+
+    from k2kremote.app import K2KRemoteApp, MasterFunctionScreen
+
+    app = K2KRemoteApp(demo=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        lookups = []
+        app.rename_lookup = lambda t, i, cb: lookups.append(i)
+
+        app.push_screen(MasterFunctionScreen())
+        await pilot.pause()
+        target = app.screen.query_one("#mastertarget", Input)
+        target.focus()
+        await pilot.pause()
+
+        await pilot.press("2", "0", "1")
+        await pilot.pause()
+        assert lookups == [], f"the device was asked while typing: {lookups}"
+
+        await pilot.press("enter")
+        for _ in range(20):
+            await pilot.pause()
+            if lookups:
+                break
+        assert lookups == [201], "Enter must still look the object up"

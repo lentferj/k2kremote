@@ -896,6 +896,8 @@ same confidence as the five that were real.
     R-24  CONFIRMED  fixed  a failed save backs out of the dialog (Cancel/Exit)
     R-25  CONFIRMED  fixed  a short listing reports complete=False
     R-26  CONFIRMED  fixed  `ask` waits for a SCREENREPLY, not for any traffic
+    R-27  PART        fixed  five of six confirmed; the resume-on-cancel half REFUTED
+    R-28  CONFIRMED  fixed  state read under the lock; _Command widened; `is` -> `==
 
 Each fix has a regression test, and all three new tests were run against the
 **unfixed** source as a negative control: three failures there, 536 passing
