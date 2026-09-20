@@ -938,3 +938,97 @@ def test_rename_refuses_control_characters_over_long_names_and_a_wrong_echo():
                                             "SOMETHING ELSE"))
     with pytest.raises(ValueError):
         MidiBridge(client, "stub").rename(ObjectType.Program, 300, "Good Name")
+
+
+def test_every_solicited_exchange_drains_stale_input_first():
+    """A late reply to a timed-out request must not answer the next one.
+
+    `_send_and_receive` matches on message CLASS only — it never checks the
+    echoed type/id/offset — so a stale LOAD sitting in the queue is
+    indistinguishable from the one just requested. That undermines the whole
+    point of `patch_object_bytes`, which would compare the bytes it wrote
+    against another object's bytes and report success.
+
+    Only `list_bank` drained before this; every other path did not.
+    """
+    from types import SimpleNamespace
+
+    from k2000.definitions import ObjectType
+
+    class Port:
+        def __init__(self, stale):
+            self.queue = list(stale)
+            self.drained = 0
+
+        def get_message(self):
+            if self.queue:
+                self.drained += 1
+                return self.queue.pop(0)
+            return None
+
+    port = Port([("stale-a", 0.0), ("stale-b", 0.0)])
+    sent = []
+
+    def fake(message, timeout):
+        sent.append(message)
+        return SimpleNamespace(data=b"\x01", type=ObjectType.Program,
+                               idno=7, offset=3)
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake, midi_in=port),
+                        "stub")
+    bridge.read_object_bytes(ObjectType.Program, 7, 3, 1)
+    assert port.drained == 2, "stale input was not drained before the request"
+    assert len(sent) == 1
+
+
+def test_a_reply_about_another_object_is_refused():
+    """The echoed fields are the only thing tying a reply to its request."""
+    from types import SimpleNamespace
+
+    import pytest
+
+    from k2000.definitions import ObjectType
+    from k2kremote.midi_bridge import PatchUnverified
+
+    def fake(message, timeout):
+        # right class, wrong object — exactly what a stale reply looks like
+        return SimpleNamespace(data=b"\xff", type=ObjectType.Program,
+                               idno=999, offset=3)
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub")
+    with pytest.raises(PatchUnverified):
+        bridge.read_object_bytes(ObjectType.Program, 7, 3, 1)
+
+
+def test_close_frees_a_plain_rtmidi_input_not_only_wrapped_ports():
+    """Every reconnect leaked one ALSA sequencer client.
+
+    `close()` freed only `port._port`. `ThrottledOut` has that attribute and
+    `MultiIn` deletes its own sub-ports, but the plain `rtmidi.MidiIn` that
+    `standard()` and `_connect_split()` get from `_open_in` has neither — so
+    its backend client was never released, which is exactly the leak the
+    module docstring warns about.
+    """
+    from types import SimpleNamespace
+
+    freed = []
+
+    class RawIn:                      # no _port: what _open_in returns
+        def close_port(self):
+            pass
+
+        def delete(self):
+            freed.append("in")
+
+    class WrappedOut:                 # ThrottledOut's shape
+        def __init__(self):
+            self._port = SimpleNamespace(delete=lambda: freed.append("out"))
+
+        def close_port(self):
+            pass
+
+    bridge = MidiBridge(
+        SimpleNamespace(midi_out=WrappedOut(), midi_in=RawIn()), "stub")
+    bridge.close()
+    assert sorted(freed) == ["in", "out"], (
+        "close() left a backend client allocated: %r" % freed)

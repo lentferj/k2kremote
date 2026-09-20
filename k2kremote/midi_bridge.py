@@ -727,6 +727,60 @@ class MidiBridge:
             )
 
     # -- object rename (whole-name SysEx, no multi-tap) ----------------------
+    def _drain(self) -> int:
+        """Throw away anything already waiting on the input port.
+
+        Every solicited exchange in this class calls this first. Without it a
+        LATE reply to an earlier, timed-out request is sitting in the queue
+        when the next request goes out, and `_send_and_receive` returns it as
+        this request's answer — the vendored client matches only on message
+        CLASS, never on the echoed type/id/offset, so a stale LOAD is
+        indistinguishable from the one just asked for. That undermines the
+        read-back guarantee `patch_object_bytes` is built on: it would compare
+        the bytes it wrote against a different object's bytes.
+
+        `list_bank` has drained since it was written (its DIRBANK reply shape
+        needs its own loop); everything else did not.
+        """
+        port = getattr(self.client, "midi_in", None)
+        if port is None:          # a send-only client has no stale input
+            return 0
+        dropped = 0
+        while port.get_message() is not None:
+            dropped += 1
+        return dropped
+
+    def _ask(self, message, timeout=None):
+        """Drain, send, and return the reply — the one solicited-exchange path."""
+        self._drain()
+        return self.client._send_and_receive(message, timeout or self.timeout)
+
+    @staticmethod
+    def _check_echo(reply, obj_type, idno, offset=None) -> None:
+        """Refuse a reply that is not about the object that was asked for.
+
+        The vendored `_send_and_receive` matches on message CLASS only, so a
+        LOAD for another object satisfies a DUMP exactly as well as the right
+        one. Draining first (see :meth:`_drain`) removes the common source of
+        those, but the echoed fields are free to check and are the only thing
+        that actually ties a reply to its request — which matters most for
+        `patch_object_bytes`, whose whole guarantee is that the bytes it read
+        back are the bytes it wrote.
+
+        Fields are checked only when the reply carries them, so this stays
+        usable across reply types.
+        """
+        for attr, want in (("type", obj_type), ("idno", idno),
+                           ("offset", offset)):
+            if want is None:
+                continue
+            got = getattr(reply, attr, None)
+            if got is not None and got != want:
+                raise PatchUnverified(
+                    f"reply is about {attr}={got!r}, not the {attr}={want!r} "
+                    f"that was requested -- refusing to treat it as this "
+                    f"request's answer")
+
     def rename(self, obj_type: ObjectType, idno: int, name: str,
                timeout: Optional[float] = None) -> str:
         """Rename an existing object in one CHANGE (0x08) — the whole name at once.
@@ -765,8 +819,7 @@ class MidiBridge:
                 f"name {name!r} is {len(name)} characters; the field is 16 "
                 f"and the firmware's truncation is unverified, so this "
                 f"refuses rather than guessing what would be stored")
-        info = self.client._send_and_receive(
-            Change(obj_type, idno, 0, name), timeout or self.timeout)
+        info = self._ask(Change(obj_type, idno, 0, name), timeout)
         # The INFO reply is presented to the caller as device-confirmed, so
         # check that it IS this rename's reply and not a stale one, and that
         # the device kept what was asked for.
@@ -785,8 +838,7 @@ class MidiBridge:
         # for exactly this reason; these three were left behind, so the
         # k2kmaced online push could flake on a slow interface.
         from k2000.messages import Dir
-        return self.client._send_and_receive(
-            Dir(obj_type, idno), self.timeout).name
+        return self._ask(Dir(obj_type, idno)).name
 
     def list_bank(self, obj_type: ObjectType, bank: int, *, ram_only: bool = True,
                   quiet_for: float = 2.0) -> Tuple[List["Info"], bool]:
@@ -868,9 +920,9 @@ class MidiBridge:
         # to replace. `read_object_bytes`/`patch_object_bytes` were moved
         # for exactly this reason; these three were left behind, so the
         # k2kmaced online push could flake on a slow interface.
-        return self.client._send_and_receive(
+        return self._ask(
             Dump(ObjectType.MacroTable, MACRO_TABLE_ID, 0, 2**21 - 1,
-                 EncodingFormat.BitStream), self.timeout).data
+                 EncodingFormat.BitStream)).data
 
     def write_macro_table(self, data: bytes, name: str = "Macro"):
         """Replace the live Macro Table object — WRITE (0x09). **This writes.**
@@ -894,10 +946,10 @@ class MidiBridge:
         # k2kmaced online push could flake on a slow interface.
         from k2000.definitions import WriteMode
         from k2000.messages import Write
-        return self.client._send_and_receive(
+        return self._ask(
             Write(ObjectType.MacroTable, MACRO_TABLE_ID,
                   WriteMode.WriteToExactIDNumber, name,
-                  EncodingFormat.BitStream, data), self.timeout)
+                  EncodingFormat.BitStream, data))
 
     # -- byte-offset field patching (DUMP/LOAD, not WRITE) --------------------
     def read_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
@@ -930,9 +982,10 @@ class MidiBridge:
         fact worth having, not a timeout tuning problem — check the object
         exists first if a DUMP might otherwise hang.
         """
-        reply = self.client._send_and_receive(
+        reply = self._ask(
             Dump(obj_type, idno, offset, size, EncodingFormat.BitStream),
-            timeout or self.timeout)
+            timeout)
+        self._check_echo(reply, obj_type, idno, offset)
         return reply.data
 
     def patch_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
@@ -970,9 +1023,8 @@ class MidiBridge:
         hardcoded 1.0 s timeout has no override — see that method's
         docstring for what DUMPing a nonexistent object actually does.
         """
-        reply = self.client._send_and_receive(
-            Load(obj_type, idno, offset, EncodingFormat.BitStream, data),
-            self.timeout)
+        reply = self._ask(
+            Load(obj_type, idno, offset, EncodingFormat.BitStream, data))
         code = getattr(getattr(reply, "code", None), "name", None)
         if code is not None:
             raise PatchUnverified(
@@ -1003,7 +1055,7 @@ class MidiBridge:
                       timeout: Optional[float] = None):
         """Delete one object — DEL (0x07). Returns the INFO reply (the deleted
         object, or the ROM object it uncovers; a ROM object cannot be deleted)."""
-        return self.client._send_and_receive(Del(obj_type, idno),
+        return self._ask(Del(obj_type, idno),
                                              timeout or self.timeout)
 
     def move_object(self, obj_type: ObjectType, idno: int, newid: int,
@@ -1011,7 +1063,7 @@ class MidiBridge:
         """Relocate one object to ``newid`` — CHANGE (0x08) with an empty name (the
         name is left unchanged). **Destructive at the destination:** the protocol
         deletes whatever object already sits at ``newid``. Returns the INFO reply."""
-        return self.client._send_and_receive(Change(obj_type, idno, newid, ""),
+        return self._ask(Change(obj_type, idno, newid, ""),
                                              timeout or self.timeout)
 
     def delete_bank(self, obj_type: Optional[ObjectType], bank: int,
@@ -1032,7 +1084,7 @@ class MidiBridge:
         msg = DelBank(obj_type if obj_type is not None else self._ALL_OBJECT_TYPES,
                       bank)
         try:
-            return self.client._send_and_receive(msg, timeout or 0.5)
+            return self._ask(msg, timeout or 0.5)
         except TimeoutError:
             return None   # no ACK is expected; the wipe still happened
 
@@ -1058,11 +1110,21 @@ class MidiBridge:
                 port.close_port()
             except Exception:
                 pass
-            # Free the backend ALSA client, not just the port. MultiIn.close_port
-            # already deletes its sub-ports; ThrottledOut wraps one rtmidi.MidiOut.
+            # Free the backend ALSA client, not just the port. MultiIn's own
+            # close_port already deletes its sub-ports; ThrottledOut wraps one
+            # rtmidi.MidiOut and exposes it as `_port`.
+            #
+            # But this used to free ONLY `port._port`, and the plain
+            # `rtmidi.MidiIn` that `standard()` and `_connect_split()` get from
+            # `_open_in` has no such attribute — so its sequencer client was
+            # never freed and every reconnect cycle leaked one "RtMidiIn
+            # Client", which is the documented hazard at the top of this file.
+            # Anything that is not one of our two wrappers IS the raw object.
             raw = getattr(port, "_port", None)
             if raw is not None:
                 _delete_quiet(raw)
+            elif not isinstance(port, MultiIn):
+                _delete_quiet(port)
 
     def __repr__(self) -> str:
         return f"<MidiBridge {self.description!r}>"
