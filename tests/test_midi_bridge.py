@@ -77,11 +77,18 @@ def test_get_screen_text_attrs_returns_text_and_mask():
 
 
 def test_throttle_enforces_gap_for_sysex():
-    out = ThrottledOut(FakeOut(), gap=0.05)
+    """A second SysEx waits.
+
+    The gap asked for here is deliberately ABOVE the floor: passing 50 ms and
+    asserting 50 ms proved nothing, because SYSEX_FLOOR clamps anything smaller
+    to 120 ms and the assertion passed on the clamp rather than on the throttle.
+    (The clamp has its own test below.)
+    """
+    out = ThrottledOut(FakeOut(), gap=0.2)
     start = time.time()
     out.send_message([0xF0, 0x07, 0x00, 0x78, 0x18, 0xF7])
     out.send_message([0xF0, 0x07, 0x00, 0x78, 0x18, 0xF7])
-    assert time.time() - start >= 0.05  # second SysEx waited for the gap
+    assert time.time() - start >= 0.2  # the gap that was asked for, not the floor
 
 
 def test_gap_is_clamped_to_the_hardware_floor():
@@ -1254,3 +1261,188 @@ def test_movebank_decodes_an_all_types_move_like_its_siblings():
     assert isinstance(decoded, MoveBank)
     assert decoded.type is None and decoded.bank == 3 and decoded.newbank == 4
     assert decoded.encode() == raw    # and it survives the round trip back out
+
+
+# --- the real receive path, and the local reads around it --------------------
+#
+# Gap the audit named: exactly one test drove the genuine `_send_and_receive`
+# loop and it fed a valid packet, so the behaviour of every malformed-reply
+# path was unpinned.
+
+class _RawPort:
+    """A minimal rtmidi-shaped input that hands back pre-built raw packets.
+
+    `gated` withholds them until `arm()` is called, which is what a real port
+    does: the reply to a request cannot arrive before the request goes out.
+    Without that, `_ask`'s own pre-send drain eats the fixture.
+    """
+
+    def __init__(self, packets=(), ports=("K2000R MIDI 1",), gated=False):
+        self._packets = [(list(p), 0.0) for p in packets]
+        self._ports = list(ports)
+        self._open = not gated
+
+    def arm(self, *_args):
+        self._open = True
+
+    def get_message(self):
+        if not self._open or not self._packets:
+            return None
+        return self._packets.pop(0)
+
+    def get_ports(self):
+        return list(self._ports)
+
+
+def _real_client(inbound, sent=None):
+    """A genuine K2000Client with fake ports, so the vendored loop really runs."""
+    from k2000.client import K2000Client
+
+    client = K2000Client.__new__(K2000Client)
+    client.midi_in = _RawPort(inbound, gated=True)
+
+    def send(data):
+        if sent is not None:
+            sent.append(data)
+        client.midi_in.arm()
+
+    client.midi_out = SimpleNamespace(send_message=send)
+    client.port_name = "K2000R MIDI 1"
+    return client
+
+
+def test_a_reply_that_cannot_decode_times_out_through_the_real_loop():
+    """End to end, not a stub: garbage in, TimeoutError out.
+
+    The vendored loop keeps the last decode failure and raises it once the wait
+    ends, which is how a corrupt reply reached callers as a ValueError from
+    inside the codec. This drives the actual `_send_and_receive`.
+    """
+    from k2000.messages import AllText
+
+    bad = bytes([0xF0, 0x07, 0x00, 0x78, 0x19, 0x01, 0x02])   # no F7, no payload
+    bridge = MidiBridge(_real_client([bad]), "stub")
+    bridge.timeout = 0.05
+
+    with pytest.raises(TimeoutError):
+        bridge._ask(AllText(), 0.05)
+
+
+def test_a_reply_of_the_wrong_class_is_not_served_as_an_answer():
+    """`_send_and_receive` matches on CLASS, and silently drops the rest.
+
+    Worth pinning: it means a DUMP cannot be answered by somebody else's INFO,
+    but also that the drop is silent -- which is why `_drain` and `_check_echo`
+    exist either side of it.
+    """
+    from k2000.definitions import ObjectType
+    from k2000.messages import Dir, Info
+
+    from k2kremote.midi_bridge import PatchUnverified
+
+    wrong = Info(ObjectType.Program, 300, 264, True, "NOT YOURS").encode()
+    bridge = MidiBridge(_real_client([wrong]), "stub")
+
+    # Dir's replies are Info, so this one IS accepted...
+    assert bridge._ask(Dir(ObjectType.Program, 300), 0.2).name == "NOT YOURS"
+
+    # ...and _check_echo is what refuses it when it is about another object.
+    with pytest.raises(PatchUnverified):
+        MidiBridge._check_echo(Info(ObjectType.Program, 300, 264, True, "X"),
+                               ObjectType.Program, 301)
+
+
+def test_poll_panel_sees_a_press_and_drains_everything_else():
+    """The RX-drain loop had no direct coverage at all."""
+    from k2000.definitions import Button, ButtonEventType, ObjectType
+    from k2000.messages import ButtonEvent, Info, Panel
+
+    press = Panel([ButtonEvent(ButtonEventType.Down, Button.SoftA, 0)]).encode()
+    other = Info(ObjectType.Program, 300, 264, True, "X").encode()
+
+    port = _RawPort([other, press, other])
+    bridge = MidiBridge(SimpleNamespace(midi_in=port), "stub")
+
+    assert bridge.poll_panel() is True
+    assert port.get_message() is None, "the buffer must be drained, not peeked"
+    assert bridge.poll_panel() is False      # nothing left to see
+
+
+def test_poll_panel_ignores_traffic_that_is_not_ours():
+    """A note from another instrument on the same wire is not a front-panel press."""
+    note_on = bytes([0x90, 0x3C, 0x64])
+    universal = bytes([0xF0, 0x7E, 0x00, 0x06, 0x02, 0xF7])
+
+    bridge = MidiBridge(SimpleNamespace(midi_in=_RawPort([note_on, universal])),
+                        "stub")
+    assert bridge.poll_panel() is False
+
+
+def test_ports_present_tells_a_busy_device_from_an_unplugged_one():
+    """The substring match that underpins busy-vs-disconnected, untested until now.
+
+    A K2000 disk load silences the unit for minutes while the ports stay
+    enumerated; that is "busy". The ports going away is "gone". Getting this
+    backwards makes the mirror cry wolf through every disk operation.
+    """
+    import k2kremote.midi_bridge as mb
+
+    bridge = MidiBridge(
+        SimpleNamespace(midi_in=_RawPort(ports=("K2000R MIDI 1",)),
+                        port_name="K2000R MIDI 1"), "stub")
+    assert bridge.ports_present() is True
+
+    gone = MidiBridge(
+        SimpleNamespace(midi_in=_RawPort(ports=("Some Other IF",)),
+                        port_name="K2000R MIDI 1"), "stub")
+    assert gone.ports_present() is False
+
+
+def test_ports_present_matches_both_halves_of_a_split_rig(monkeypatch):
+    """A split rig's port_name is "OUT -> IN"; both halves must be found."""
+    import k2kremote.midi_bridge as mb
+
+    monkeypatch.setattr(mb, "_enum_out", lambda: ["UM-ONE MIDI 1"])
+    bridge = MidiBridge(
+        SimpleNamespace(midi_in=_RawPort(ports=("K2000R MIDI 1",)),
+                        port_name="UM-ONE MIDI 1 -> K2000R MIDI 1"), "stub")
+    assert bridge.ports_present() is True
+
+    monkeypatch.setattr(mb, "_enum_out", lambda: [])       # the sender vanished
+    assert bridge.ports_present() is False
+
+
+def test_ports_present_says_present_when_it_cannot_tell(monkeypatch):
+    """An enumeration that raises must not be read as a disconnection."""
+    import k2kremote.midi_bridge as mb
+
+    def explode():
+        raise RuntimeError("ALSA is not answering")
+
+    monkeypatch.setattr(mb, "_enum_out", explode)
+    bridge = MidiBridge(SimpleNamespace(midi_in=SimpleNamespace(),
+                                        port_name="K2000R MIDI 1"), "stub")
+    assert bridge.ports_present() is True
+
+
+def test_the_device_id_shim_can_be_taken_back_off():
+    """It patches a shared library class process-wide; that must be reversible.
+
+    Without an inverse, one call changes how SysEx decodes for everything in
+    the process for as long as it lives -- including every later test, in
+    whatever order pytest ran them.
+    """
+    from k2000 import messages
+
+    from k2kremote.midi_bridge import (_install_device_id_tolerance,
+                                       _uninstall_device_id_tolerance)
+
+    on_id_5 = bytes([0xF0, 0x07, 0x05, 0x78, 0x15, 0xF7])
+    before = messages.SysexMessage.has_valid_k2_headers(on_id_5)
+
+    _install_device_id_tolerance()
+    assert messages.SysexMessage.has_valid_k2_headers(on_id_5) is True
+
+    _uninstall_device_id_tolerance()
+    assert messages.SysexMessage.has_valid_k2_headers(on_id_5) == before
+    _uninstall_device_id_tolerance()          # idempotent

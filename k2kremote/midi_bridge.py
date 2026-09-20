@@ -179,6 +179,26 @@ def _install_device_id_tolerance() -> None:
         lambda cls, data: _orig_valid(_normalize(data))
     )
     messages._k2kremote_devid_tolerant = True
+    messages._k2kremote_devid_originals = (_orig_decode, _orig_valid)
+
+
+def _uninstall_device_id_tolerance() -> None:
+    """Put the vendored class back exactly as it was.  Idempotent.
+
+    The shim patches a class in a *shared* library, process-wide, for as long
+    as the process lives -- so anything embedding this bridge inherits it, and
+    a test suite that installs it once runs every later test under it. Having
+    the inverse makes that reversible instead of permanent.
+    """
+    from k2000 import messages
+
+    originals = getattr(messages, "_k2kremote_devid_originals", None)
+    if originals is None:
+        return
+    messages.SysexMessage.decode = classmethod(originals[0].__func__)
+    messages.SysexMessage.has_valid_k2_headers = classmethod(originals[1].__func__)
+    messages._k2kremote_devid_tolerant = False
+    del messages._k2kremote_devid_originals
 
 
 # --- leak-free rtmidi port helpers ------------------------------------------

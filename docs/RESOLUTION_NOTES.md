@@ -7956,3 +7956,70 @@ the envelope contributes 1.66 dB/s, so ~88 % of the fall is the sample and the
 contour is *measured* rather than solved for. Without it the constant 2.99
 would have shipped, correct on noise and wrong on every program whose sample
 decays.
+
+## 85. Working an external code review, and what a negative control costs (2026-09-20)
+
+An external review of the whole tree (GLM-5.3-Flash, 29 numbered findings plus
+static-analysis nits and five test-suite gaps) was worked through end to end.
+The procedure is the point, not the individual fixes — those are in
+`TODO.md`'s own table and in the ten `Audit round N` commits.
+
+**Every claim was reproduced before it was actioned.** Three did not survive:
+
+* **R-12** said the committed `LFO_RATE_CHZ` table disagreed with the ROM. It
+  does not — all 256 entries are byte-for-byte identical. The reviewer read
+  the literal one row late: the file prints twelve values per row, and every
+  "actual" value quoted equals the real value twelve indices earlier. It was
+  argued *from* the other tables being correct, so a miscount arrived dressed
+  as corroboration.
+* **R-27's** first clause asked for `resume_mirror()` calls in the macro
+  screen's cancel branches. Nothing those branches undo ever paused the
+  mirror — and adding them is precisely the bug the finding's own *next*
+  clause complains about (un-pausing a hold somebody else placed).
+* **R-29** called `.iso` "never readable". `DiskImage.open` reads a raw FAT16
+  dump whatever it is called, and `.iso` is a common name for exactly that.
+
+The refuted claims were written with the same confidence as the real ones, and
+two of the three were *argued*, not merely asserted. Confidence and reasoning
+in a review are not evidence; the reproduction is.
+
+### A negative control is not free, and it fails quietly
+
+Every fix got a regression test, and every test was run against the **unfixed**
+source. Two ways that went wrong, both worth remembering:
+
+* `git stash` with no arguments stashes the new tests along with the fix. The
+  suite then passes, and the control has proved nothing. Stash the **source
+  paths only** (`git stash push -q <paths>`).
+* One control passed against unfixed code for a reason that had nothing to do
+  with the code: the assertion looked for the word `opening` in a status line,
+  and pytest's `tmp_path` is named after the test —
+  `…/test_opening_an_image_does_not0/` — so *every* status line that quoted a
+  path contained it. `startswith` instead of `in` fixed the test; noticing at
+  all came from asking why a bug-finding test passed.
+
+And one control cannot be run as a test at all: the DIRBANK quiet-window fix
+(R-18). Against the unfixed source the test does not fail, it **hangs** — the
+panel storm holds the listing open forever, which is the finding. It is run
+under `timeout` by hand and excluded from the suite's control runs.
+
+### Two bugs that only existed because nothing had ever joined
+
+Adding `join()` to the monitor TUI's worker (R-22) immediately broke every
+Textual test, because `_DeviceWorker` stored its stop flag as `self._stop` —
+shadowing `threading.Thread._stop`, which `join()` calls internally. The
+shadowing was years-old and completely invisible for exactly as long as
+nothing joined the thread. The same shape appeared in `k2kmaced`'s image
+handling: a `.lzo` was decompressed three times per open because nobody had
+ever counted, and counting was a four-line test.
+
+### The rule that keeps coming back
+
+Every finding in this review lived in a seam — a thread boundary, an error
+path, or a comment that had drifted from the code. Three of them were places
+where **the prose was ahead of the code**: `VENDORED.md` listed `MoveBank`
+among the patched decoders before it was one; `disk_browse.listing` promised
+to "leave a trace" for a short listing and left none; `SaveRefused`'s
+docstring promised "the panel was left where it was found" for failures that
+left a modal dialog open on the instrument. A comment that says what the code
+should do is a finding waiting to be written up by somebody else.

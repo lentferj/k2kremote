@@ -219,6 +219,15 @@ def test_pause_silences_all_device_traffic():
     worker.start()
     try:
         _drain_startup(bridge)
+        # Positive control FIRST: the same window, unpaused, must produce
+        # traffic. Without it, "nothing happened in 0.3 s" also passes on a
+        # machine slow enough that nothing was going to happen anyway -- a
+        # sleep-bounded negative assertion proves nothing on its own.
+        with bridge.lock:
+            bridge.calls.clear()
+        time.sleep(0.3)
+        assert bridge.kinds(), "the heartbeat never fired; the check below is empty"
+
         worker.set_paused(True)
         time.sleep(0.2)  # let any in-flight refresh finish
         with bridge.lock:

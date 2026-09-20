@@ -871,11 +871,13 @@ Two properties it must have, both from how the failure actually happened:
 
 ## External code review (GLM-5.3-Flash) — full-repo findings
 
-**Status:** in progress — recorded 2026-09-20. **Six findings verified by
-hand and closed on 2026-09-20; one REFUTED.** Each verified finding carries a
-verdict inline below. Nothing here is actioned on the review's say-so: every
-claim is reproduced first, because the one refuted finding was stated with the
-same confidence as the five that were real.
+**Status:** CLOSED — worked through on 2026-09-20. All 29 findings, the
+static-analysis nits and the five test-suite gaps were verified by hand,
+confirmed or refuted, and fixed. **Three claims were refuted** (R-12 whole,
+R-27's resume-on-cancel half, R-29's ".iso is never readable"). Nothing here
+was actioned on the review's say-so: every claim was reproduced first,
+because the refuted findings were stated with exactly the same confidence as
+the real ones.
 
     R-01  CONFIRMED  fixed  --port routed to standard(); bare --rig standard refused
     R-05  CONFIRMED  fixed  short .MAC block -> MacError, not raw struct.error
@@ -901,9 +903,24 @@ same confidence as the five that were real.
     R-29  PART        fixed  eight of nine; the ".iso is never readable" claim REFUTED
     nits  PART        fixed  5 real unused imports (not 15), both zips, B904, both F821
 
-Each fix has a regression test, and all three new tests were run against the
-**unfixed** source as a negative control: three failures there, 536 passing
-here. A test that passes against the bug it was written for tests nothing.
+Each fix has a regression test, and every new test was run against the
+**unfixed** source as a negative control — a test that passes against the bug
+it was written for tests nothing. Two lessons from doing that:
+
+* `git stash` with no paths stashes the new tests along with the fix, so the
+  control "passes" and proves nothing. Stash the source paths only.
+* One control passed against unfixed code because pytest's `tmp_path` is named
+  after the test, so the word the assertion looked for ("opening") appeared
+  inside every status line that quoted a path.
+
+The five test-suite gaps the review named are closed too: the real
+`_send_and_receive` receive path (malformed and wrong-class replies),
+`poll_panel` and `ports_present`, `main()`/teardown and the `--sysex-interval`
+clamp, the vendored client's own semantics, and monkeypatch isolation — the
+device-id shim now has an inverse and a conftest fixture that puts the
+vendored class back after every test. The throttle test asks for a gap above
+`SYSEX_FLOOR` now, so it tests the throttle rather than the clamp, and the
+pause test has a positive control ahead of its sleep-bounded negative.
 
 A complete external review of the whole tree (`k2kremote/`, `k2kmaced/`, the
 vendored `k2000/`, the test suite, CI and packaging) by GLM-5.3-Flash

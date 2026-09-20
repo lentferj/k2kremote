@@ -1691,3 +1691,72 @@ async def test_the_master_id_field_does_not_ask_the_device_per_keystroke():
             if lookups:
                 break
         assert lookups == [201], "Enter must still look the object up"
+
+
+# --- main() and teardown: the paths the audit found untested -----------------
+
+def test_main_prints_the_startup_size_and_exits(capsys):
+    from k2kremote.app import main
+
+    main(["--print-size"])
+    out = capsys.readouterr().out.strip()
+    cols, rows = out.split("x")
+    assert int(cols) > 0 and int(rows) > 0
+
+
+def test_main_closes_the_bridge_even_when_the_app_raises(monkeypatch):
+    """`finally: bridge.close()` is what frees the ALSA clients.
+
+    Untested, and it sits next to the shutdown race R-22 fixed -- so the join
+    and the close have to be right *together*.
+    """
+    from types import SimpleNamespace
+
+    import k2kremote.app as appmod
+
+    closed = []
+    bridge = SimpleNamespace(close=lambda: closed.append(True))
+    monkeypatch.setattr(appmod, "_build_bridge", lambda args: bridge)
+
+    class _Boom(appmod.K2KRemoteApp):
+        def run(self):
+            raise RuntimeError("the terminal went away")
+
+    monkeypatch.setattr(appmod, "K2KRemoteApp", _Boom)
+
+    with pytest.raises(RuntimeError):
+        appmod.main([])
+    assert closed == [True], "the bridge was left open"
+
+
+def test_sysex_interval_below_the_floor_is_clamped_not_obeyed(monkeypatch):
+    """`-i 10` must not put 10 ms between SysEx packets.
+
+    The floor is a property of the K2000's CPU: under it the LCD garbles, and
+    that failure appears on the panel rather than in any reply. The clamp lives
+    in ThrottledOut; this pins that the CLI path actually reaches it.
+    """
+    from types import SimpleNamespace
+
+    import k2kremote.app as appmod
+    from k2kremote.midi_bridge import SYSEX_FLOOR, MidiBridge, ThrottledOut
+
+    seen = {}
+
+    def fake_from_config(config, *, gap):
+        seen["gap"] = gap
+        return SimpleNamespace(client=SimpleNamespace(
+            midi_out=ThrottledOut(SimpleNamespace(send_message=lambda m: None),
+                                  gap=gap)))
+
+    monkeypatch.setattr(MidiBridge, "from_config", classmethod(
+        lambda cls, config, *, gap: fake_from_config(config, gap=gap)))
+    monkeypatch.setattr("k2kremote.midi_bridge.bidirectional_ports",
+                        lambda: ["a port"])
+
+    args = SimpleNamespace(sysex_interval=10.0, config=None, rig="standard",
+                           port=None, save_config=False)
+    bridge = appmod._build_bridge(args)
+
+    assert seen["gap"] == 0.01                       # the CLI passes it through
+    assert bridge.client.midi_out._gap == SYSEX_FLOOR  # and the floor holds
