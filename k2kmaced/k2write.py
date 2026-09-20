@@ -64,7 +64,7 @@ import os
 import struct
 from typing import Iterator, Tuple
 
-from k2kmaced.k2image import DiskImage, ImageError
+from k2kmaced.k2image import DiskImage
 
 __all__ = ["ImageWriteError", "replace_file_in_image", "plan_replacement"]
 

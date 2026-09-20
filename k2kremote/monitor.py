@@ -87,7 +87,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from typing import Iterator, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from k2000 import messages as _messages
 from k2000.messages import SysexMessage
@@ -427,7 +427,10 @@ def compare_encodings(bridge, type_name: str, idno: int) -> int:
     print("   `form` selects packing only (4 bits vs 7 bits per MIDI byte); both "
           "carry the same object, so this can never be a protocol difference.")
 
-    pairs = list(zip(a, b))
+    # strict=False deliberately: the two encodings disagreeing in LENGTH is one
+    # of the things this command exists to report, and it is reported two lines
+    # down. Raising here would lose the comparison instead of showing it.
+    pairs = list(zip(a, b, strict=False))
     same = [i for i, (x, y) in enumerate(pairs) if x == y]
     # Both zero at the same index is the weakest possible evidence of agreement,
     # and on these objects it is most of it.
@@ -446,9 +449,9 @@ def _object_type(type_name: str):
     from k2000.definitions import ObjectType
     try:
         return getattr(ObjectType, type_name)
-    except AttributeError:
+    except AttributeError as exc:
         raise SystemExit(f"unknown object type {type_name!r}; try one of: "
-                         f"{', '.join(t.name for t in ObjectType)}")
+                         f"{', '.join(t.name for t in ObjectType)}") from exc
 
 
 def read_object(bridge, type_name: str, idno: int, encoding_name: str,

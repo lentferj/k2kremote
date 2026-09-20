@@ -26,13 +26,13 @@ from typing import Callable, List, Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Static
 
 from k2000.definitions import ObjectType
 from k2kremote import k2kfields
-from k2kremote.monitor import describe, hexdump
+from k2kremote.monitor import describe
 
 
 class _DeviceWorker(threading.Thread):

@@ -899,6 +899,7 @@ same confidence as the five that were real.
     R-27  PART        fixed  five of six confirmed; the resume-on-cancel half REFUTED
     R-28  CONFIRMED  fixed  state read under the lock; _Command widened; `is` -> `==
     R-29  PART        fixed  eight of nine; the ".iso is never readable" claim REFUTED
+    nits  PART        fixed  5 real unused imports (not 15), both zips, B904, both F821
 
 Each fix has a regression test, and all three new tests were run against the
 **unfixed** source as a negative control: three failures there, 536 passing

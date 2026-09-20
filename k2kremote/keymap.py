@@ -192,7 +192,11 @@ MODE_KEYS: Dict[str, KeyAction] = {
 # Alt-chords. Lowercase letters — no Shift is involved.
 MODE_BAR_ALT: List[Tuple[str, str]] = [
     (f"{MODE_LEADER},{letter}", name)
-    for (_, name), letter in zip(MODE_BAR, ("p", "s", "q", "m", "i", "d", "g", "e"))
+    # strict: the letters are a parallel list maintained by hand, so a mode
+    # added to MODE_BAR without one here must fail loudly rather than vanish
+    # from the bar it is supposed to document.
+    for (_, name), letter in zip(MODE_BAR, ("p", "s", "q", "m", "i", "d", "g", "e"),
+                                 strict=True)
 ]
 
 # Key legend for the status row, as discrete blocks. The TUI folds these to the

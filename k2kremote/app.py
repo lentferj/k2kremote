@@ -40,6 +40,7 @@ import argparse
 import os
 import re
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -236,13 +237,12 @@ def optimal_size() -> Tuple[int, int]:
     return braille.BRAILLE_COLS + 4, _CHROME_ROWS + braille.BRAILLE_ROWS + 1
 
 
-def _size_state_path() -> "pathlib.Path":
+def _size_state_path() -> Path:
     """Where the last-used window size is cached (XDG, falling back to ~/.cache)."""
     import os
-    import pathlib
 
     base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    return pathlib.Path(base) / "k2kremote" / "window-size"
+    return Path(base) / "k2kremote" / "window-size"
 
 
 def remembered_size() -> Optional[Tuple[int, int]]:

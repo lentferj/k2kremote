@@ -58,13 +58,16 @@ from __future__ import annotations
 import sys
 import threading
 import time
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Iterable, List, Optional, Tuple
 
 import rtmidi  # noqa: E402
 
 from k2000.client import K2000Client  # noqa: E402
 from k2000.definitions import Button, ButtonEventType, EncodingFormat, ObjectType  # noqa: E402
 from k2000.messages import ButtonEvent, Change, Del, DelBank, Dump, Load, Panel  # noqa: E402
+
+if TYPE_CHECKING:  # `Info` appears only in an annotation; importing it at
+    from k2000.messages import Info  # runtime would be a needless cycle
 
 # The live Macro Table's object id. Defined here rather than imported from
 # k2kmaced: that is the *macro editor*, and the mirror must not depend on it —
