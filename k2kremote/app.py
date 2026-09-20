@@ -1147,8 +1147,10 @@ class MacroScreen(ModalScreen):
     def _write_table(self) -> None:
         self._status.update("writing ...")
         table = self._table
-        backup = os.path.join(os.path.expanduser("~"),
-                              ".k2kremote-macro-backup.bin")
+        from k2kmaced.online import default_backup_path
+        # Timestamped: one fixed path meant the second push destroyed the copy
+        # of the table the first one replaced.
+        backup = default_backup_path()
 
         def op(bridge):
             from k2kmaced import online

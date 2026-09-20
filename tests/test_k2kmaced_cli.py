@@ -264,3 +264,52 @@ def test_parse_source_does_not_split_a_windows_drive_letter():
     # ...while a member on a Windows path still splits, at the right colon.
     assert parse_source(r"C:\Users\me\hd0.img:\BOOT.MAC") == (
         r"C:\Users\me\hd0.img", r"\BOOT.MAC")
+
+
+def test_edit_refuses_an_index_that_names_no_entry(tmp_path, capsys):
+    """`--delete -1` silently removed the LAST entry, not entry -1.
+
+    Python indexing takes a negative index from the end, and anything past the
+    end ended the command with a traceback. Both are edits to what may be
+    somebody's only copy of a boot macro.
+    """
+    from k2kmaced.cli import main
+    from k2kmaced.macfile import read_mac
+
+    source = FIXTURE
+    out = tmp_path / "out.MAC"
+    before = read_mac(source).macro_table()
+
+    assert main(["edit", str(source), "-o", str(out), "--delete", "-1"]) == 1
+    assert "no entry -1" in capsys.readouterr().err
+    assert not out.exists(), "a refused edit must not write anything"
+
+    assert main(["edit", str(source), "-o", str(out),
+                 "--delete", str(len(before))]) == 1
+    assert "no entry" in capsys.readouterr().err
+
+
+def test_new_refuses_an_entry_with_no_filename(tmp_path, capsys):
+    """An entry naming no file is a line the K2000 can never load."""
+    from k2kmaced.cli import main
+
+    out = tmp_path / "out.MAC"
+    assert main(["new", "-o", str(out), "\\-FAVS\\"]) == 1
+    assert "names no file" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_extract_will_not_overwrite_without_force(tmp_path, capsys, image):
+    """`edit` and `new` both ask first; `extract` wrote straight over the file."""
+    from k2kmaced.cli import main
+
+    out = tmp_path / "taken.MAC"
+    out.write_bytes(b"something the user still wants")
+
+    assert main(["extract", str(image), "\\BOOT.MAC", "-o", str(out)]) == 1
+    assert "pass --force" in capsys.readouterr().err
+    assert out.read_bytes() == b"something the user still wants"
+
+    assert main(["extract", str(image), "\\BOOT.MAC", "-o", str(out),
+                 "--force"]) == 0
+    assert out.read_bytes() != b"something the user still wants"

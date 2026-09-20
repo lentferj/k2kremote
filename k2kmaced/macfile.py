@@ -404,6 +404,19 @@ class PramObject:
         )
 
     def serialize(self) -> bytes:
+        if len(self.data) & 1:
+            # The container has no way to say "odd": blocks are padded to an
+            # even length and `size` counts the pad, so the next parse hands
+            # back one byte more than was written. Silently growing an object
+            # by a byte is not something a bank editor may do, and the format
+            # cannot store it either way -- all 1,040 objects in the twelve
+            # real .KRZ banks measured here are even-length, as is every macro
+            # table (its entries and terminator are 2-byte aligned).
+            raise MacError(
+                f"cannot store a {len(self.data)}-byte object body: the PRAM "
+                f"container pads blocks to an even length and counts the pad, "
+                f"so an odd-length object cannot be read back as it was written"
+            )
         name = self.name.encode("ascii", errors="replace")[:16]
         # ofs counts from the ofs field to the object data: name + NUL,
         # padded to an even total.
@@ -472,10 +485,21 @@ class PramFile:
             pos -= blocksize
         else:
             raise MacError("object section is not terminated")
+        if not (32 <= osize <= len(buf)):
+            # The payload past `osize` is a .KRZ's PCM data -- megabytes of it.
+            # Treating an out-of-range size field as "no payload" meant a
+            # parse/serialise round trip silently wrote the bank back WITHOUT
+            # its samples, and nothing said so. Every real file measured here
+            # has 32 <= osize <= len (BOOT.MAC: 300/300; banks: 3,948/180,348
+            # up to 43,360/38,715,518).
+            raise MacError(
+                f"the object-section size field says {osize}, which is not "
+                f"inside this {len(buf)}-byte file"
+            )
         return cls(
             objects=objects,
             header_rest=bytes(buf[8:32]),
-            payload=bytes(buf[osize:]) if 0 < osize <= len(buf) else b"",
+            payload=bytes(buf[osize:]),
         )
 
     def serialize(self) -> bytes:

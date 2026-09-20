@@ -248,6 +248,10 @@ def _cmd_extract(args) -> int:
     with DiskImage.open(args.image) as image:
         data = image.read_file(args.member)
     PramFile.parse(data).macro_object()  # fail early if it is not a macro
+    if os.path.exists(args.output) and not getattr(args, "force", False):
+        # `edit` and `new` both ask; `extract` wrote straight over the file.
+        print(f"{args.output} exists; pass --force to overwrite", file=sys.stderr)
+        return 1
     write_bytes_atomic(args.output, data)
     print(f"wrote {args.output} ({len(data)} bytes) from {args.member}")
     return 0
@@ -355,8 +359,7 @@ def _cmd_push(args) -> int:
                 print("aborted; nothing was sent")
                 return 1
 
-        backup = args.backup or os.path.join(
-            os.path.expanduser("~"), ".k2kremote-macro-backup.bin")
+        backup = args.backup or online.default_backup_path()
         after = online.push(bridge, wanted, backup_path=backup)
         print(f"wrote {len(wanted)} entries; previous table saved to {backup}")
         print("read back and verified byte-identical to what was sent:")
@@ -391,10 +394,35 @@ def _cmd_check(args) -> int:
     return 1 if missing else 0
 
 
+def _entry_index(table, index: int) -> int:
+    """An index that names a real entry, or a MacError saying why not.
+
+    Python indexing takes -1 as "the last one", so `--delete -1` quietly
+    removed an entry the user never named, and anything past the end ended the
+    command with a traceback instead of a message. Both are edits to a file
+    that may be somebody's only copy of a boot macro.
+    """
+    if not (0 <= index < len(table.entries)):
+        if not table.entries:
+            raise MacError(f"no entry {index}: the macro table is empty")
+        raise MacError(
+            f"no entry {index}: the table has {len(table.entries)} entries "
+            f"(0-{len(table.entries) - 1})")
+    return index
+
+
 def _cmd_edit(args) -> int:
     pram, where = load_macro(args.source)
     table = pram.macro_table()
     changes: List[str] = []
+
+    # Every index first, before a single entry is touched: a half-applied edit
+    # is worse than a refused one, and the output is written from this table.
+    for index, _value in ((args.rebank or []) + (args.set_mode or [])
+                          + (args.set_drive or []) + (args.move or [])):
+        _entry_index(table, index)
+    for index in args.delete or []:
+        _entry_index(table, index)
 
     for index, value in args.rebank or []:
         table[index].bank = _bank(value)
@@ -439,6 +467,12 @@ def _cmd_new(args) -> int:
         path_spec, _, banks = spec.partition("@")
         bank, _, mode = banks.partition(":")
         directory, _, filename = path_spec.replace("/", "\\").rpartition("\\")
+        if not filename.strip():
+            # A macro entry with no filename is a line the K2000 can never
+            # load. Nothing downstream rejects it, so the table looks fine and
+            # the boot simply comes up missing that object.
+            raise MacError(
+                f"{spec!r} names no file: give a path like \\-FAVS\\KPOWFAV.KRZ")
         entries.append(
             MacroEntry(
                 drive=_drive(args.drive),
@@ -495,6 +529,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("image")
     p.add_argument("member", help="path inside the image, e.g. \\BOOT.MAC")
     p.add_argument("-o", "--output", required=True)
+    p.add_argument("--force", action="store_true",
+                   help="overwrite the output file if it exists")
     p.set_defaults(func=_cmd_extract)
 
     p = sub.add_parser(

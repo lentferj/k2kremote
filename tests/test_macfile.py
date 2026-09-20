@@ -8,6 +8,7 @@
 # project's K2000R disk-image backup — the ground truth the format was
 # reverse-engineered from (docs/MAC_FORMAT.md).
 
+import struct
 from pathlib import Path
 
 import pytest
@@ -282,3 +283,39 @@ def test_write_bytes_atomic_keeps_the_replaced_file_s_permissions(tmp_path):
 
     assert target.read_bytes() == b"new"
     assert os.stat(target).st_mode & 0o777 == 0o644
+
+
+def test_an_odd_length_object_is_refused_rather_than_grown_by_a_byte():
+    """parse(serialize(x)) must be x.
+
+    Blocks are padded to an even length and the `size` field counts the pad, so
+    an odd-length body comes back one byte longer than it went in -- silently.
+    Nothing produces one today (all 1,040 objects across the twelve real .KRZ
+    banks measured here are even, and macro entries are 2-byte aligned), but
+    this container is documented as the general .KRZ format, so the trap is
+    armed for whoever writes the next object type.
+    """
+    from k2kmaced.macfile import MacError, PramObject
+
+    with pytest.raises(MacError, match="odd-length"):
+        PramFile(objects=[PramObject(100, 35, "X", b"\x01\x02\x03")]).serialize()
+
+    # the even case is untouched, and round-trips exactly
+    even = PramFile(objects=[PramObject(100, 35, "X", b"\x01\x02")])
+    assert PramFile.parse(even.serialize()).objects[0].data == b"\x01\x02"
+
+
+def test_a_corrupt_object_section_size_does_not_silently_drop_the_payload():
+    """A .KRZ's payload is its PCM data -- megabytes of samples.
+
+    An out-of-range `osize` was treated as "no payload", so a parse/serialise
+    round trip wrote the bank back without its samples and said nothing.
+    """
+    from k2kmaced.macfile import MacError
+
+    good = PramFile(objects=[], payload=b"PCM" * 100).serialize()
+    assert PramFile.parse(good).payload == b"PCM" * 100
+
+    corrupt = good[:4] + struct.pack(">i", len(good) + 1000) + good[8:]
+    with pytest.raises(MacError, match="size field"):
+        PramFile.parse(corrupt)

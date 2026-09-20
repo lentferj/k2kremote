@@ -152,6 +152,24 @@ class PushUnverified(MacError):
     """The write was sent but the read-back does not match. State is UNKNOWN."""
 
 
+def default_backup_path() -> str:
+    """Where a push keeps the table it is about to replace.
+
+    One fixed filename was clobbered by the next push, so the recovery copy
+    died exactly while somebody was iterating -- push, look, push again, and
+    the table you wanted back is the one you just overwrote twice. Timestamped
+    and kept together, under XDG cache like the app's other state.
+    """
+    import datetime
+    import os
+
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    directory = os.path.join(base, "k2kremote", "macro-backups")
+    os.makedirs(directory, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return os.path.join(directory, f"macro-{stamp}.bin")
+
+
 def push(bridge, table: MacroTable, *, backup_path=None, allow_empty=False):
     """Replace the instrument's live macro table, then prove it took.
 

@@ -96,8 +96,15 @@ class DirEntry:
 
 
 def is_disk_image(path) -> bool:
-    """Cheap sniff: does this look like a raw or ``.lzo`` K2000 volume?"""
-    return str(path).lower().endswith((".img", ".img.lzo", ".iso", ".hda"))
+    """Cheap sniff: does this look like a raw or ``.lzo`` K2000 volume?
+
+    Any ``.lzo``, not just ``.img.lzo``: :meth:`DiskImage.open` decompresses on
+    the extension alone, so a file called ``backup.lzo`` -- which is what this
+    project's own backups are called -- opened perfectly well while every
+    caller that asks this first refused to try.
+    """
+    name = str(path).lower()
+    return name.endswith((".img", ".iso", ".hda")) or name.endswith(".lzo")
 
 
 class _LzoDecompressionCache:
@@ -252,10 +259,18 @@ class DiskImage:
         self._data_sector = self._root_sector + (
             (root_bytes + self.bytes_per_sector - 1) // self.bytes_per_sector
         )
+        want = self.fat_sectors * self.bytes_per_sector
         self._fat = self._read_at(
-            self.reserved_sectors * self.bytes_per_sector,
-            self.fat_sectors * self.bytes_per_sector,
-        )
+            self.reserved_sectors * self.bytes_per_sector, want)
+        if len(self._fat) < want:
+            # A truncated image (an interrupted copy, a half-written download)
+            # passed every boot-sector check and then surfaced as a raw
+            # struct.error from inside a cluster walk -- which reads like a bug
+            # in the FAT code rather than a short file.
+            raise ImageError(
+                f"image is truncated: its boot sector describes a "
+                f"{want:,}-byte FAT but only {len(self._fat):,} bytes are there"
+            )
 
     # -- construction ------------------------------------------------------
 
