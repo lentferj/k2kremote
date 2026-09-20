@@ -837,6 +837,9 @@ def test_autodetect_does_not_hand_the_scan_timeout_to_the_bridge(monkeypatch):
                         lambda listeners, timeout, is_reply: "k2000 in")
 
     class _Out:
+        # get_ports too: the probe looks the name up again on the client that
+        # opens it, rather than reusing the enumeration's index.
+        def get_ports(self): return ["k2000 out"]
         def open_port(self, i): pass
         def send_message(self, m): pass
         def close_port(self): pass
@@ -1054,3 +1057,200 @@ def test_device_id_tolerance_leaves_other_manufacturers_alone():
     # and a genuine K2 reply on a non-zero device id is still accepted
     on_id_5 = bytes([0xF0, 0x07, 0x05, 0x78, 0x15, 0xF7])
     assert SysexMessage.has_valid_k2_headers(on_id_5)
+
+
+def test_throttle_holds_the_floor_across_concurrent_senders():
+    """Two threads sharing one output must not both decide no wait is due.
+
+    `wait = gap - (now - _last)` was read, slept on and written with nothing
+    serialising it, so two senders racing through it computed the same wait
+    from the same stale `_last` and put two SysEx packets on the wire inside
+    the 120 ms the K2000's LCD CPU needs -- the exact condition the whole
+    throttle exists to prevent. The refresh worker and any UI-driven write are
+    two such senders.
+    """
+    import threading
+
+    from k2kremote.midi_bridge import ThrottledOut
+
+    class _Clock:
+        def __init__(self):
+            self.stamps = []
+            self.lock = threading.Lock()
+
+        def send_message(self, message):
+            with self.lock:
+                self.stamps.append(time.monotonic())
+
+    port = _Clock()
+    out = ThrottledOut(port, gap=0.12)
+    packet = [0xF0, 0x07, 0x00, 0x78, 0x15, 0xF7]
+
+    start = threading.Barrier(4)
+
+    def sender():
+        start.wait()
+        for _ in range(2):
+            out.send_message(list(packet))
+
+    threads = [threading.Thread(target=sender) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    gaps = [b - a for a, b in zip(port.stamps, port.stamps[1:])]
+    assert len(port.stamps) == 8
+    # a little slack for scheduling, nowhere near a doubled-up send
+    assert min(gaps) > 0.11, f"two sends only {min(gaps)*1000:.1f} ms apart"
+
+
+def test_delete_bank_takes_an_explicit_zero_timeout_at_face_value():
+    """`timeout or 0.5` turned "do not wait" into the default grace wait."""
+    from k2000.definitions import ObjectType
+
+    seen = {}
+
+    def fake_ask(message, timeout=None):
+        seen["timeout"] = timeout
+        raise TimeoutError("nothing comes back from DELBANK")
+
+    bridge = MidiBridge(SimpleNamespace(), "stub")
+    bridge._ask = fake_ask
+
+    assert bridge.delete_bank(ObjectType.Program, 3, timeout=0) is None
+    assert seen["timeout"] == 0
+    assert bridge.delete_bank(ObjectType.Program, 3) is None
+    assert seen["timeout"] == 0.5          # still the documented default
+
+
+def test_list_bank_is_not_held_open_by_unrelated_traffic():
+    """A finger on a front-panel button must not extend the listing forever.
+
+    The quiet window reset on *any* decodable message, and the K2000 streams
+    PANEL messages for as long as a button is held. With no EndOfBank coming
+    (a bank whose terminator was missed), the loop then ran for as long as the
+    finger did instead of giving up after `quiet_for`.
+    """
+    from k2000.definitions import Button, ButtonEventType, ObjectType
+    from k2000.messages import ButtonEvent, Info, Panel
+
+    held = Panel([ButtonEvent(ButtonEventType.Down, Button.SoftA, 0)])
+
+    class _PanelStorm:
+        """One Info, then front-panel traffic forever."""
+
+        def __init__(self):
+            self.sent = False
+            self._first = [(list(Info(ObjectType.Program, 300, 264, True,
+                                      "CUT 000").encode()), 0.0)]
+
+        def get_message(self):
+            if not self.sent:
+                return None
+            if self._first:
+                return self._first.pop(0)
+            return (list(held.encode()), 0.0)
+
+    midi_in = _PanelStorm()
+    midi_out = _RecordingMidiOut(midi_in)
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
+                        "stub")
+
+    started = time.monotonic()
+    found, done = bridge.list_bank(ObjectType.Program, 3, quiet_for=0.2)
+    elapsed = time.monotonic() - started
+
+    assert done is False               # honestly unconfirmed
+    assert [info.idno for info in found] == [300]
+    assert elapsed < 2.0, f"the panel storm held the listing open for {elapsed:.1f}s"
+
+
+def test_a_device_answering_garbage_reads_as_a_timeout_not_a_crash():
+    """`is_connected` must answer the question it was asked.
+
+    The vendored `_send_and_receive` stores the last reply that failed to
+    decode and raises *that* when the wait runs out, instead of TimeoutError.
+    So a half-connected cable -- traffic arriving, none of it decodable --
+    came out as a bare ValueError from inside the codec, and `is_connected`,
+    which catches TimeoutError, propagated it: a crash where the answer is
+    simply "no".
+    """
+    def fake_send_and_receive(message, timeout=1.0):
+        time.sleep(timeout)                       # the full wait really elapses
+        raise ValueError("SysexMessage has invalid footer")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                        "stub")
+    bridge.timeout = 0.05
+
+    with pytest.raises(TimeoutError) as exc:
+        bridge._ask(object())
+    assert "would not decode" in str(exc.value)
+    assert isinstance(exc.value.__cause__, ValueError)
+
+
+def test_a_send_side_failure_is_not_dressed_up_as_a_timeout():
+    """The translation above must not swallow errors raised before the wait."""
+    def fake_send_and_receive(message, timeout=1.0):
+        raise ValueError("cannot encode that message")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
+                        "stub")
+    bridge.timeout = 0.5
+
+    with pytest.raises(ValueError, match="cannot encode"):
+        bridge._ask(object())
+
+
+def test_ports_are_opened_by_name_on_the_client_that_opens_them(monkeypatch):
+    """An index from one enumeration means nothing to a different client.
+
+    `_enum_in()` builds its list on a throwaway client and then the port is
+    opened by that index on a *fresh* one. Anything appearing or vanishing in
+    between -- a synth switched on, another program's ALSA client going away --
+    shifts every index after it, and the open then silently succeeds on the
+    wrong device.
+    """
+    import k2kremote.midi_bridge as mb
+
+    opened = []
+
+    class _In:
+        # what the enumeration saw is gone: "old iface" has vanished, so the
+        # K2000 that was at index 1 is now at index 0.
+        def get_ports(self): return ["K2000R MIDI 1"]
+        def open_port(self, index): opened.append(index)
+        def ignore_types(self, **kw): pass
+        def close_port(self): pass
+        def delete(self): pass
+
+    monkeypatch.setattr(mb, "_enum_in", lambda: ["old iface", "K2000R MIDI 1"])
+    monkeypatch.setattr(mb.rtmidi, "MidiIn", lambda *a, **kw: _In())
+
+    merged = mb.MultiIn("K2000R MIDI 1", exact=True)
+
+    assert len(merged.ports) == 1
+    assert opened == [0], "opened the index from the stale enumeration"
+
+
+def test_movebank_decodes_an_all_types_move_like_its_siblings():
+    """`type = 0` means "all object types" in MOVEBANK too.
+
+    VENDORED.md already listed MoveBank among the messages patched for this,
+    but only EndOfBank and DelBank actually were -- the note was ahead of the
+    code. An all-types MOVEBANK, and the ENDOFBANK that acknowledges it, are
+    what a front-panel bank move looks like on the wire.
+    """
+    from k2000.encoding import encode
+    from k2000.messages import MoveBank, SysexMessage
+
+    raw = (bytes([0xF0, 0x07, 0x00, 0x78, 0x0F])
+           + encode[7](0, 2) + encode[7](3, 1) + encode[7](4, 1)
+           + bytes([0xF7]))
+
+    decoded = SysexMessage.decode(raw)
+
+    assert isinstance(decoded, MoveBank)
+    assert decoded.type is None and decoded.bank == 3 and decoded.newbank == 4
+    assert decoded.encode() == raw    # and it survives the round trip back out

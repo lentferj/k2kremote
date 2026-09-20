@@ -136,4 +136,13 @@ def decode_data_field(value: bytes, n: int, size: int) -> bytes:
         out.append(bit_array_to_int(bits[start : start + 8]))
         if len(out) == size:
             break
+    # k2kremote: a truncated packet -- a long SysEx dump split or clipped on the
+    # way in, which this rig does see -- used to come back silently short. The
+    # caller has no way to tell that from a genuinely small object, so a patch
+    # that verified its read-back could "confirm" bytes it never received.
+    if len(out) != size:
+        raise ValueError(
+            f"data field decodes to {len(out)} bytes but the message declares "
+            f"{size}: the packet is truncated"
+        )
     return bytes(out)

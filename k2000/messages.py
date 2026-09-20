@@ -41,6 +41,16 @@ def _decode_object_type(data: bytes) -> Optional[ObjectType]:
     return None if value == 0 else ObjectType(value)
 
 
+def _encode_object_type(value: Optional[ObjectType]) -> int:
+    """k2kremote: the inverse of :func:`_decode_object_type`.
+
+    Without it a message decoded from the wire with ``type = 0`` (all object
+    types) could not be encoded again -- ``None.value`` -- so the round trip
+    every test and every re-send depends on was one-way.
+    """
+    return 0 if value is None else value.value
+
+
 class SysexMessage:
     """
     A superclass for all Kurzweil K2 sysex messages.
@@ -642,7 +652,8 @@ class EndOfBank(SysexMessage):
     bank: int
 
     def _encode_body(self):
-        return encode[7](self.type.value, 2) + encode[7](self.bank, 1)
+        return (encode[7](_encode_object_type(self.type), 2)
+                + encode[7](self.bank, 1))
 
     @classmethod
     def _decode_body(cls, data):
@@ -670,7 +681,8 @@ class DelBank(SysexMessage):
     bank: int
 
     def _encode_body(self):
-        return encode[7](self.type.value, 2) + encode[7](self.bank, 1)
+        return (encode[7](_encode_object_type(self.type), 2)
+                + encode[7](self.bank, 1))
 
     @classmethod
     def _decode_body(cls, data):
@@ -700,11 +712,16 @@ class MoveBank(SysexMessage):
     newbank: int
 
     def _encode_body(self):
-        return encode[7](self.type.value, 2) + encode[7](self.bank, 1) + encode[7](self.newbank, 1)
+        return (encode[7](_encode_object_type(self.type), 2)
+                + encode[7](self.bank, 1) + encode[7](self.newbank, 1))
 
     @classmethod
     def _decode_body(cls, data):
-        _type = ObjectType(int.from_bytes(decode[7](data[:2]), "big"))
+        # k2kremote: type 0 means "all object types" here exactly as it does in
+        # ENDOFBANK/DELBANK, and MOVEBANK's own docstring above says so. Only
+        # the two siblings had been patched, so an all-types MOVEBANK still
+        # failed to decode.
+        _type = _decode_object_type(data[:2])
         bank = data[2]
         newbank = data[3]
         return cls(_type, bank, newbank)

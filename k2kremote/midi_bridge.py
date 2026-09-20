@@ -56,6 +56,7 @@ id via a tolerance shim, so a device on a non-zero id still mirrors; set
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from typing import Callable, Iterable, List, Optional, Tuple
 
@@ -268,6 +269,12 @@ class ThrottledOut:
         self._gap = max(gap, SYSEX_FLOOR)
         self._device_id = device_id
         self._last = 0.0
+        # The gap is computed from `_last` and then slept on, so two senders
+        # racing here both see the same stale `_last`, both decide no wait is
+        # due, and both send -- putting two SysEx packets on the wire inside the
+        # 120 ms the K2000's LCD CPU needs. The lock is held across the sleep on
+        # purpose: serialising senders IS the throttle.
+        self._lock = threading.Lock()
         # Cumulative seconds spent asleep on the gap. Makes the throttle
         # observable so instrumentation can tell "the device was slow" from
         # "we were waiting on ourselves" — without it, a timed call at a 500 ms
@@ -288,12 +295,13 @@ class ThrottledOut:
             message = list(message)
             message[_DEVICE_ID_INDEX] = self._device_id
 
-        wait = self._gap - (time.time() - self._last)
-        if wait > 0:
-            time.sleep(wait)
-            self.throttled_seconds += wait
-        self._port.send_message(message)
-        self._last = time.time()
+        with self._lock:
+            wait = self._gap - (time.time() - self._last)
+            if wait > 0:
+                time.sleep(wait)
+                self.throttled_seconds += wait
+            self._port.send_message(message)
+            self._last = time.time()
 
     def __getattr__(self, name):
         return getattr(self._port, name)
@@ -311,13 +319,24 @@ class MultiIn:
 
     def __init__(self, name: str, *, exact: bool = False):
         self.ports: List[rtmidi.MidiIn] = []
-        for index, port_name in enumerate(_enum_in()):
+        opened: List[str] = []
+        for port_name in _enum_in():
             matches = (port_name == name) if exact else (name.lower() in port_name.lower())
-            if matches:
-                port = rtmidi.MidiIn(queue_size_limit=8192)
-                port.open_port(index)
-                port.ignore_types(sysex=False)
-                self.ports.append(port)
+            if not matches:
+                continue
+            port = rtmidi.MidiIn(queue_size_limit=8192)
+            # Not the index from the enumeration above: that list came from a
+            # different, already-deleted client (see :func:`_index_of`). `skip`
+            # keeps two identically named ports distinct.
+            index = _index_of(port.get_ports(), port_name,
+                              skip=opened.count(port_name))
+            if index is None:
+                _delete_quiet(port)  # it went away between listing and opening
+                continue
+            port.open_port(index)
+            port.ignore_types(sysex=False)
+            self.ports.append(port)
+            opened.append(port_name)
         if not self.ports:
             raise RuntimeError(f"no input port matching {name!r}")
 
@@ -379,10 +398,32 @@ def bidirectional_ports() -> List[str]:
     return [name for name in outs if name in in_set]
 
 
+def _index_of(names: List[str], wanted: str, skip: int = 0) -> Optional[int]:
+    """Index of the ``skip``-th port called ``wanted`` in ``names``, or None.
+
+    Port indices are only meaningful for the client object that produced the
+    list. One enumeration's index handed to a *different*, freshly created
+    client is a time-of-check/time-of-use bug: a port appearing or vanishing in
+    between (a synth switched on, another program's client going away) shifts
+    every index after it, and the open then silently succeeds on the wrong
+    device. Every open here looks the name up again on the object that will do
+    the opening.
+    """
+    start = 0
+    for _ in range(skip + 1):
+        try:
+            found = names.index(wanted, start)
+        except ValueError:
+            return None
+        start = found + 1
+    return found
+
+
 def _open_out(port_name: str) -> rtmidi.MidiOut:
     out = rtmidi.MidiOut()
     names = out.get_ports()
     if port_name not in names:
+        _delete_quiet(out)  # a raised RuntimeError must not leak an ALSA client
         raise RuntimeError(f"no output port named {port_name!r}; have {names}")
     out.open_port(names.index(port_name))
     return out
@@ -417,6 +458,7 @@ def _open_in(port_name: str) -> rtmidi.MidiIn:
     in_port = rtmidi.MidiIn(queue_size_limit=8192)
     names = in_port.get_ports()
     if port_name not in names:
+        _delete_quiet(in_port)  # a raised RuntimeError must not leak an ALSA client
         raise RuntimeError(f"no input port named {port_name!r}; have {names}")
     in_port.open_port(names.index(port_name))
     in_port.ignore_types(sysex=False)
@@ -532,12 +574,12 @@ class MidiBridge:
 
         # Open every input once as a merged scan listener.
         listeners: List[Tuple[str, "rtmidi.MidiIn"]] = []
-        for index, name in enumerate(in_names):
+        for name in in_names:
             port = None
             try:
-                port = rtmidi.MidiIn(queue_size_limit=8192)
-                port.open_port(index)
-                port.ignore_types(sysex=False)
+                # By name on the opening client, not by the index this list was
+                # built with -- see :func:`_index_of`.
+                port = _open_in(name)
                 listeners.append((name, port))
             except Exception:
                 if port is not None:
@@ -556,8 +598,7 @@ class MidiBridge:
                     on_try(out_name)
                 out = None
                 try:
-                    out = rtmidi.MidiOut()
-                    out.open_port(i)
+                    out = _open_out(out_name)
                 except Exception:
                     if out is not None:
                         _delete_quiet(out)  # free the client even on open failure
@@ -764,9 +805,34 @@ class MidiBridge:
         return dropped
 
     def _ask(self, message, timeout=None):
-        """Drain, send, and return the reply — the one solicited-exchange path."""
+        """Drain, send, and return the reply — the one solicited-exchange path.
+
+        The vendored ``_send_and_receive`` remembers the last reply that failed
+        to decode and raises *that* when the timeout runs out, instead of
+        ``TimeoutError``. So a device answering garbage -- a half-connected
+        cable, another Kurzweil on the same wire -- surfaces as a bare
+        ``ValueError`` from deep inside the codec, and every caller that
+        distinguishes "not answering" from "broken" (``is_connected`` most of
+        all) sees a crash where it should see a disconnect. Restore the
+        documented contract: if the full wait elapsed, it timed out, and the
+        undecodable traffic is reported as the reason.
+        """
         self._drain()
-        return self.client._send_and_receive(message, timeout or self.timeout)
+        timeout = timeout or self.timeout
+        started = time.monotonic()
+        try:
+            return self.client._send_and_receive(message, timeout)
+        except TimeoutError:
+            raise
+        except Exception as exc:
+            # Only after the whole wait: anything raised sooner came from the
+            # send side, not from a reply, and must not be dressed as a timeout.
+            if time.monotonic() - started < timeout * 0.9:
+                raise
+            raise TimeoutError(
+                f"no usable reply within {timeout:.2f}s; the traffic that did "
+                f"arrive would not decode ({type(exc).__name__}: {exc})"
+            ) from exc
 
     @staticmethod
     def _check_echo(reply, obj_type, idno, offset=None) -> None:
@@ -896,9 +962,13 @@ class MidiBridge:
                 decoded = SysexMessage.decode(data)
             except Exception:
                 continue
-            last_seen = time.monotonic()
+            # Only this listing's own replies count as progress. Resetting on
+            # any decodable message let unrelated traffic hold the loop open --
+            # a finger resting on a front-panel button streams PANEL messages,
+            # and the listing would then run for as long as the finger did.
             if isinstance(decoded, Info):
                 found.append(decoded)
+                last_seen = time.monotonic()
             elif isinstance(decoded, EndOfBank):
                 done = True
         return found, done
@@ -1093,11 +1163,21 @@ class MidiBridge:
         ``None``. (The ENDOFBANK reply must still *decode*; ``_decode_object_type``
         in ``k2000/messages.py`` maps its type-0 field to ``None`` so it does not
         raise — verified live 2026-06-25.)
+
+        **A timeout here cannot distinguish "done, as expected" from "the cable
+        is out".** Nothing is expected to come back, so silence is the success
+        signal and an unplugged device produces exactly the same silence. A
+        caller that needs to *know* must follow up with :meth:`list_bank` on the
+        bank it wiped; this method deliberately does not, because the
+        all-types/`bank=127` nuke would mean re-listing every bank on an
+        instrument that has just been given a lot of work to do.
         """
         msg = DelBank(obj_type if obj_type is not None else self._ALL_OBJECT_TYPES,
                       bank)
         try:
-            return self._ask(msg, timeout or 0.5)
+            # `timeout or 0.5` would turn an explicit 0 -- "do not wait at all"
+            # -- back into the default grace wait.
+            return self._ask(msg, 0.5 if timeout is None else timeout)
         except TimeoutError:
             return None   # no ACK is expected; the wipe still happened
 

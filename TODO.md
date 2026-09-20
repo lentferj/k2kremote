@@ -885,6 +885,12 @@ same confidence as the five that were real.
     R-28  CONFIRMED  fixed  (type-drift half) decode annotation widened
     R-14  CONFIRMED  fixed  one decompression per image, and off the event loop
     R-15  CONFIRMED  fixed  every host-side write goes through os.replace
+    R-16  CONFIRMED  fixed  the throttle serialises its senders
+    R-17  CONFIRMED  fixed  explicit timeout=0 honoured; the rest documented
+    R-18  CONFIRMED  fixed  only INFO/ENDOFBANK extend the listing's quiet window
+    R-19  CONFIRMED  fixed  undecodable traffic reads as a timeout, not a crash
+    R-20  CONFIRMED  fixed  MoveBank type 0 + type-0 encode + truncation; 2 documented
+    R-21  CONFIRMED  fixed  every port opened by name on its own client
 
 Each fix has a regression test, and all three new tests were run against the
 **unfixed** source as a negative control: three failures there, 536 passing

@@ -77,3 +77,16 @@ def test_decode_rejects_a_byte_with_bits_above_the_field_width():
     beats silently decoding framing noise as object bytes."""
     with pytest.raises(ValueError):
         decode_data_field(bytes([0xFF, 0x00]), 7, 1)
+
+
+def test_decode_refuses_a_truncated_data_field():
+    """A short packet must fail, not come back silently short.
+
+    A long SysEx dump that arrives clipped -- a real failure mode on this rig,
+    where a 722-byte program travels as 826 MIDI bytes -- decoded to whatever
+    happened to arrive. Nothing downstream can tell a short result from a small
+    object, so `patch_object_bytes` could verify a read-back against bytes it
+    never received.
+    """
+    with pytest.raises(ValueError, match="truncated"):
+        decode_data_field(bytes([0x7F] * 5), 7, 40)
