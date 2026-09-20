@@ -238,10 +238,27 @@ def describe(data: bytes, direction: str = "") -> str:
 # --- live modes --------------------------------------------------------------
 
 def _open_bridge(port: Optional[str], rig: str):
+    """Open the bridge for `--rig`/`--port`.
+
+    Was calling `MidiBridge.open()` / `MidiBridge.open_first()`, neither of
+    which exists — every `--rig standard` invocation died with an
+    `AttributeError` before any cleanup. And under the default `rig="auto"`
+    an explicit `--port` was silently ignored, so a run against the wrong
+    interface looked like it had honoured the flag.
+
+    Now: a `--port` selects the standard single-port rig and says so, and
+    asking for `standard` without one is refused rather than guessed at —
+    picking "the first bidirectional port" on a machine with four MIDI
+    interfaces is how a measurement ends up on another instrument.
+    """
     from k2kremote.midi_bridge import MidiBridge
-    if rig == "auto":
-        return MidiBridge.autodetect()
-    return MidiBridge.open(port) if port else MidiBridge.open_first()
+    if port:
+        return MidiBridge.standard(port)
+    if rig == "standard":
+        raise SystemExit(
+            "--rig standard needs --port NAME (there is no sensible default "
+            "on a multi-interface machine); use --rig auto to autodetect")
+    return MidiBridge.autodetect()
 
 
 def watch(bridge, *, only_panel: bool = False, seconds: Optional[float] = None,

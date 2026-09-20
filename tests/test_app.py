@@ -1535,3 +1535,31 @@ def test_legend_groups_and_flat_blocks_stay_in_sync():
         b for g in keymap.LEGEND_GROUPS_ALT for b in g)
     assert "F7 Edit" in keymap.LEGEND_BLOCKS
     assert "Ctrl+e Edit" in keymap.LEGEND_BLOCKS_ALT
+
+
+def test_timing_help_text_matches_the_shipped_constants(capsys):
+    """The three timing defaults are interpolated, never typed in prose.
+
+    All three had drifted — help said 150 / 150 / 1200 ms against actual
+    500 / 350 / 2500 — and two of them advised raising a value *to* a figure
+    the default already exceeded. These are the knobs someone turns when
+    weighing the documented LCD lock-up risk, so a wrong number here is worse
+    than no number, and prose is exactly what drifts.
+    """
+    import pytest
+
+    from k2kremote.app import main
+    from k2kremote.midi_bridge import SEND_GAP, SYSEX_FLOOR
+    from k2kremote.refresh import HEARTBEAT, SETTLE
+
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    text = " ".join(capsys.readouterr().out.split())
+
+    for label, value in (("--sysex-interval", SEND_GAP),
+                         ("--settle", SETTLE),
+                         ("--heartbeat", HEARTBEAT)):
+        assert "default %.0f" % (value * 1000) in text, (
+            "%s help does not state its actual default of %.0f ms"
+            % (label, value * 1000))
+    assert "%.0f ms floor" % (SYSEX_FLOOR * 1000) in text

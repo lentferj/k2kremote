@@ -2741,12 +2741,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     conn.add_argument("--save-config", action="store_true",
                       help="write the effective port/rig selection to --config, so "
                            "later runs need no flags")
+    # Defaults are interpolated from the constants, never typed in prose: all
+    # three of these help strings had drifted (150/150/1200 against actual
+    # 500/350/2500 ms), and two of them recommended raising a value TO a
+    # figure the default already exceeded. Anyone tuning wire timing against
+    # the lock-up risk was reading numbers the program does not use.
+    from k2kremote.midi_bridge import SEND_GAP, SYSEX_FLOOR
+    from k2kremote.refresh import HEARTBEAT, SETTLE
+
     conn.add_argument("-i", "--sysex-interval", type=float, metavar="MS",
-                      help="minimum delay between outgoing SysEx messages in "
-                           "milliseconds (default 150, like 'amidi -i'; clamped to "
-                           "the RE'd 120 ms floor). Lower = snappier UI but more "
-                           "risk of garbling the K2000's LCD; raise it to 500 for "
-                           "unattended runs")
+                      help=f"minimum delay between outgoing SysEx messages in "
+                           f"milliseconds (default {SEND_GAP * 1000:.0f}, like "
+                           f"'amidi -i'; clamped to the RE'd "
+                           f"{SYSEX_FLOOR * 1000:.0f} ms floor). Lower = snappier "
+                           f"UI but more risk of garbling the K2000's LCD")
 
     disp = parser.add_argument_group("display")
     disp.add_argument("--text", action="store_true",
@@ -2765,15 +2773,17 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     misc = parser.add_argument_group("behaviour")
     misc.add_argument("--settle", type=float, metavar="MS",
-                      help="delay after a keypress before reading the redrawn LCD in "
-                           "milliseconds (default 150; lower = snappier. Too low just "
-                           "costs one cheap re-read — the mirror takes a second look "
-                           "when the screen comes back unchanged)")
+                      help=f"delay after a keypress before reading the redrawn LCD "
+                           f"in milliseconds (default {SETTLE * 1000:.0f}; lower = "
+                           f"snappier. Too low just costs one cheap re-read — the "
+                           f"mirror takes a second look when the screen comes back "
+                           f"unchanged)")
     misc.add_argument("--heartbeat", type=float, metavar="MS",
-                      help="idle refresh cadence in milliseconds (default 1200). The "
-                           "idle poll reads only the 321-byte text plane and stops "
-                           "there when nothing changed, so it is ~8x cheaper than a "
-                           "full frame; lower = front-panel changes appear sooner")
+                      help=f"idle refresh cadence in milliseconds (default "
+                           f"{HEARTBEAT * 1000:.0f}). The idle poll reads only the "
+                           f"321-byte text plane and stops there when nothing "
+                           f"changed, so it is ~8x cheaper than a full frame; "
+                           f"lower = front-panel changes appear sooner")
     misc.add_argument("--alt-keys", action="store_true",
                       help="show the terminal-safe key alternates (a-h soft keys, "
                            "Ctrl+e/x/n/v/g) in the legend and soft-key bar — for "

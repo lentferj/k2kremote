@@ -331,3 +331,39 @@ def test_requests_are_all_real_message_classes():
     for key, (class_name, blurb) in monitor.REQUESTS.items():
         assert hasattr(messages, class_name), f"{key} -> missing {class_name}"
         assert blurb
+
+
+def test_open_bridge_routes_a_port_and_refuses_a_bare_standard_rig(monkeypatch):
+    """`_open_bridge` called methods that do not exist.
+
+    `MidiBridge.open()` / `.open_first()` are nowhere in the class, so every
+    `k2kmon --rig standard` died with an AttributeError before any cleanup —
+    and under the default `rig="auto"` an explicit `--port` was silently
+    ignored, so a run against the wrong interface looked like it had honoured
+    the flag.
+    """
+    import pytest
+
+    from k2kremote import monitor
+    from k2kremote.midi_bridge import MidiBridge
+
+    assert not hasattr(MidiBridge, "open")
+    assert not hasattr(MidiBridge, "open_first")
+
+    seen = {}
+    monkeypatch.setattr(MidiBridge, "standard",
+                        classmethod(lambda cls, name: seen.setdefault("port", name)))
+    monkeypatch.setattr(MidiBridge, "autodetect",
+                        classmethod(lambda cls: seen.setdefault("auto", True)))
+
+    # a port is honoured even under the default auto rig
+    monitor._open_bridge("K2000 MIDI 1", "auto")
+    assert seen == {"port": "K2000 MIDI 1"}
+
+    # and `standard` without one is refused rather than guessed at
+    with pytest.raises(SystemExit):
+        monitor._open_bridge(None, "standard")
+
+    seen.clear()
+    monitor._open_bridge(None, "auto")
+    assert seen == {"auto": True}

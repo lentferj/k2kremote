@@ -38,7 +38,7 @@ for a byte outside a formula's *proven* range rather than guess.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple, Union
 
 from k2000.definitions import ObjectType
 from k2kremote.k2kromtables import (ENV2_FILFREQ_CT, FILTER_COARSE_HZ,
@@ -54,8 +54,12 @@ class Field:
     unit: str
     notes: str
     #: raw bytes -> decoded value, or None if out of the formula's proven
-    #: range (see module docstring).
-    decode: Callable[[bytes], Optional[int]]
+    #: range (see module docstring). A decoder may return a preformatted
+    #: string where the device's own display has fixed decimals that an int
+    #: would lose -- `LFO1 MnRate` shows `2.00 Hz`, not `2 Hz` -- so the
+    #: annotation is not `Optional[int]`, which is what it claimed while
+    #: `_lfo1_mnrate_hz` had been returning `str` since the day it was added.
+    decode: Callable[[bytes], Optional[Union[int, str]]]
     #: `(offset, predicate, why)` for a field whose meaning depends on
     #: ANOTHER byte -- the DSP block-type byte, in the one case that needs
     #: it. An ungated entry at such an offset is not merely imprecise, it

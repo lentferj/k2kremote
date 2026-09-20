@@ -210,3 +210,33 @@ def test_unknown_codes_degrade_to_labels_not_crashes():
     assert entry.mode_label == "mode 88"
     assert entry.mode_letter == "?"
     assert entry.display().startswith("?:")
+
+
+def test_short_object_block_raises_macerror_not_struct_error():
+    """A corrupt `.MAC` must fail as MacError, the documented type.
+
+    The size guard rejected only positive block sizes, so a blocksize in
+    -9..-1 produced a block shorter than its own 6-byte header and
+    `struct.unpack_from(">HHH", block)` raised a raw `struct.error` — which no
+    caller catches (`cli.py`, `app.py`'s save and open paths all list
+    MacError/OSError). A truncated file gave a CLI traceback and a TUI crash
+    with unsaved work instead of the "cannot open" status path.
+
+    `block` spans [pos+4, pos-blocksize), so six header bytes need
+    `blocksize <= -10`; the first attempt at this guard used -6 and still
+    crashed at -6..-9, which is why the whole range is asserted here.
+    """
+    import struct
+    from k2kmaced.macfile import MacError, PramFile
+
+    for blocksize in range(-40, 0):
+        buf = (b"PRAM" + struct.pack(">i", 0) + b"\x00" * 24
+               + struct.pack(">i", blocksize) + b"\x00" * 64)
+        try:
+            PramFile.parse(buf)
+        except MacError:
+            pass
+        except struct.error as exc:  # pragma: no cover - the bug being fixed
+            raise AssertionError(
+                "blocksize %d raised struct.error, not MacError: %s"
+                % (blocksize, exc))

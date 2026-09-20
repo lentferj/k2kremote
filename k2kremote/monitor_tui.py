@@ -247,6 +247,47 @@ class MonitorTuiApp(App):
             yield DataTable(id="fields")
         yield Static("", id="status")
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Apply the type/bank boxes — they had no handler at all.
+
+        Typing a new object type or bank number and pressing Enter did
+        nothing: the widgets accepted the text, the app kept browsing the old
+        type, and a refresh silently re-listed the previous selection. A
+        control that takes input and discards it is worse than no control,
+        because the screen then disagrees with what is being read.
+
+        Both are validated and refused rather than coerced: an unknown type
+        name or a bank outside 0-9 leaves the previous value in place and
+        says so, since guessing here would list a different bank than the one
+        on screen.
+        """
+        if event.input.id == "typeinput":
+            name = event.value.strip()
+            match = next((t for t in ObjectType
+                          if t.name.lower() == name.lower()), None)
+            if match is None:
+                self.notify_status(
+                    f"unknown object type {name!r}; keeping "
+                    f"{self._obj_type.name}")
+                event.input.value = self._obj_type.name
+                return
+            self._obj_type = match
+        elif event.input.id == "bankinput":
+            try:
+                bank = int(event.value.strip())
+            except ValueError:
+                bank = -1
+            if not 0 <= bank <= 9:
+                self.notify_status(
+                    f"bank must be 0-9 (the K2000's own bank field is the "
+                    f"hundreds digit); keeping {self._bank}")
+                event.input.value = str(self._bank)
+                return
+            self._bank = bank
+        else:
+            return
+        self.action_refresh()
+
     def on_mount(self) -> None:
         self._worker.start()
         objects = self.query_one("#objects", DataTable)

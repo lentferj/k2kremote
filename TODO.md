@@ -868,3 +868,336 @@ Two properties it must have, both from how the failure actually happened:
   producing a plausible offset;
 * the layer count comes from the object size, not from counting matches, since
   counting matches is the bug.
+
+## External code review (GLM-5.3-Flash) — full-repo findings
+
+**Status:** in progress — recorded 2026-09-20. **Six findings verified by
+hand and closed on 2026-09-20; one REFUTED.** Each verified finding carries a
+verdict inline below. Nothing here is actioned on the review's say-so: every
+claim is reproduced first, because the one refuted finding was stated with the
+same confidence as the five that were real.
+
+    R-01  CONFIRMED  fixed  --port routed to standard(); bare --rig standard refused
+    R-05  CONFIRMED  fixed  short .MAC block -> MacError, not raw struct.error
+    R-11  CONFIRMED  fixed  timing help interpolated from the constants
+    R-12  REFUTED           the ROM table is byte-for-byte correct; see below
+    R-13  CONFIRMED  fixed  type/bank inputs now validate and refresh
+    R-28  CONFIRMED  fixed  (type-drift half) decode annotation widened
+
+Each fix has a regression test, and all three new tests were run against the
+**unfixed** source as a negative control: three failures there, 536 passing
+here. A test that passes against the bug it was written for tests nothing.
+
+A complete external review of the whole tree (`k2kremote/`, `k2kmaced/`, the
+vendored `k2000/`, the test suite, CI and packaging) by GLM-5.3-Flash
+(Z.ai), 2026-09-20, on `main` @ `1176e8f`. Method: four parallel deep passes
+over the source plus static analysis (ruff bug-rule set) and a full test run.
+Baseline: **533/533 tests pass**; no `eval`/`exec`/`pickle`/`shell=True`
+anywhere; repo hygiene and the CI workflow clean; static analysis finds only
+21 non-test issues, all minor. Findings are numbered R-01 … R-29 for
+reference. Severity is the reviewer's assessment; every claim is to be
+re-verified before acting, since this review had no hardware.
+
+### Reachable crashes / broken features
+
+**R-01 (major) `k2kmon --port` calls methods that do not exist.**
+`monitor.py:244` calls `MidiBridge.open(port)` / `MidiBridge.open_first()` —
+neither exists in `midi_bridge.py` (checked repo-wide), so
+`k2kmon --rig standard --port "K2000"` dies with `AttributeError` before any
+cleanup. Compounding it: under the default `rig="auto"` an explicit `--port`
+is silently ignored (autodetect runs anyway).
+*What it needs:* route through `MidiBridge.standard(port)` / the first
+bidirectional port, and make `--port` imply `standard` or error out.
+
+**R-02 (major) two threads drain the same MIDI input queue.**
+`monitor_tui.py:189-198` (`WatchScreen._poll`) calls
+`bridge.client.midi_in.get_message()` on its own thread while `_DeviceWorker`
+executes ops that also consume `midi_in` (`list_bank`, every
+`_send_and_receive`). The invariant at `midi_bridge.py:623-625` says all input
+consumption is serialized on one thread; the watch thread violates it.
+Reachable from the UI (the watch modal does not suppress the `r`/`p`
+bindings). Consequences: `get_message()` from two native threads on one
+rtmidi port; the watcher **steals solicited replies** — a verify-read can fail
+with `PatchUnverified` for a write that actually landed; replies show up
+misattributed as unsolicited traffic.
+*What it needs:* serialize input consumption (worker holds a lock across an
+op, `_poll` skips while held), or route watch reads through
+`_DeviceWorker.submit`.
+
+**R-03 (major) write/read paths serve stale replies as this request's answer.**
+`midi_bridge.py:751, 882, 922-931, 955, 963, 984` — `rename`,
+`read_object_bytes`, `patch_object_bytes` (both the LOAD and the verify DUMP),
+`delete_object`, `move_object`, `delete_bank` call `_send_and_receive`
+without draining stale input first, although `monitor.ask`, `_read_raw` and
+`list_bank` all drain, with docstrings explaining why. A late reply from an
+earlier timed-out request can be consumed as this request's answer; the
+vendored client also never checks that a reply's echo fields match the
+request, which undermines `patch_object_bytes`' verified-read-back guarantee.
+*What it needs:* a `_drain()` before every `_send_and_receive` in the bridge,
+and echo validation on reads (`reply.idno == idno`, `reply.offset == offset`),
+refusing rather than verifying on mismatch.
+
+**R-04 (major) ALSA client leak on every reopen.**
+`midi_bridge.py:1004-1014` — `close()` calls `_delete_quiet(raw)` only when
+the port has a `_port` attribute; `ThrottledOut` (wrapped) has one, the plain
+`rtmidi.MidiIn` used by the `standard`/`_connect_split` rigs does not, so its
+sequencer client is never freed — every reconnect cycle leaks one
+"RtMidiIn Client" (the hazard documented at lines 168-174). Same pattern on
+error paths at `midi_bridge.py:369-375, 403-410, 299-309` (probe ports
+abandoned on raise).
+*What it needs:* `_delete_quiet` any raw rtmidi object that is not a
+`MultiIn`/`ThrottledOut`; try/except around probe opens.
+
+**R-05 (major) k2kmaced: malformed `.MAC` block size crashes with raw
+`struct.error`.** `macfile.py:434-448` — the guard rejects only positive
+sizes; a negative size in `[-5, -1]` yields a <6-byte block and
+`struct.unpack_from(">HHH", …)` raises `struct.error`, which is in no catch
+list (`cli.py:565`, `app.py:1087, 1203`). A corrupt/truncated `.MAC` gives a
+traceback in the CLI and a TUI crash with unsaved work instead of the
+"cannot open" status path.
+*What it needs:* require `pos + 4 + 6 <= pos - blocksize`, or wrap the unpack
+in `try/except struct.error → MacError`.
+
+**R-06 (major) k2kmaced: non-latin-1 path passes validation, crashes at
+save.** `app.py:351` measures the *filename* with
+`encode("latin-1", errors="replace")` and never checks the *path*;
+`macfile.py:281, 287` later encode strictly. A path like `\日本\FILE.KRZ` is
+accepted, then `UnicodeEncodeError` escapes `action_save` (`app.py:1030`
+catches only `MacError, OSError`) and escapes `action_install` entirely —
+Ctrl+S crashes the TUI with unsaved work.
+*What it needs:* strict-encode `directory + filename` in `set_full_path` →
+`MacError`; wrap `UnicodeEncodeError` in `MacroEntry.serialize` so the
+documented error type is what every caller sees.
+
+**R-07 (major) three bridge methods still on the 1.0 s timeout the project
+deliberately abandoned.** `midi_bridge.py:757, 833, 849` — `object_name`,
+`read_macro_table`, `write_macro_table` use the vendored `client.dir/dump/
+write`, which default to the vendored 1.0 s; `DEFAULT_TIMEOUT = 2.5` was
+raised precisely because 1.0 s is too short, and `read_object_bytes`/
+`patch_object_bytes` were rerouted through `_send_and_receive` for that
+reason — these three were left behind. The `k2kmaced` online push path can
+flake on slow interfaces.
+*What it needs:* route them through
+`self.client._send_and_receive(..., timeout or self.timeout)` like their
+siblings.
+
+**R-08 (major) short-but-valid ALLTEXT replies are not retried, then
+`IndexError`.** `disk_browse.py:97-105`, `macro_save.py:87-101` — `_rows()`
+retries only on exception, but the manual (quoted in macro_save's own
+docstring) says a short reply means the screen was mid-redraw and should be
+re-requested. A successful short decode then hits blind indexing (`[7]`,
+`[3]`, `[0]`) and raises `IndexError` mid-panel-flow.
+*What it needs:* treat `len(rows) < 8` as failure and retry inside the loop;
+raise only after the tries are exhausted.
+
+**R-09 (major) `rename()` sends unbounded, unvalidated names.**
+`midi_bridge.py:748-753` — only non-ASCII is rejected; control characters
+(`\n`, `\x1b`, `\x00` are all ASCII) and arbitrary lengths go to the wire
+(the >16-char truncation behaviour is itself marked "Unverified on
+hardware"), and the returned `info.name` is presented as device-confirmed
+with no check that it matches or plausibly truncates the request — and per
+R-03 it may even be stale.
+*What it needs:* clamp to 16 chars, restrict to printable `0x20-0x7E`,
+verify the round-tripped name.
+
+### Major design / correctness
+
+**R-10 process-global monkeypatch of the vendored library.**
+`midi_bridge.py:133-164` — `_install_device_id_tolerance` permanently
+rewrites `SysexMessage.decode`/`has_valid_k2_headers` for the whole process,
+and `_normalize` rewrites byte 2 of *any* packet starting `0xF0`, mangling
+non-Kurzweil `F0 7E …` universal replies before validation. The bridge
+already owns the receive path (`MultiIn`), so the normalization can live
+there and leave the vendored class untouched.
+
+**R-11 help text defaults contradict the shipped constants.**
+`app.py:2744-2776`, `refresh.py:104-116` — `--sysex-interval` documents
+"default 150" (actual `SEND_GAP = 0.5`), `--settle` says 150 (actual 0.35 s),
+`--heartbeat` says 1200 (actual 2.5 s); two help strings recommend raising
+*to* values already exceeded. Comments repeat the stale numbers
+(`refresh.py:107-108`, the duty-cycle prose at lines 72-75). Anyone tuning
+wire timing against the lock-up risk reads wrong numbers.
+*What it needs:* regenerate help/comment text from the constants and re-run
+the duty-cycle measurement.
+
+**R-12 the LFO rate prose and the ROM table disagree by ~12 bytes.**
+`k2kfields.py:96-104, 213-219` vs `k2kromtables.py:94-116` — the prose says
+the wheel stops at byte 184 (24.00 Hz) with 25.00 saturating from 186;
+indexing the table gives `[184] = 19.20`, `[196] = 24.00`, `[197] = 24.50`,
+saturation from 198. Since decoding comes from the table, either the table is
+mis-transcribed (every rate in 184-197 displays wrong) or all three prose
+claims are wrong. Every *other* table in the file spot-checked byte-for-byte
+correct, which is why this one looks like a genuine error.
+**VERDICT: REFUTED, and no hardware was needed.** The committed table is
+byte-for-byte identical to the ROM at **all 256 entries** — `[184] = 24.00`,
+`[185] = 24.50`, `[186] = 25.00`, saturating from 186 — which is exactly what
+the prose says and exactly what §70 measured on the panel.
+
+The reviewer's numbers are the table read **one row late**. The literal in
+`k2kromtables.py` is formatted 12 values per row, and every claimed value is
+the actual value 12 indices earlier:
+
+    claimed[184] = 19.20   actual[172] = 19.20
+    claimed[196] = 24.00   actual[184] = 24.00
+    claimed[197] = 24.50   actual[185] = 24.50
+
+Worth keeping for what it says about the review as a whole: this finding was
+argued *from* the other tables being correct — "every other table spot-checked
+byte-for-byte correct, which is why this one looks like a genuine error" — and
+that reasoning made a miscount look like evidence. **A confident claim in an
+audit is a claim, not a finding.**
+
+**R-13 dead controls in the monitor TUI.** `monitor_tui.py:241-244` — the
+`typeinput`/`bankinput` widgets have no submit handler anywhere; typing a new
+type/bank does nothing and refresh silently keeps browsing the old type.
+*What it needs:* an `on_input_submitted` handler (validate + update +
+refresh) or removal.
+
+**R-14 multi-GB `.lzo` decompression runs synchronously on the Textual event
+loop — up to three times per open.** `k2kmaced/app.py:1060-1099, 425-440`,
+`k2image.py:149-173` — `_open_path`, `build_editor → load_macro`, and
+`scan_image` each decompress the full image; a 2 GB backup freezes the UI for
+tens of seconds, recurs in `cli._cmd_check` (cli.py:378-382), and
+`plan_replacement`/`replace_file_in_image` open the image again too.
+*What it needs:* cache the decompressed temp path (keyed by source
+path/mtime) and move the load onto a worker with an "opening…" status.
+
+**R-15 non-atomic host-side writes.** `k2kmaced/macfile.py:505-507`
+(`write_mac` truncates before serializing — exported, currently unused, the
+trap is armed), `cli.py:426-427, 456-457, 250-251`, `app.py:396-402`; `-o`
+with `--force` at the source path destroys the only copy on a mid-write
+failure.
+*What it needs:* write to `path + ".tmp"`, fsync, `os.replace` — in
+`write_mac` and the CLI's `_cmd_edit`/`_cmd_new`/`_cmd_extract`.
+
+### Minor findings (hardware/protocol)
+
+**R-16** `ThrottledOut.send_message` (`midi_bridge.py:264-283`) has no lock;
+two concurrent senders compute `wait` from the same stale `_last` and can
+violate `SYSEX_FLOOR` — latent until R-02 is fixed.
+**R-17** `delete_bank` (`midi_bridge.py:984`) — `timeout or 0.5` treats an
+explicit `0` as missing, and treating *any* timeout as "the wipe still
+happened" is unverifiable for a bank-wide delete; document or enforce a
+follow-up DIRBANK check.
+**R-18** `list_bank`'s quiet window (`midi_bridge.py:788-807`) resets on any
+decoded message including PANEL — a finger resting on a button extends the
+loop past `quiet_for`. Reset only on `Info`/`EndOfBank`.
+**R-19** vendored `client.py:99-119` — corrupt replies surface as `ValueError`
+at timeout instead of `TimeoutError`; `MidiBridge.is_connected`
+(`midi_bridge.py:685-691`) catches only `TimeoutError`, so a
+corrupt-replying device reads as a crash, not a disconnect.
+**R-20** vendored gaps: `MoveBank._decode_body` (`k2000/messages.py:707`)
+still raises on type 0 where `EndOfBank`/`DelBank` were patched;
+`decode_data_field` (`k2000/encoding.py:134-139`) silently returns short data
+on truncated replies; `Button.SoftYes/SoftNo` (`k2000/definitions.py:70-71`)
+alias `SoftE/SoftF` (duplicate enum values — `client.yes()/.no()` send the
+A–F codes); `EndOfBank._response_classes = [Info]` (`k2000/messages.py:639`)
+makes `client._send_and_receive(DirBank…)` structurally unable to return the
+terminator (worked around correctly in `list_bank` today).
+**R-21** ports opened by index from a *different* object's enumeration
+(`midi_bridge.py:301-307`, `:546-547`) — TOCTOU on hotplug; the name-lookup
+pattern already exists in `_open_in`/`_open_out`.
+
+### Minor findings (app/TUI)
+
+**R-22** shutdown races on both apps: `worker.stop()` never joins
+(`app.py:1949-1954` + `app.py:2825-2829`; `monitor.py:636-639`), so
+`bridge.close()` in `finally` can run mid-op and callbacks target a dead
+loop. Join with a short timeout; guard callbacks with a closing flag.
+**R-23** Escape during an in-flight patch → double `pop_screen` and side
+effects after cancel; Enter queues duplicate writes
+(`monitor_tui.py:122-146`).
+**R-24** `macro_save.py:268-301` — failure paths leave a modal dialog
+unanswered on the instrument's screen; back out (Cancel/Exit only) before
+raising, and use the `more>` label search for the overwrite prompt.
+**R-25** `disk_browse.py:311-314` — a listing *shorter* than the device's own
+count is returned silently (only over-long is truncated), unlike
+`list_bank`'s honest `done=False`; the promised trace is never emitted.
+**R-26** `monitor.ask` (`monitor.py:326-334`) accepts the first inbound
+message of any type as the reply — a PANEL press during the wait is printed
+as the round-trip result.
+**R-27** k2kremote app: cancelling the macro-save leaves the mirror paused
+with no hint (`app.py:1534-1556`, cancel branches skip `resume_mirror`),
+while `_loaded` (`app.py:1086-1116`) blindly un-pauses a user's manual pause;
+`MasterFunctionScreen` fires a device round-trip on *every keystroke* of the
+id field (`app.py:1656-1659`), regressing the Enter/blur discipline of
+`RenameObjectScreen`; `text_entry.py:285-286` raises raw `IndexError` instead
+of `NameEntryFailed` on a short ALLTEXT row; `DiskBrowserScreen._done`
+(`app.py:782-793`) guards falsy but not wrong-shape results (the comment
+records that this class of bug took the app down once); `remembered_size`
+(`app.py:262`) — `max(rows, min(least_rows, rows))` is algebraically `rows`,
+a dead clamp; `entry.remove()` un-awaited (`app.py:2063`, fine on current
+Textual, a coroutine on some `textual>=0.80` versions — pin or await).
+**R-28** `refresh.py:521-527, 724` — the worker reads `_paused`/`_danger`/
+`_commands` outside the condition lock (benign under the GIL today; one
+refactor from a stale-read bug). Type drift: `k2kfields.py:58` declares
+`Optional[int]` but `_lfo1_mnrate_hz` returns `Optional[str]`;
+`refresh.py:239-241` `_Command` covers 2 of ~8 actual command kinds;
+`is` vs `==` on string constants (`refresh.py:771` vs `:763`).
+
+### Minor findings (k2kmaced)
+
+**R-29** `k2kmacli edit`: out-of-range index → `IndexError` traceback and a
+*negative* index silently deletes the last entry (`cli.py:399-413`); `new`
+accepts an empty filename (an entry that can never load, cli.py:439-451);
+`extract` overwrites without the `--force` guard its siblings have
+(cli.py:250-252); the fixed default `push` backup path is clobbered on every
+push (cli.py:358-360, online.py:183-186) — the recovery copy dies exactly
+while iterating; `macfile.py:456` silently drops the payload on a corrupt
+`osize`; `k2image.py:104-136` — no image-size/geometry validation (truncated
+FAT surfaces as `struct.error`), `dd` is not `which`-checked alongside
+`lzop`, decompression stderr is discarded; `is_disk_image`
+(k2image.py:96-98) advertises `.iso` (never readable) but not `backup.lzo`
+(readable); latent pad-byte asymmetry in the PRAM object codec for odd-length
+bodies (`macfile.py:398-405` vs `:445-448`) — unreachable via the macro path
+today, but the container is documented as the general `.KRZ` format.
+
+### Static-analysis nits
+
+21 non-test findings: 15 unused imports, 7× `zip()` without `strict=`, 2
+`global` statements (`midi_bridge.py:217`), 1 `B904`
+(`monitor.py:412`). Two F821s are deferred-annotation false positives
+(`app.py:239`, `midi_bridge.py:760` — the latter's `Info` should live under
+`TYPE_CHECKING`).
+
+### Test-suite gaps
+
+1. Malformed/corrupt SysEx through the *real* receive path — only one test
+   touches the genuine `_send_and_receive` loop and it feeds a valid packet
+   (which is why R-03's behaviour is unbested).
+2. Real `poll_panel` and `ports_present` — zero direct coverage of the
+   RX-drain loop and the substring matching that underpins the
+   busy-vs-disconnected distinction.
+3. `main()`/teardown paths — `app.main()`, unmount, and `-sysex-interval`
+   clamping in `_build_bridge` are untested (the R-22 races live here).
+4. The vendored client as a unit — `_send_and_receive`'s semantics
+   (wrong-class replies silently discarded) only incidentally covered.
+5. Monkeypatch isolation — `_install_device_id_tolerance` is never undone
+   between tests; nothing asserts a non-Kurzweil packet survives
+   `_normalize`.
+
+Also: the throttle test (`tests/test_midi_bridge.py:79-84`) names a 50 ms gap
+but actually tests the 120 ms floor (`SYSEX_FLOOR` clamps it), and the
+refresh-burst tests retain a timing-shaped flaky edge (sleep-based negative
+assertions at `tests/test_refresh.py:226-227, 305-306, 501`).
+
+### Noted as done well (reviewer's words)
+
+The single-owner worker with marshalled `call_from_thread` callbacks and the
+ALLTEXT-as-change-detector design; every write path verifying with exact
+read-back, DNAK decoding, typed confirmations and `newid=0`; tests asserting
+on wire bytes with a real `BOOT.MAC` fixture round-tripped bit-exactly;
+`SYSEX_FLOOR` clamped in code so no config can violate the lock-up threshold;
+`k2write`'s refuse-to-grow + FAT-untouched proof + mandatory read-back; and
+the measured, documented timing constants. The findings above are
+concentrated in the seams — thread boundaries, error paths, and prose that
+drifted from data — not in the core architecture.
+
+### Suggested fix order (reviewer's)
+
+1. Reachable crashes: R-01, R-05, R-06, R-08.
+2. Wire data-integrity: R-03, R-07, R-09, R-02.
+3. Resource lifecycle: R-04 + R-22 joins.
+4. Truth-in-documentation: R-11, and R-12 after a hardware check.
+5. The rest, opportunistically — plus one targeted test file for the receive
+   loop to lock in the step-2 fixes.

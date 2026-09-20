@@ -436,7 +436,17 @@ class PramFile:
             if blocksize == 0:
                 pos += 4
                 break
-            if blocksize > 0 or pos - blocksize > len(buf):
+            # The block must be large enough for its own 6-byte header, not
+            # merely negative and in range: a blocksize in [-5, -1] passed the
+            # old check and then `struct.unpack_from(">HHH", block)` raised a
+            # raw `struct.error`, which no caller catches -- a corrupt .MAC
+            # gave a CLI traceback and a TUI crash with unsaved work instead
+            # of the documented "cannot open" path.
+            # `block` spans [pos+4, pos-blocksize), so its length is
+            # `-blocksize - 4`; six header bytes therefore need
+            # `blocksize <= -10`, not `<= -6`. (The first attempt at this
+            # guard used -6 and still crashed at exactly -6..-9.)
+            if blocksize > -10 or pos - blocksize > len(buf):
                 raise MacError(f"bad object block size {blocksize} at {pos}")
             block = buf[pos + 4 : pos - blocksize]
             hash_, size, ofs = struct.unpack_from(">HHH", block)
