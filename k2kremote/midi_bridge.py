@@ -143,10 +143,23 @@ def _install_device_id_tolerance() -> None:
     if getattr(messages, "_k2kremote_devid_tolerant", False):
         return
 
-    canonical = messages.K2_HEADER[_DEVICE_ID_INDEX]
+    K2_HEADER = messages.K2_HEADER
+    canonical = K2_HEADER[_DEVICE_ID_INDEX]
 
     def _normalize(data: bytes) -> bytes:
-        if len(data) > _DEVICE_ID_INDEX and data[0] == 0xF0:
+        """Rewrite the device-id byte of a **Kurzweil K2** packet only.
+
+        This used to fire on anything starting `0xF0`, so a universal SysEx
+        reply — `F0 7E <id> 06 02 ...`, an Identity Reply, where byte 2 means
+        something else entirely — had byte 2 overwritten before the library
+        ever validated it. The header is `F0 07 <dev> 78`, so matching the
+        manufacturer byte (0x07) and the 0x78 that follows the device id
+        leaves every other manufacturer's traffic byte-for-byte intact.
+        """
+        if (len(data) > len(K2_HEADER)
+                and data[0] == K2_HEADER[0]
+                and data[1] == K2_HEADER[1]
+                and data[3] == K2_HEADER[3]):
             buf = bytearray(data)
             buf[_DEVICE_ID_INDEX] = canonical
             return bytes(buf)

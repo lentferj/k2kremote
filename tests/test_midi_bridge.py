@@ -1032,3 +1032,25 @@ def test_close_frees_a_plain_rtmidi_input_not_only_wrapped_ports():
     bridge.close()
     assert sorted(freed) == ["in", "out"], (
         "close() left a backend client allocated: %r" % freed)
+
+
+def test_device_id_tolerance_leaves_other_manufacturers_alone():
+    """The shim rewrote byte 2 of ANY packet starting 0xF0.
+
+    A universal SysEx reply — `F0 7E <id> 06 02 …`, an Identity Reply — has a
+    different layout, so overwriting byte 2 mangled it before the library ever
+    validated it. The K2 header is `F0 07 <dev> 78`, so matching the
+    manufacturer byte and the 0x78 that follows the device id is enough to
+    leave every other manufacturer's traffic byte-for-byte intact.
+    """
+    from k2000.messages import SysexMessage
+    from k2kremote.midi_bridge import _install_device_id_tolerance
+
+    _install_device_id_tolerance()
+
+    identity = bytes([0xF0, 0x7E, 0x05, 0x06, 0x02, 0x00, 0x20, 0x33, 0xF7])
+    assert not SysexMessage.has_valid_k2_headers(identity)
+
+    # and a genuine K2 reply on a non-zero device id is still accepted
+    on_id_5 = bytes([0xF0, 0x07, 0x05, 0x78, 0x15, 0xF7])
+    assert SysexMessage.has_valid_k2_headers(on_id_5)

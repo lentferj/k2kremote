@@ -51,6 +51,14 @@ class _DeviceWorker(threading.Thread):
         self.bridge = bridge
         self._queue: "list[tuple[Callable, Callable]]" = []
         self._lock = threading.Lock()
+        #: Held for the whole of a device op. `WatchScreen._poll` also
+        #: consumes `midi_in`, and two threads draining one rtmidi port meant
+        #: the watcher could swallow a SOLICITED reply -- a verify-read then
+        #: failing with PatchUnverified for a write that actually landed, and
+        #: the reply appearing in the log as unsolicited traffic. The bridge's
+        #: own invariant is that input consumption is serialized on one
+        #: thread; this is what makes that true here.
+        self.io_lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
 
@@ -64,7 +72,8 @@ class _DeviceWorker(threading.Thread):
                 continue
             thunk, on_result = job
             try:
-                result = thunk(self.bridge)
+                with self.io_lock:
+                    result = thunk(self.bridge)
                 on_result(result, None)
             except Exception as exc:  # noqa: BLE001 -- surfaced to the UI, not swallowed
                 on_result(None, exc)
@@ -188,8 +197,19 @@ class WatchScreen(ModalScreen):
 
     def _poll(self) -> None:
         bridge = self._app.bridge
+        io_lock = self._app._worker.io_lock
         while not self._stop.is_set():
-            got = bridge.client.midi_in.get_message()
+            # Never read while a device op is in flight: the reply belongs to
+            # that op. `acquire(blocking=False)` rather than a wait, so the
+            # watcher simply skips its turn instead of queueing up behind
+            # every read and then draining a burst of replies out of order.
+            if not io_lock.acquire(blocking=False):
+                time.sleep(0.01)
+                continue
+            try:
+                got = bridge.client.midi_in.get_message()
+            finally:
+                io_lock.release()
             if got is None:
                 time.sleep(0.01)
                 continue
