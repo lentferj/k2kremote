@@ -283,3 +283,58 @@ def test_reset_to_root_only_ever_presses_root_and_cancel():
     bridge = _PanelBridge([DISKPAGE, root_browser, DISKPAGE])
     disk_browse.reset_to_root(bridge)
     assert Button.SoftE not in bridge.presses, "OK must never be pressed"
+
+
+class _StuckBrowser:
+    """A browser whose header counts 25 entries but which never scrolls.
+
+    Real shape of the failure: the Delete listing ignores the alpha wheel, and
+    a screen read that keeps coming back short leaves the walk where it was.
+    Either way the window holds still and the walk ends after one screenful.
+    """
+
+    def __init__(self, shown, total):
+        self.shown = shown
+        self.total = total
+
+    def alpha_wheel(self, clicks):
+        pass
+
+    def press_button(self, button):
+        pass
+
+    def get_screen_text(self):
+        rows = [f"Dir:\\      Sel:0/{self.total}   Index:  {self.total}"]
+        for i in range(6):
+            rows.append(f"    {self.shown[i]}   1K" if i < len(self.shown) else "")
+        rows.append("Total: 1K")
+        rows.append("Select  Root  Parent  Open   OK   Cancel")
+        return "\n".join(rows)
+
+
+def test_a_listing_short_of_the_devices_own_count_says_so():
+    """A partial directory looks exactly like a small one.
+
+    Only the over-long case was handled -- a walk that ended early returned
+    quietly, and the comment promising "leave a trace" left none. Choosing from
+    a truncated listing is how a file that is plainly on the disk gets reported
+    as not being there.
+    """
+    bridge = _StuckBrowser([f"FILE{i:02d}.KRZ" for i in range(3)], total=25)
+
+    items = disk_browse.listing(bridge, limit=4)
+
+    assert len(items) == 3
+    assert items.complete is False
+    assert items.expected == 25
+
+
+def test_a_full_listing_is_marked_complete():
+    names = [f"FILE{i:02d}.KRZ" for i in range(3)]
+    bridge = _StuckBrowser(names, total=3)
+
+    items = disk_browse.listing(bridge, limit=4)
+
+    assert len(items) == 3
+    assert items.complete is True
+    assert list(i.name for i in items) == names   # still an ordinary list

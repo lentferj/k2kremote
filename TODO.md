@@ -891,6 +891,11 @@ same confidence as the five that were real.
     R-19  CONFIRMED  fixed  undecodable traffic reads as a timeout, not a crash
     R-20  CONFIRMED  fixed  MoveBank type 0 + type-0 encode + truncation; 2 documented
     R-21  CONFIRMED  fixed  every port opened by name on its own client
+    R-22  CONFIRMED  fixed  both workers join, and stay silent once stopping
+    R-23  CONFIRMED  fixed  a write in flight refuses both Escape and a 2nd Enter
+    R-24  CONFIRMED  fixed  a failed save backs out of the dialog (Cancel/Exit)
+    R-25  CONFIRMED  fixed  a short listing reports complete=False
+    R-26  CONFIRMED  fixed  `ask` waits for a SCREENREPLY, not for any traffic
 
 Each fix has a regression test, and all three new tests were run against the
 **unfixed** source as a negative control: three failures there, 536 passing

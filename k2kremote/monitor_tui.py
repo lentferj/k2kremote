@@ -60,10 +60,13 @@ class _DeviceWorker(threading.Thread):
         #: thread; this is what makes that true here.
         self.io_lock = threading.Lock()
         self._wake = threading.Event()
-        self._stop = threading.Event()
+        # NOT `self._stop`: threading.Thread has a private _stop() of its
+        # own, and shadowing it with an Event breaks join() from the
+        # inside -- which stayed invisible for as long as nothing joined.
+        self._stopping = threading.Event()
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stopping.is_set():
             self._wake.wait(0.05)
             self._wake.clear()
             with self._lock:
@@ -74,18 +77,33 @@ class _DeviceWorker(threading.Thread):
             try:
                 with self.io_lock:
                     result = thunk(self.bridge)
-                on_result(result, None)
+                if not self._stopping.is_set():
+                    on_result(result, None)
             except Exception as exc:  # noqa: BLE001 -- surfaced to the UI, not swallowed
-                on_result(None, exc)
+                if not self._stopping.is_set():
+                    on_result(None, exc)
 
     def submit(self, thunk: Callable, on_result: Callable) -> None:
         with self._lock:
             self._queue.append((thunk, on_result))
         self._wake.set()
 
-    def stop(self) -> None:
-        self._stop.set()
+    def stop(self, timeout: float = 3.0) -> None:
+        """Ask the worker to finish **and wait for it**.
+
+        `on_unmount` used to return with an op still in flight, and `k2kmon`'s
+        own `finally: bridge.close()` then deleted the rtmidi ports underneath
+        it -- a use-after-free inside a C extension, not a Python exception.
+        The `_stop` check around `on_result` is the other half: callbacks
+        marshal onto the event loop with `call_from_thread`, and after
+        shutdown there is no loop to take them (and, while this join is
+        running, no loop to take them *from* -- which is what would turn the
+        join into a deadlock).
+        """
+        self._stopping.set()
         self._wake.set()
+        if self.is_alive() and threading.current_thread() is not self:
+            self.join(timeout)
 
 
 class PatchScreen(ModalScreen):
@@ -114,6 +132,13 @@ class PatchScreen(ModalScreen):
         self._current_hex = current_hex
         self._input = Input(placeholder="new hex bytes, e.g. 28", id="patchinput")
         self._status = Static("", id="patchstatus")
+        #: True from the moment the write is handed to the worker until its
+        #: result comes back. A SysEx write is not cancellable once it is on
+        #: the wire, so this refuses both a second Enter (which queued a second
+        #: write of the same field) and Escape (which popped the modal, leaving
+        #: `_done` to pop whatever screen had taken its place and report a
+        #: "cancelled" write as done).
+        self._writing = False
 
     def compose(self) -> ComposeResult:
         with Container(id="patchbox"):
@@ -129,6 +154,9 @@ class PatchScreen(ModalScreen):
         self._input.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        if self._writing:
+            self._status.update("a write is already in flight -- waiting for it")
+            return
         hex_data = event.value.strip()
         try:
             data = bytes.fromhex(hex_data)
@@ -139,6 +167,7 @@ class PatchScreen(ModalScreen):
             self._status.update("no bytes to write")
             return
         self._status.update("writing ...")
+        self._writing = True
 
         def op(bridge):
             return bridge.patch_object_bytes(self._obj_type, self._idno,
@@ -147,14 +176,26 @@ class PatchScreen(ModalScreen):
         self._app.device_op(op, self._done)
 
     def _done(self, result, error) -> None:
+        self._writing = False
         if error is not None:
             self._status.update(f"NOT written: {error}")
+            return
+        if self.app.screen is not self:
+            # Belt and braces: pop_screen() pops whatever is on top, so popping
+            # from a screen that is no longer on top closes somebody else's.
+            self._app.notify_status(f"wrote {result.hex()} to offset {self._offset}")
             return
         self._app.pop_screen()
         self._app.notify_status(f"wrote {result.hex()} to offset {self._offset}")
         self._app.refresh_fields()
 
     def action_close(self) -> None:
+        if self._writing:
+            # Closing would not stop the write -- the bytes are already on the
+            # wire. Saying "cancelled" over a write that is still landing is the
+            # one thing this dialog must not do.
+            self._status.update("a write is in flight; it cannot be cancelled")
+            return
         self.app.pop_screen()
 
 
@@ -180,7 +221,7 @@ class WatchScreen(ModalScreen):
         self._app = app_ref
         self._lines: List[str] = []
         self._log = Static("", id="watchlog")
-        self._stop = threading.Event()
+        self._stopping = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
     def compose(self) -> ComposeResult:
@@ -193,12 +234,17 @@ class WatchScreen(ModalScreen):
         self._thread.start()
 
     def on_unmount(self) -> None:
-        self._stop.set()
+        # Joined, not just signalled: this thread reads `bridge.client.midi_in`
+        # directly, and the app's teardown closes the bridge right behind us.
+        self._stopping.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(2.0)
+            self._thread = None
 
     def _poll(self) -> None:
         bridge = self._app.bridge
         io_lock = self._app._worker.io_lock
-        while not self._stop.is_set():
+        while not self._stopping.is_set():
             # Never read while a device op is in flight: the reply belongs to
             # that op. `acquire(blocking=False)` rather than a wait, so the
             # watcher simply skips its turn instead of queueing up behind
@@ -223,7 +269,7 @@ class WatchScreen(ModalScreen):
         self._log.update("\n".join(self._lines))
 
     def action_close(self) -> None:
-        self._stop.set()
+        self._stopping.set()
         self.app.pop_screen()
 
 

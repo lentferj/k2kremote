@@ -346,11 +346,32 @@ def ask(bridge, what: str) -> int:
             time.sleep(0.002)
             continue
         elapsed = (time.monotonic() - started) * 1000
+        if not _is_reply_to(got[0], request):
+            # Unsolicited, not an answer. All four of these requests are
+            # answered by a SCREENREPLY; a front-panel press during the wait
+            # arrives as a PANEL, and taking the first thing that showed up as
+            # "the reply" printed a button press with a round-trip time on it.
+            print(describe(got[0], "in") + "   (unsolicited — still waiting)")
+            continue
         print(describe(got[0], "in"))
         print(f"   round trip {elapsed:.1f} ms")
         return 0
     print("   no reply within 3 s")
     return 1
+
+
+def _is_reply_to(data, request) -> bool:
+    """Is this inbound packet an answer to `request`, or just traffic?"""
+    from k2000.messages import ScreenReply, SysexMessage
+
+    if not SysexMessage.has_valid_k2_headers(data):
+        return False
+    try:
+        decoded = SysexMessage.decode(bytes(data))
+    except Exception:                                       # noqa: BLE001
+        return False
+    expected = tuple(request._response_classes or [ScreenReply])
+    return isinstance(decoded, expected)
 
 
 def _read_raw(bridge, kind, idno: int, encoding):

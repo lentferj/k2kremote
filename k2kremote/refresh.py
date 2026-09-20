@@ -311,6 +311,8 @@ class RefreshWorker(threading.Thread):
         self._settle_due: Optional[float] = None
         self._next_heartbeat = 0.0
         self._running = False
+        #: Set by stop(): the UI is going away, so no callback may fire.
+        self._stopping = False
         self._paused = False
         # The mirrored screen is a destructive/object-table op (delete/confirm/
         # erase). While true the worker is fully quiescent — it auto-pauses, sending
@@ -498,10 +500,24 @@ class RefreshWorker(threading.Thread):
         """
         return self._danger
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 3.0) -> None:
+        """Ask the worker to finish **and wait for it**.
+
+        Returning while an op is still in flight is not a tidy shutdown: the
+        caller's own ``finally: bridge.close()`` then deletes the rtmidi ports
+        underneath a thread that is mid-read -- a use-after-free inside a C
+        extension, not a Python exception -- and the callbacks that op still
+        has to make marshal onto an event loop that has already stopped.
+        `_stopping` closes the second half: nothing is handed to the UI once
+        shutdown has begun, so the join cannot deadlock against a
+        `call_from_thread` waiting on the loop we are blocking.
+        """
         with self._cond:
             self._running = False
+            self._stopping = True
             self._cond.notify()
+        if self.is_alive() and threading.current_thread() is not self:
+            self.join(timeout)
 
     # -- thread body ---------------------------------------------------------
     def run(self) -> None:
@@ -714,6 +730,8 @@ class RefreshWorker(threading.Thread):
 
         if self._text_only_stop(origin, text_rows, reverse):
             return
+        if self._stopping:
+            return
         self._on_frame(Frame(pixels=self._last_pixels, text_rows=text_rows, reverse=reverse))
 
         # If a keypress is already waiting, don't block ~0.8 s on the full
@@ -739,7 +757,8 @@ class RefreshWorker(threading.Thread):
         self._last_pixels = pixels
         self._last_graphics_at = monotonic()
         self._note_success()  # only after a full (both-planes) success
-        self._on_frame(Frame(pixels=pixels, text_rows=text_rows, reverse=reverse))
+        if not self._stopping:
+            self._on_frame(Frame(pixels=pixels, text_rows=text_rows, reverse=reverse))
 
     def _text_only_stop(self, origin: str, text_rows, reverse) -> bool:
         """Record this ALLTEXT read; True if the refresh can stop right here.
@@ -837,7 +856,7 @@ class RefreshWorker(threading.Thread):
         if waiting == self._waiting:
             return
         self._waiting = waiting
-        if self._on_waiting is not None:
+        if self._on_waiting is not None and not self._stopping:
             self._on_waiting(waiting)
 
     @property
@@ -866,9 +885,9 @@ class RefreshWorker(threading.Thread):
         if connected == self._connected:
             return
         self._connected = connected
-        if self._on_connection is not None:
+        if self._on_connection is not None and not self._stopping:
             self._on_connection(connected)
 
     def _report_error(self, exc: Exception) -> None:
-        if self._on_error is not None:
+        if self._on_error is not None and not self._stopping:
             self._on_error(exc)

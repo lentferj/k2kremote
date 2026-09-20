@@ -90,6 +90,22 @@ class Item(NamedTuple):
         return f"{stem.strip()}.{ext.strip()}" if ext else stem.strip()
 
 
+class Listing(list):
+    """The entries walked out of a browser, and whether they are all of them.
+
+    A plain ``list`` to every existing caller; ``complete`` is False when the
+    walk ended with fewer entries than the instrument's own count said the
+    directory has, and ``expected`` is that count (None when the header did not
+    give one). A short listing is not wrong, it is *partial* -- and nothing
+    downstream can tell the difference by looking.
+    """
+
+    def __init__(self, items=(), *, expected=None, complete=True):
+        super().__init__(items)
+        self.expected = expected
+        self.complete = complete
+
+
 class BrowseError(Exception):
     """The panel was not where this expected it."""
 
@@ -319,11 +335,17 @@ def listing(bridge, limit: int = 400) -> List[Item]:
             time.sleep(0.25)
         else:
             _step_by_presses(bridge)
-    if total is not None and len(items) != total:
-        # Not fatal — but a listing that disagrees with the instrument's own
-        # count is exactly the silent-truncation case, so leave a trace.
-        items = items[:total] if len(items) > total else items
-    return items
+    if total is not None and len(items) > total:
+        items = items[:total]
+    # A listing that disagrees with the instrument's own count is the
+    # silent-truncation case, and only the over-long half was handled: a walk
+    # that ended early -- a browser that ignores both the wheel and the cursor,
+    # a screen read that kept coming back short -- returned a directory missing
+    # entries that looked exactly like a directory that has none. The comment
+    # here promised a trace and never left one; `complete` is that trace, in
+    # the same shape as `MidiBridge.list_bank`'s own `done` flag.
+    return Listing(items, expected=total,
+                   complete=total is None or len(items) == total)
 
 
 def _step_by_presses(bridge) -> None:

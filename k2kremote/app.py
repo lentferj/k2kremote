@@ -793,6 +793,14 @@ class DiskBrowserScreen(ModalScreen):
         self._path, self._items = result
         self._index = 0
         self._redraw()
+        # Say so when the walk came back with fewer entries than the K2000's own
+        # header counts. A partial directory is indistinguishable from a small
+        # one, and choosing from it is how a file "that is not on the disk" gets
+        # reported for a file that plainly is.
+        if getattr(self._items, "complete", True) is False:
+            self._hint.update(
+                f"showing {len(self._items)} of {self._items.expected} entries — "
+                f"the listing is incomplete (r to re-read)")
 
     # -- navigation ---------------------------------------------------------
 
@@ -1948,6 +1956,9 @@ class K2KRemoteApp(App):
 
     def on_unmount(self) -> None:
         if self._worker is not None:
+            # stop() joins: main()'s `finally: bridge.close()` runs straight
+            # after this and must not pull the ports out from under a thread
+            # that is still mid-read.
             self._worker.stop()
         # Remember the size so the next launch reopens like this one.
         if self.size.width and self.size.height:

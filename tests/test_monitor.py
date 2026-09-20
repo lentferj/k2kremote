@@ -367,3 +367,41 @@ def test_open_bridge_routes_a_port_and_refuses_a_bare_standard_rig(monkeypatch):
     seen.clear()
     monitor._open_bridge(None, "auto")
     assert seen == {"auto": True}
+
+
+def test_ask_does_not_report_a_button_press_as_the_reply(capsys):
+    """`k2kmon ask` waits for an ANSWER, not for the next thing to arrive.
+
+    All four of its requests are answered by a SCREENREPLY. The K2000 also
+    echoes front-panel presses when XMIT Bttns is On, so a finger on the panel
+    during the wait produced a PANEL message -- which was printed as the
+    round-trip result, complete with a timing figure for a message nobody
+    asked for.
+    """
+    from types import SimpleNamespace
+
+    from k2000.definitions import Button, ButtonEventType
+    from k2000.messages import ButtonEvent, Panel, ScreenReply
+
+    press = list(Panel([ButtonEvent(ButtonEventType.Down, Button.SoftA, 0)]).encode())
+    reply = list(ScreenReply(b"K2000" + b"\x00" * 316).encode())
+    inbound = [(press, 0.0), (reply, 0.0)]
+    sent = []
+
+    def get_message():
+        # Gated on the request having gone out, like a real port: otherwise
+        # ask()'s own pre-send drain eats both of these before the wait starts.
+        if not sent or not inbound:
+            return None
+        return inbound.pop(0)
+
+    midi_in = SimpleNamespace(get_message=get_message)
+    midi_out = SimpleNamespace(send_message=sent.append)
+    bridge = SimpleNamespace(client=SimpleNamespace(midi_in=midi_in, midi_out=midi_out))
+
+    assert monitor.ask(bridge, "alltext") == 0
+
+    out = capsys.readouterr().out
+    assert "unsolicited" in out
+    # the round trip is reported once, for the screen reply -- not for the press
+    assert out.count("round trip") == 1

@@ -8,6 +8,7 @@
 
 import pytest
 
+from k2000.definitions import Button
 from k2kremote import macro_save
 from k2kremote.macro_save import SaveRefused
 
@@ -177,3 +178,54 @@ def test_an_extension_is_refused_with_the_stem_to_use():
     with pytest.raises(SaveRefused) as exc:
         macro_save.save_macro(bridge, "BOOT.MAC")
     assert "adds .MAC itself" in str(exc.value) and "'BOOT'" in str(exc.value)
+
+
+DIALOG = ["Save Macro", "", "", "", "", "", "",
+          "                       Cancel    OK  "]
+
+
+class _ModalBridge(FakeBridge):
+    """Goes modal on the first press; only Cancel or Exit gets back out.
+
+    A K2000 dialog is modal on the instrument itself -- `Disk` does nothing
+    while one is up. That is what makes a dialog left open by a failed save
+    everybody else's problem: the mirror, the next save, and a human at the
+    panel all start from a question they did not ask.
+    """
+
+    def __init__(self, drive="SCSI 0"):
+        super().__init__(list(DISK), drive=drive)
+        self.in_dialog = False
+
+    def press_button(self, button):
+        super().press_button(button)
+        if not self.in_dialog:
+            self.in_dialog = True
+            self._rows = list(DIALOG)
+            return
+        cancel = macro_save._SOFT[macro_save._soft_index(DIALOG[7], "Cancel")]
+        if button in (cancel, Button.Exit):
+            self.in_dialog = False
+            self._rows = list(DISK)
+
+
+def test_a_failed_save_does_not_leave_a_dialog_open_on_the_instrument():
+    """`SaveRefused` says "the panel was left where it was found"."""
+    bridge = _ModalBridge()
+
+    with pytest.raises(SaveRefused):
+        macro_save.save_macro(bridge, "TESTMAC")
+
+    assert not bridge.in_dialog, "the instrument was left inside a dialog"
+    assert "DiskMode" in bridge.get_screen_text().split("\n")[0]
+
+
+def test_backing_out_never_answers_a_question_it_did_not_read():
+    """Cancel and Exit abandon; Yes, No and OK commit to something."""
+    bridge = _ModalBridge()
+
+    with pytest.raises(SaveRefused):
+        macro_save.save_macro(bridge, "TESTMAC")
+
+    ok = macro_save._SOFT[macro_save._soft_index(DIALOG[7], "OK")]
+    assert ok not in bridge.presses[1:], "the back-out pressed OK"

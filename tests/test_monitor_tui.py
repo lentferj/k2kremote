@@ -5,6 +5,7 @@
 #
 # Synthetic only -- never opens a MIDI port, per CLAUDE.md's hardware rule.
 
+import threading
 from types import SimpleNamespace
 
 from k2000.definitions import ObjectType
@@ -183,3 +184,134 @@ async def test_patch_reports_dnak_without_closing_the_modal():
         assert await _wait_for(
             pilot, lambda: "NOT written" in str(screen._status.render()))
         assert len(app.screen_stack) > 1  # modal stays open on failure
+
+
+class _SlowPatchBridge(FakeK2000Bridge):
+    """Holds the write open so the dialog can be poked while it is in flight."""
+
+    def __init__(self):
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def patch_object_bytes(self, obj_type, idno, offset, data):
+        self.started.set()
+        self.release.wait(5)
+        return super().patch_object_bytes(obj_type, idno, offset, data)
+
+
+async def _open_patch_dialog(app, pilot):
+    objects = app.query_one("#objects")
+    await _wait_for(pilot, lambda: objects.row_count == 2)
+    app._selected_idno = 906
+    app.refresh_fields()
+    fields = app.query_one("#fields")
+    await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
+    app.action_patch_selected()
+    assert await _wait_for(pilot, lambda: len(app.screen_stack) > 1)
+    return app.screen
+
+
+async def test_escape_during_a_write_neither_cancels_nor_closes():
+    """A SysEx write cannot be called back once it is on the wire.
+
+    Escape popped the modal anyway, and the result callback then popped
+    *again* -- closing whatever screen had taken its place -- and reported the
+    write as done for an operation the user had been told was cancelled.
+    """
+    bridge = _SlowPatchBridge()
+    app = MonitorTuiApp(bridge)
+    async with app.run_test() as pilot:
+        screen = await _open_patch_dialog(app, pilot)
+        screen.on_input_submitted(
+            type(screen._input).Submitted(screen._input, "50"))
+        assert await _wait_for(pilot, lambda: bridge.started.is_set())
+
+        screen.action_close()
+        await pilot.pause()
+        assert app.screen is screen, "the modal closed over a write in flight"
+        assert "cannot be cancelled" in str(screen._status.render())
+
+        bridge.release.set()
+        assert await _wait_for(pilot, lambda: len(app.screen_stack) == 1)
+        assert len(bridge.patches) == 1
+
+
+async def test_a_second_enter_does_not_queue_a_second_write():
+    """Enter twice wrote the same field twice -- once per keypress."""
+    bridge = _SlowPatchBridge()
+    app = MonitorTuiApp(bridge)
+    async with app.run_test() as pilot:
+        screen = await _open_patch_dialog(app, pilot)
+        submitted = type(screen._input).Submitted(screen._input, "50")
+        screen.on_input_submitted(submitted)
+        assert await _wait_for(pilot, lambda: bridge.started.is_set())
+
+        screen.on_input_submitted(submitted)
+        assert "already in flight" in str(screen._status.render())
+
+        bridge.release.set()
+        assert await _wait_for(pilot, lambda: len(app.screen_stack) == 1)
+        assert len(bridge.patches) == 1, bridge.patches
+
+
+def test_worker_stop_waits_for_the_op_in_flight():
+    """Shutdown must not race `bridge.close()`.
+
+    `k2kmon`'s own `finally: bridge.close()` runs the moment the app's
+    `on_unmount` returns. With stop() only setting a flag, that deleted the
+    rtmidi ports underneath a thread still inside a read -- a use-after-free
+    in a C extension, which is not something Python will raise for you.
+    """
+    import threading
+    import time
+
+    from k2kremote.monitor_tui import _DeviceWorker
+
+    finished = threading.Event()
+
+    def slow(_bridge):
+        time.sleep(0.3)
+        finished.set()
+        return "done"
+
+    worker = _DeviceWorker(SimpleNamespace())
+    worker.start()
+    worker.submit(slow, lambda r, e: None)
+    time.sleep(0.1)                       # let it pick the job up
+
+    worker.stop()
+
+    assert finished.is_set(), "stop() returned with the device op still running"
+    assert not worker.is_alive()
+
+
+def test_worker_hands_nothing_back_once_it_is_stopping():
+    """A callback after shutdown targets an event loop that is gone.
+
+    Every callback here is marshalled with `call_from_thread`, which waits on
+    the loop -- so firing one during shutdown is both useless and, while the UI
+    thread is inside the join, a deadlock.
+    """
+    import threading
+    import time
+
+    from k2kremote.monitor_tui import _DeviceWorker
+
+    called = []
+    running = threading.Event()
+
+    def slow(_bridge):
+        running.set()
+        time.sleep(0.2)
+        return "done"
+
+    worker = _DeviceWorker(SimpleNamespace())
+    worker.start()
+    worker.submit(slow, lambda r, e: called.append((r, e)))
+    running.wait(2)
+
+    worker.stop()
+    time.sleep(0.4)          # long enough for the op to have finished and fired
+
+    assert called == []

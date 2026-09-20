@@ -1029,3 +1029,38 @@ def test_waiting_clears_when_the_device_comes_back():
     finally:
         worker.stop()
         worker.join(timeout=1.0)
+
+
+def test_stop_waits_for_the_read_in_flight_and_then_says_nothing():
+    """`app.main()` closes the bridge the moment on_unmount returns.
+
+    A GETGRAPHICS takes ~963 ms on the real instrument, so "signal and return"
+    reliably left a thread inside a read while the rtmidi ports were deleted
+    under it -- a use-after-free in a C extension. And any callback that op
+    still owed the UI was marshalled with `call_from_thread` onto an event loop
+    that had already stopped.
+    """
+    class _SlowBridge(FakeBridge):
+        def __init__(self):
+            super().__init__()
+            self.in_read = threading.Event()
+            self.left_read = threading.Event()
+
+        def get_screen_text(self):
+            self.in_read.set()
+            time.sleep(0.4)
+            self.left_read.set()
+            return super().get_screen_text()
+
+    bridge = _SlowBridge()
+    frames, errors = [], []
+    worker = _worker(bridge, frames, errors, mirror_panel=False)
+    worker.start()
+    assert bridge.in_read.wait(3), "the worker never started its first read"
+    before = len(frames)
+
+    worker.stop()
+
+    assert bridge.left_read.is_set(), "stop() returned mid-read"
+    assert not worker.is_alive()
+    assert len(frames) == before, "a frame was delivered after shutdown began"

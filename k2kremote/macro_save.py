@@ -243,76 +243,113 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
             f"and the save prompt shows the path but never the drive."
         )
 
-    # 2. Disk -> Save -> Macro -> All lands on the filename editor.
-    _press_labelled(bridge, "Save")
-    _press_labelled(bridge, "Macro")
-    _press_labelled(bridge, "All", settle=1.4)
+    # 2-5 run inside dialogs on the instrument's own screen, so every exit
+    #     from here has to leave the panel somewhere sane -- see _from_disk_page.
+    return _from_disk_page(bridge, stem, where, name_width=name_width,
+                           overwrite=overwrite)
 
-    row = _rows(bridge)[3]
-    if "Save as:" not in row:
-        raise SaveRefused(f"expected the filename editor, got {row.rstrip()!r}")
 
-    # 3. Clear the pre-filled default and type ours, then read it back.
-    #    Delete removes the character to the RIGHT, so the first one can only be
-    #    overwritten -- a delete-until-empty loop would never end.
-    text_entry.home_cursor(bridge, width=name_width)
-    for _ in range(name_width):
-        current = _rows(bridge)[3].split("Save as:")[-1].strip()
-        if len(current) <= 1:
-            break
-        i = _soft_index(_rows(bridge)[7], "Delete")
-        if i is None:
-            break
-        bridge.press_button(_SOFT[i])
-        time.sleep(0.45)
-    text_entry.home_cursor(bridge, width=name_width)
-    text_entry.type_name(bridge, stem, name_row=3, name_col=16, start_col=0)
+def _from_disk_page(bridge, stem: str, where, *, name_width: int,
+                    overwrite: bool) -> str:
+    """Steps 2-5 of :func:`save_macro`, from the Disk page to the written file.
 
-    shown = _rows(bridge)[3].split("Save as:")[-1].strip()
-    if shown.upper() != stem:
-        raise SaveRefused(
-            f"the field reads {shown!r}, not {stem!r} — nothing was written"
-        )
+    Split out so the one caller can guarantee the back-out: from step 2 on, the
+    instrument is inside its own modal dialogs, and every raise in here used to
+    leave one of them open on its screen -- the filename editor, the directory
+    prompt, or the `Replace existing file?` question. `SaveRefused` promises
+    "the panel was left where it was found", which stopped being true the moment
+    step 2 pressed `Save`; and a mirror that reconnects onto an unanswered
+    prompt has no way to know it is not the user's own.
 
-    # 4. Commit: name -> OK, then the directory prompt -> OK.
-    _press_labelled(bridge, "OK", settle=1.6)
-    row = " ".join(_rows(bridge))
-    if "current directory" not in row:
-        raise SaveUnverified(f"expected the directory prompt, got {row[:80]!r}")
-    if stem not in row.upper():
-        raise SaveRefused(
-            f"the prompt names a different file than {stem!r}: {row[:80]!r}"
-        )
-    _press_labelled(bridge, "OK", settle=2.5)
+    Backing out presses **Cancel** (or Exit), never `Yes`/`No`/`OK` -- the same
+    rule `disk_browse.ensure_disk_mode` follows, which is what does it here.
+    """
+    from k2kremote import disk_browse
+    try:
+        # 2. Disk -> Save -> Macro -> All lands on the filename editor.
+        _press_labelled(bridge, "Save")
+        _press_labelled(bridge, "Macro")
+        _press_labelled(bridge, "All", settle=1.4)
 
-    # 5. The instrument's own overwrite guard, then the write. It goes silent
-    #    while writing, which is normal.
-    deadline = time.monotonic() + WRITE_TIMEOUT
-    while time.monotonic() < deadline:
-        try:
-            rows = bridge.get_screen_text().split("\n")
-        except Exception:                                   # noqa: BLE001
-            time.sleep(1.5)
-            continue
-        text = " ".join(rows)
-        if "eplace existing" in text:
-            answer = "Yes" if overwrite else "No"
-            i = _soft_index(rows[7], answer)
+        row = _rows(bridge)[3]
+        if "Save as:" not in row:
+            raise SaveRefused(f"expected the filename editor, got {row.rstrip()!r}")
+
+        # 3. Clear the pre-filled default and type ours, then read it back.
+        #    Delete removes the character to the RIGHT, so the first one can only be
+        #    overwritten -- a delete-until-empty loop would never end.
+        text_entry.home_cursor(bridge, width=name_width)
+        for _ in range(name_width):
+            current = _rows(bridge)[3].split("Save as:")[-1].strip()
+            if len(current) <= 1:
+                break
+            i = _soft_index(_rows(bridge)[7], "Delete")
             if i is None:
-                raise SaveUnverified(
-                    f"the K2000 asks {rows[3].strip()!r} but offers no {answer!r}"
-                )
+                break
             bridge.press_button(_SOFT[i])
-            time.sleep(2.0)
-            if not overwrite:
-                # The instrument told us the name is taken -- which is how we
-                # find out, since nothing here lists the directory first. Say so
-                # in a way the caller can act on rather than as a flat failure.
-                raise SaveNeedsOverwrite(stem)
-            continue
-        if "DiskMode" in rows[0]:
-            # Say where it went. The directory is whatever the instrument was
-            # already in, which is not visible from the name alone.
-            return f"{stem}.MAC in {where or 'the current directory'}"
-        time.sleep(1.0)
-    raise SaveUnverified("the K2000 did not return to Disk mode after the write")
+            time.sleep(0.45)
+        text_entry.home_cursor(bridge, width=name_width)
+        text_entry.type_name(bridge, stem, name_row=3, name_col=16, start_col=0)
+
+        shown = _rows(bridge)[3].split("Save as:")[-1].strip()
+        if shown.upper() != stem:
+            raise SaveRefused(
+                f"the field reads {shown!r}, not {stem!r} — nothing was written"
+            )
+
+        # 4. Commit: name -> OK, then the directory prompt -> OK.
+        _press_labelled(bridge, "OK", settle=1.6)
+        row = " ".join(_rows(bridge))
+        if "current directory" not in row:
+            raise SaveUnverified(f"expected the directory prompt, got {row[:80]!r}")
+        if stem not in row.upper():
+            raise SaveRefused(
+                f"the prompt names a different file than {stem!r}: {row[:80]!r}"
+            )
+        _press_labelled(bridge, "OK", settle=2.5)
+
+        # 5. The instrument's own overwrite guard, then the write. It goes silent
+        #    while writing, which is normal.
+        deadline = time.monotonic() + WRITE_TIMEOUT
+        while time.monotonic() < deadline:
+            try:
+                rows = bridge.get_screen_text().split("\n")
+            except Exception:                                   # noqa: BLE001
+                time.sleep(1.5)
+                continue
+            text = " ".join(rows)
+            if "eplace existing" in text:
+                answer = "Yes" if overwrite else "No"
+                # Through _press_labelled, like every other key in this module:
+                # a single look at the current label page is exactly the
+                # assumption the rest of the flow refuses to make, and this is
+                # the one prompt where being unable to answer leaves the
+                # instrument blocked.
+                try:
+                    _press_labelled(bridge, answer, settle=2.0)
+                except SaveRefused as exc:
+                    raise SaveUnverified(
+                        f"the K2000 asks {rows[3].strip()!r} but offers no "
+                        f"{answer!r} soft key: {exc}"
+                    ) from exc
+                if not overwrite:
+                    # The instrument told us the name is taken -- which is how we
+                    # find out, since nothing here lists the directory first. Say so
+                    # in a way the caller can act on rather than as a flat failure.
+                    raise SaveNeedsOverwrite(stem)
+                continue
+            if "DiskMode" in rows[0]:
+                # Say where it went. The directory is whatever the instrument was
+                # already in, which is not visible from the name alone.
+                return f"{stem}.MAC in {where or 'the current directory'}"
+            time.sleep(1.0)
+        raise SaveUnverified("the K2000 did not return to Disk mode after the write")
+    except Exception:
+        # Whatever failed, do not walk away from an open dialog. Best-effort:
+        # the original failure is what the caller needs to see, so a back-out
+        # that itself fails must not replace it.
+        try:
+            disk_browse.ensure_disk_mode(bridge)
+        except Exception:                                   # noqa: BLE001
+            pass
+        raise
