@@ -9,7 +9,10 @@
 # cross-checks the reader against an image built by the sibling mpc2emu
 # project's own FAT16 writer, and skips when mpc2emu is not installed.
 
+import os
+import shutil
 import struct
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -219,3 +222,57 @@ def test_reads_an_image_written_by_mpc2emu(tmp_path):
         assert img.read_file("\\BOOT.MAC") == payload
         assert img.read_file("\\--FAVS\\KPOWFAV.KRZ") == payload
         assert [e.path for e in img.find(".MAC")] == ["\\BOOT.MAC"]
+
+
+@pytest.mark.skipif(shutil.which("lzop") is None, reason="lzop not installed")
+def test_lzo_images_are_decompressed_once_and_reused(tmp_path, monkeypatch):
+    """Opening one `.lzo` image three times must not run lzop three times.
+
+    The editor opens a chosen image three times for a single keypress -- the
+    .MAC scan, `load_macro` reading the member, and `scan_image` listing the
+    files -- and each open ran `lzop -dc` over the whole volume. On this
+    project's own 2 GB backups that is minutes of a frozen UI for one open.
+    """
+    from k2kmaced.k2image import _LZO_CACHE
+
+    raw = build_image(tmp_path / "vol.img", {"": {"BOOT.MAC": b"x" * 40}})
+    subprocess.run(["lzop", "-q", "-o", str(tmp_path / "vol.img.lzo"), str(raw)],
+                   check=True)
+    lzo = str(tmp_path / "vol.img.lzo")
+
+    _LZO_CACHE.clear(force=True)
+    runs = []
+    real = type(_LZO_CACHE)._decompress
+
+    def counted(path):
+        runs.append(path)
+        return real(path)
+
+    monkeypatch.setattr(_LZO_CACHE, "_decompress", counted)
+    try:
+        for _ in range(3):
+            with DiskImage.open(lzo) as image:
+                assert [e.name for e in image.walk() if not e.is_dir] == ["BOOT.MAC"]
+        assert len(runs) == 1, f"decompressed {len(runs)} times, not once"
+
+        # touching the source invalidates the cache
+        os.utime(lzo, (0, 0))
+        with DiskImage.open(lzo):
+            pass
+        assert len(runs) == 2
+    finally:
+        _LZO_CACHE.clear(force=True)
+
+
+@pytest.mark.skipif(shutil.which("lzop") is None, reason="lzop not installed")
+def test_a_corrupt_lzo_reports_what_lzop_said(tmp_path):
+    """lzop's stderr went to /dev/null, so every failure read the same."""
+    from k2kmaced.k2image import _LZO_CACHE
+
+    bad = tmp_path / "not-really.img.lzo"
+    bad.write_bytes(b"this is not an lzop stream" * 10)
+    _LZO_CACHE.clear(force=True)
+    with pytest.raises(ImageError) as exc:
+        DiskImage.open(str(bad))
+    assert "lzop failed" in str(exc.value)
+    assert len(str(exc.value)) > len(f"lzop failed to decompress {bad}")

@@ -64,6 +64,7 @@ from k2kmaced.macfile import (
     MacroEntry,
     MacroTable,
     PramFile,
+    write_bytes_atomic,
 )
 
 __all__ = ["parse_source", "load_macro", "format_table", "main"]
@@ -247,8 +248,7 @@ def _cmd_extract(args) -> int:
     with DiskImage.open(args.image) as image:
         data = image.read_file(args.member)
     PramFile.parse(data).macro_object()  # fail early if it is not a macro
-    with open(args.output, "wb") as fh:
-        fh.write(data)
+    write_bytes_atomic(args.output, data)
     print(f"wrote {args.output} ({len(data)} bytes) from {args.member}")
     return 0
 
@@ -423,8 +423,7 @@ def _cmd_edit(args) -> int:
     if os.path.exists(args.output) and not args.force:
         print(f"{args.output} exists; pass --force to overwrite", file=sys.stderr)
         return 1
-    with open(args.output, "wb") as fh:
-        fh.write(pram.serialize())
+    write_bytes_atomic(args.output, pram.serialize())
 
     print(f"{where} → {args.output}")
     for change in changes:
@@ -453,8 +452,7 @@ def _cmd_new(args) -> int:
     if os.path.exists(args.output) and not args.force:
         print(f"{args.output} exists; pass --force to overwrite", file=sys.stderr)
         return 1
-    with open(args.output, "wb") as fh:
-        fh.write(pram.serialize())
+    write_bytes_atomic(args.output, pram.serialize())
     print(f"wrote {args.output}")
     for line in format_table(pram.macro_table()):
         print(line)

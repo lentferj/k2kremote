@@ -883,6 +883,8 @@ same confidence as the five that were real.
     R-12  REFUTED           the ROM table is byte-for-byte correct; see below
     R-13  CONFIRMED  fixed  type/bank inputs now validate and refresh
     R-28  CONFIRMED  fixed  (type-drift half) decode annotation widened
+    R-14  CONFIRMED  fixed  one decompression per image, and off the event loop
+    R-15  CONFIRMED  fixed  every host-side write goes through os.replace
 
 Each fix has a regression test, and all three new tests were run against the
 **unfixed** source as a negative control: three failures there, 536 passing

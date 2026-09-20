@@ -240,3 +240,45 @@ def test_short_object_block_raises_macerror_not_struct_error():
             raise AssertionError(
                 "blocksize %d raised struct.error, not MacError: %s"
                 % (blocksize, exc))
+
+
+def test_write_mac_leaves_the_original_intact_when_serialising_fails(tmp_path):
+    """`-o <the input> --force` must not be able to destroy the only copy.
+
+    `open(path, "wb")` truncates before `serialize()` has produced a single
+    byte, so a table that cannot be encoded -- exactly what the MacError
+    backstop in `MacroEntry.serialize` now raises for a non-Latin-1 name --
+    turned an edit of a file in place into an empty file. The macro table it
+    held may have been typed in by hand on the instrument's own front panel.
+    """
+    from k2kmaced.macfile import MacError, write_mac
+
+    target = tmp_path / "BOOT.MAC"
+    original = b"the macro table somebody typed in by hand"
+    target.write_bytes(original)
+
+    class Exploding(PramFile):
+        def serialize(self):
+            raise MacError("cannot encode")
+
+    with pytest.raises(MacError):
+        write_mac(target, Exploding(objects=[], header_rest=bytes(24)))
+
+    assert target.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [target]  # and no temp file left behind
+
+
+def test_write_bytes_atomic_keeps_the_replaced_file_s_permissions(tmp_path):
+    """mkstemp is 0600; a file the user could read yesterday must stay readable."""
+    import os
+
+    from k2kmaced.macfile import write_bytes_atomic
+
+    target = tmp_path / "BOOT.MAC"
+    target.write_bytes(b"old")
+    os.chmod(target, 0o644)
+
+    write_bytes_atomic(target, b"new")
+
+    assert target.read_bytes() == b"new"
+    assert os.stat(target).st_mode & 0o777 == 0o644

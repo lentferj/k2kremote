@@ -55,7 +55,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
-from k2kmaced.macfile import MacError, MacroEntry, MacroTable
+from k2kmaced.macfile import (
+    MacError,
+    MacroEntry,
+    MacroTable,
+    write_bytes_atomic,
+)
 
 #: The live table's object identity. Not a guess: `macfile.MACRO_TYPE` /
 #: `MACRO_ID` carry the same values, taken from the `.MAC` container's own
@@ -182,8 +187,7 @@ def push(bridge, table: MacroTable, *, backup_path=None, allow_empty=False):
     # the new table turns out to be wrong in a way that is hard to retype.
     previous = bridge.read_macro_table()
     if backup_path is not None:
-        with open(backup_path, "wb") as fh:
-            fh.write(previous)
+        write_bytes_atomic(backup_path, previous)
 
     reply = bridge.write_macro_table(payload)
     code = getattr(getattr(reply, "code", None), "name", None)

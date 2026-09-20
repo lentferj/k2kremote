@@ -55,11 +55,13 @@ finding this class opened it directly).
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import struct
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass
 from typing import BinaryIO, Iterator, List, Optional
 
@@ -96,6 +98,126 @@ class DirEntry:
 def is_disk_image(path) -> bool:
     """Cheap sniff: does this look like a raw or ``.lzo`` K2000 volume?"""
     return str(path).lower().endswith((".img", ".img.lzo", ".iso", ".hda"))
+
+
+class _LzoDecompressionCache:
+    """Keeps the most recently decompressed ``.lzo`` image around.
+
+    Opening one image costs three decompressions in the editor today: the
+    "which .MAC is on here?" scan, :func:`~k2kmaced.cli.load_macro` reading the
+    member, and :func:`~k2kmaced.app.scan_image` listing the files to check the
+    entries against.  On a 2 GB backup that is three multi-minute runs of
+    ``lzop -dc`` for one keypress.  They all decompress the *same* bytes, so
+    remember the temp file and hand it out again.
+
+    Keyed by path, mtime and size, so editing the ``.lzo`` on disk invalidates
+    it.  The file outlives the last :meth:`DiskImage.close` on purpose -- that
+    is what makes the second and third open free -- and is dropped when a
+    *different* image is decompressed with nothing still reading this one, or
+    at exit.  Only one image is kept: these are gigabytes.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._key: Optional[tuple] = None
+        self._tmp: Optional[str] = None
+        self._users = 0
+
+    @staticmethod
+    def _key_for(path: str) -> tuple:
+        st = os.stat(path)
+        return (os.path.abspath(path), st.st_mtime_ns, st.st_size)
+
+    def acquire(self, path: str) -> str:
+        key = self._key_for(path)
+        with self._lock:
+            if self._key == key and self._tmp is not None:
+                self._users += 1
+                return self._tmp
+            if self._users:
+                # Something is still reading the old image; leave it alone and
+                # let its own release() clean it up.
+                self._key = self._tmp = None
+                self._users = 0
+            else:
+                self._discard_locked()
+        tmp = self._decompress(path)
+        with self._lock:
+            if self._tmp is None:
+                self._key, self._tmp, self._users = key, tmp, 1
+                return tmp
+        # Another thread won the race and cached its own copy; ours is a
+        # duplicate, but it is already on disk and valid, so hand it out
+        # uncached rather than decompressing a fourth time.
+        return tmp
+
+    def release(self, tmp: str) -> None:
+        with self._lock:
+            if tmp == self._tmp:
+                self._users = max(0, self._users - 1)
+                return  # kept for the next open
+        _unlink_quiet(tmp)
+
+    def clear(self, *, force: bool = False) -> None:
+        """Drop the cached copy.  ``force`` at exit: nothing will read it now."""
+        with self._lock:
+            if self._users and not force:
+                return
+            self._discard_locked()
+
+    def _discard_locked(self) -> None:
+        if self._tmp:
+            _unlink_quiet(self._tmp)
+        self._key = self._tmp = None
+        self._users = 0
+
+    @staticmethod
+    def _decompress(path: str) -> str:
+        for tool in ("lzop", "dd"):
+            if shutil.which(tool) is None:
+                raise ImageError(
+                    f"{os.path.basename(path)} is lzop-compressed but "
+                    f"'{tool}' is not installed; decompress it first"
+                )
+        tmp = tempfile.NamedTemporaryFile(prefix="k2image-", suffix=".img", delete=False)
+        try:
+            with subprocess.Popen(
+                ["lzop", "-dc", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            ) as proc:
+                # dd's sparse mode keeps the unused half of a 2 GB image off disk.
+                subprocess.run(
+                    ["dd", f"of={tmp.name}", "bs=1M", "conv=sparse", "status=none"],
+                    stdin=proc.stdout,
+                    check=True,
+                )
+                stderr = proc.stderr.read() if proc.stderr else b""
+                if proc.wait() != 0:
+                    # Say what lzop said: "not a lzop file" and "no space left"
+                    # are the same silent failure without it.
+                    detail = stderr.decode("utf-8", "replace").strip()
+                    raise ImageError(
+                        f"lzop failed to decompress {path}"
+                        + (f": {detail}" if detail else "")
+                    )
+        except Exception:
+            tmp.close()
+            _unlink_quiet(tmp.name)
+            raise
+        tmp.close()
+        return tmp.name
+
+
+def _unlink_quiet(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+_LZO_CACHE = _LzoDecompressionCache()
+# A gigabyte of temp file must not survive the process just because an image was
+# left open; at exit nobody can still be reading it.
+atexit.register(lambda: _LZO_CACHE.clear(force=True))
 
 
 class DiskImage:
@@ -147,38 +269,17 @@ class DiskImage:
 
     @classmethod
     def _open_lzo(cls, path: str) -> "DiskImage":
-        if shutil.which("lzop") is None:
-            raise ImageError(
-                f"{os.path.basename(path)} is lzop-compressed but 'lzop' is not "
-                f"installed; decompress it first"
-            )
-        tmp = tempfile.NamedTemporaryFile(prefix="k2image-", suffix=".img", delete=False)
+        tmp = _LZO_CACHE.acquire(path)
         try:
-            with subprocess.Popen(
-                ["lzop", "-dc", path], stdout=subprocess.PIPE
-            ) as proc:
-                # dd's sparse mode keeps the unused half of a 2 GB image off disk.
-                subprocess.run(
-                    ["dd", f"of={tmp.name}", "bs=1M", "conv=sparse", "status=none"],
-                    stdin=proc.stdout,
-                    check=True,
-                )
-                if proc.wait() != 0:
-                    raise ImageError(f"lzop failed to decompress {path}")
+            return cls(open(tmp, "rb"), _cleanup=tmp)
         except Exception:
-            tmp.close()
-            os.unlink(tmp.name)
+            _LZO_CACHE.release(tmp)
             raise
-        tmp.close()
-        return cls(open(tmp.name, "rb"), _cleanup=tmp.name)
 
     def close(self) -> None:
         self._fh.close()
         if self._cleanup:
-            try:
-                os.unlink(self._cleanup)
-            except OSError:
-                pass
+            _LZO_CACHE.release(self._cleanup)
             self._cleanup = None
 
     def __enter__(self) -> "DiskImage":

@@ -59,7 +59,9 @@ replace a ``BOOT.MAC`` without keeping the previous one.
 
 from __future__ import annotations
 
+import os
 import struct
+import tempfile
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -522,6 +524,43 @@ def read_mac(path) -> PramFile:
         return PramFile.parse(fh.read())
 
 
+def write_bytes_atomic(path, data: bytes) -> None:
+    """Replace ``path`` with ``data`` without ever leaving it half-written.
+
+    These tools are routinely pointed at their own input (``k2kmacli edit -o
+    BOOT.MAC --force``), and that file may be the only copy of a macro table
+    somebody typed in by hand.  Opening it ``"wb"`` truncates it *before* the
+    replacement bytes exist, so anything that goes wrong in between -- a
+    serialise error, a full disk, a power cut -- leaves nothing at all.  Write
+    a sibling temp file, flush it to the platter, then rename over the target:
+    :func:`os.replace` is atomic, so the file on disk is either entirely the
+    old one or entirely the new one.
+    """
+    target = os.fspath(path)
+    directory = os.path.dirname(os.path.abspath(target)) or "."
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".k2kmac-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        # mkstemp is deliberately 0600; a replaced file should keep the mode it
+        # had, and a new one should look like any other file the user creates.
+        try:
+            os.chmod(tmp, os.stat(target).st_mode & 0o7777)
+        except OSError:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_mac(path, pram: PramFile) -> None:
-    with open(path, "wb") as fh:
-        fh.write(pram.serialize())
+    # Serialise first: an encoding failure must not reach the filesystem at all.
+    write_bytes_atomic(path, pram.serialize())

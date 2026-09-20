@@ -9,6 +9,8 @@
 import shutil
 from pathlib import Path
 
+import threading
+
 import pytest
 
 from k2kmaced.macfile import BANK_EVERYTHING, PramFile
@@ -649,7 +651,13 @@ async def test_opening_a_new_file_disarms_the_gate(img_editor, image, boot):
         await pilot.press("w")
         assert app.allow_write is True
         app._load(str(boot))                   # a plain .MAC this time
-        await pilot.pause()
+        # The load runs on a worker thread now, so wait for it rather than
+        # assuming one frame is enough.
+        for _ in range(200):
+            await pilot.pause()
+            if app.editor is not None and app.editor.source == str(boot):
+                break
+        assert app.editor.source == str(boot)
         assert app.allow_write is False
 
 
@@ -712,3 +720,53 @@ async def test_legend_shows_the_write_keys_even_in_a_narrow_window(editor):
         assert "w write gate" in legend
         assert "i install to image" in legend
         assert "ctrl+o open" in legend
+
+
+@pytest.mark.asyncio
+async def test_opening_an_image_does_not_block_the_event_loop(img_editor, image):
+    """A slow image open must leave the UI answering keys.
+
+    `.lzo` backups here are gigabytes; decompressing one inline froze the
+    terminal for as long as it took -- no status line, no cursor, no way to
+    tell a long open from a hang. The work belongs on a worker, with the
+    status line saying so.
+    """
+    import time
+
+    from k2kmaced import app as appmod
+    from k2kmaced.app import K2kmacedApp
+
+    started = threading.Event()
+    release = threading.Event()
+    real_open = appmod.DiskImage.open
+
+    def slow_open(path):
+        started.set()
+        release.wait(5)
+        return real_open(path)
+
+    app = K2kmacedApp(img_editor)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        appmod.DiskImage.open = slow_open
+        try:
+            app._open_path(str(image))
+            deadline = time.monotonic() + 5
+            while not started.is_set() and time.monotonic() < deadline:
+                await pilot.pause()
+            assert started.is_set(), "the open never ran"
+            # the loop is still alive while the read is in flight
+            # startswith, not `in`: pytest's own tmp_path is named after this
+            # test, so "opening" appears inside any status that quotes the path
+            # -- the first attempt at this assertion passed against the unfixed
+            # code for exactly that reason.
+            assert app.last_status.startswith("opening "), app.last_status
+            await pilot.pause()
+            assert app.is_running
+        finally:
+            release.set()
+            appmod.DiskImage.open = real_open
+        for _ in range(200):
+            await pilot.pause()
+            if not app.last_status.startswith("opening "):
+                break

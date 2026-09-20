@@ -70,6 +70,7 @@ else. It writes in place, there is no undo, and nothing here makes a backup.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import List, Optional, Sequence
 
@@ -89,6 +90,7 @@ from k2kmaced.macfile import (
     MacroEntry,
     MacroTable,
     PramFile,
+    write_bytes_atomic,
 )
 from k2kmaced.cli import load_macro, parse_source
 
@@ -411,8 +413,7 @@ class MacroEditor:
     def save(self, path: str) -> int:
         self.pram.set_macro_table(self.table)
         blob = self.pram.serialize()
-        with open(path, "wb") as fh:
-            fh.write(blob)
+        write_bytes_atomic(path, blob)
         self.dirty = False
         return len(blob)
 
@@ -1072,36 +1073,83 @@ else:
 
             self.push_screen(OpenScreen(), chosen)
 
+        def _in_background(self, work, done, *, opening: str) -> None:
+            """Run ``work()`` off the event loop, then ``done(result_or_exc)``.
+
+            Reading an image is not a quick call: a ``.lzo`` backup has to be
+            decompressed in full first, which on this project's own 2 GB
+            images takes long enough that doing it inline froze the whole
+            terminal -- no cursor, no keys, no status line, indistinguishable
+            from a hang. The decompression is cached now (one run per image
+            instead of three), but the first one still has to happen somewhere,
+            and the event loop is not it.
+
+            Outside a running app (tests calling ``_load`` directly, and the
+            no-Textual fallback) there is no loop to protect, so the work
+            happens inline and ``done`` is called on the spot.
+            """
+            self._status(f"opening {opening} …")
+            if not self.is_running:
+                try:
+                    done(work())
+                except Exception as exc:  # noqa: BLE001 - handed to `done`
+                    done(exc)
+                return
+
+            def run() -> None:
+                try:
+                    result = work()
+                except Exception as exc:  # noqa: BLE001 - handed to `done`
+                    result = exc
+                self.call_from_thread(done, result)
+
+            self.run_worker(run, thread=True, exclusive=True, group="open")
+
         def _open_path(self, path: str) -> None:
             """Load a .MAC, or ask which macro when given an image."""
             if not is_disk_image(path):
                 self._load(path)
                 return
-            try:
+
+            def scan():
                 with DiskImage.open(path) as image:
-                    macros = [e.path for e in image.find(".MAC")]
-            except (ImageError, OSError) as exc:
-                self._status(f"cannot read {path}: {exc}")
-                return
-            if not macros:
-                self._status(f"{path} holds no .MAC files")
-                return
-            if len(macros) == 1:
-                self._load(f"{path}:{macros[0]}")
-                return
+                    return [e.path for e in image.find(".MAC")]
 
-            def picked(member: Optional[str]) -> None:
-                if member is not None:
-                    self._load(f"{path}:{member}")
+            def scanned(result) -> None:
+                if isinstance(result, (ImageError, OSError)):
+                    self._status(f"cannot read {path}: {result}")
+                    return
+                if isinstance(result, BaseException):
+                    raise result
+                macros = result
+                if not macros:
+                    self._status(f"{path} holds no .MAC files")
+                    return
+                if len(macros) == 1:
+                    self._load(f"{path}:{macros[0]}")
+                    return
 
-            self.push_screen(PickMacroScreen(macros), picked)
+                def picked(member: Optional[str]) -> None:
+                    if member is not None:
+                        self._load(f"{path}:{member}")
+
+                self.push_screen(PickMacroScreen(macros), picked)
+
+            self._in_background(scan, scanned, opening=os.path.basename(path))
 
         def _load(self, source: str) -> None:
-            try:
-                editor = build_editor(source)
-            except (MacError, ImageError, FileNotFoundError, OSError) as exc:
-                self._status(f"cannot open: {exc}")
-                return
+            def built(result):
+                if isinstance(result, (MacError, ImageError, FileNotFoundError, OSError)):
+                    self._status(f"cannot open: {result}")
+                    return
+                if isinstance(result, BaseException):
+                    raise result
+                self._loaded_editor(result)
+
+            self._in_background(lambda: build_editor(source), built,
+                                opening=os.path.basename(source))
+
+        def _loaded_editor(self, editor: "MacroEditor") -> None:
             self.editor = editor
             # A freshly opened macro is never armed: the gate is per-file, so
             # opening a different image cannot inherit permission granted for
