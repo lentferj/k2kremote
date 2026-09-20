@@ -85,10 +85,12 @@ def test_throttle_enforces_gap_for_sysex():
     (The clamp has its own test below.)
     """
     out = ThrottledOut(FakeOut(), gap=0.2)
-    start = time.time()
+    start = time.monotonic()
     out.send_message([0xF0, 0x07, 0x00, 0x78, 0x18, 0xF7])
     out.send_message([0xF0, 0x07, 0x00, 0x78, 0x18, 0xF7])
-    assert time.time() - start >= 0.2  # the gap that was asked for, not the floor
+    # monotonic, like the throttle itself: measuring a 200 ms wait with
+    # `time.time()` on Windows, whose tick is ~15.6 ms, can read it short.
+    assert time.monotonic() - start >= 0.2  # the gap asked for, not the floor
 
 
 def test_gap_is_clamped_to_the_hardware_floor():
@@ -1076,6 +1078,7 @@ def test_throttle_holds_the_floor_across_concurrent_senders():
     throttle exists to prevent. The refresh worker and any UI-driven write are
     two such senders.
     """
+    import itertools
     import threading
 
     from k2kremote.midi_bridge import ThrottledOut
@@ -1093,7 +1096,9 @@ def test_throttle_holds_the_floor_across_concurrent_senders():
     out = ThrottledOut(port, gap=0.12)
     packet = [0xF0, 0x07, 0x00, 0x78, 0x15, 0xF7]
 
-    start = threading.Barrier(4)
+    # A timeout on the barrier, not a bare wait: if one sender never arrives,
+    # a hung CI job tells you far less than a failed one.
+    start = threading.Barrier(4, timeout=10)
 
     def sender():
         start.wait()
@@ -1106,10 +1111,12 @@ def test_throttle_holds_the_floor_across_concurrent_senders():
     for t in threads:
         t.join()
 
-    gaps = [b - a for a, b in zip(port.stamps, port.stamps[1:])]
+    gaps = [b - a for a, b in itertools.pairwise(port.stamps)]
     assert len(port.stamps) == 8
-    # a little slack for scheduling, nowhere near a doubled-up send
-    assert min(gaps) > 0.11, f"two sends only {min(gaps)*1000:.1f} ms apart"
+    # 20% of slack for scheduling and clock granularity, which is still an
+    # order of magnitude away from what the bug produces: without the lock the
+    # racing senders land within a millisecond of each other.
+    assert min(gaps) > 0.096, f"two sends only {min(gaps)*1000:.1f} ms apart"
 
 
 def test_delete_bank_takes_an_explicit_zero_timeout_at_face_value():
@@ -1378,7 +1385,7 @@ def test_poll_panel_ignores_traffic_that_is_not_ours():
     assert bridge.poll_panel() is False
 
 
-def test_ports_present_tells_a_busy_device_from_an_unplugged_one():
+def test_ports_present_tells_a_busy_device_from_an_unplugged_one(monkeypatch):
     """The substring match that underpins busy-vs-disconnected, untested until now.
 
     A K2000 disk load silences the unit for minutes while the ports stay
@@ -1386,6 +1393,13 @@ def test_ports_present_tells_a_busy_device_from_an_unplugged_one():
     backwards makes the mirror cry wolf through every disk operation.
     """
     import k2kremote.midi_bridge as mb
+
+    # Stub the OUTPUT enumeration: unstubbed it asks the host's real MIDI
+    # backend, and on a runner with none `_enum_out` raises -- which this
+    # method deliberately reads as "present", turning the second assertion
+    # below into an environment test rather than a behaviour one. (Synthetic
+    # only, per CLAUDE.md: nothing here may touch a real port.)
+    monkeypatch.setattr(mb, "_enum_out", lambda: [])
 
     bridge = MidiBridge(
         SimpleNamespace(midi_in=_RawPort(ports=("K2000R MIDI 1",)),

@@ -268,9 +268,11 @@ def test_worker_stop_waits_for_the_op_in_flight():
 
     from k2kremote.monitor_tui import _DeviceWorker
 
+    started = threading.Event()
     finished = threading.Event()
 
     def slow(_bridge):
+        started.set()
         time.sleep(0.3)
         finished.set()
         return "done"
@@ -278,7 +280,10 @@ def test_worker_stop_waits_for_the_op_in_flight():
     worker = _DeviceWorker(SimpleNamespace())
     worker.start()
     worker.submit(slow, lambda r, e: None)
-    time.sleep(0.1)                       # let it pick the job up
+    # Wait for the op to actually BE in flight rather than sleeping and hoping:
+    # a fixed sleep is a race on a loaded runner, and stop() before the job is
+    # picked up would make this pass for the wrong reason.
+    assert started.wait(5), "the worker never picked the job up"
 
     worker.stop()
 

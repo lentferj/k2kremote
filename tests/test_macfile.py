@@ -8,6 +8,7 @@
 # project's K2000R disk-image backup — the ground truth the format was
 # reverse-engineered from (docs/MAC_FORMAT.md).
 
+import os
 import struct
 from pathlib import Path
 
@@ -269,10 +270,12 @@ def test_write_mac_leaves_the_original_intact_when_serialising_fails(tmp_path):
     assert list(tmp_path.iterdir()) == [target]  # and no temp file left behind
 
 
+@pytest.mark.skipif(os.name != "posix",
+                    reason="Windows has no POSIX mode bits: os.chmod there only "
+                           "toggles the read-only flag, so st_mode reads back "
+                           "0o666 whatever was asked for")
 def test_write_bytes_atomic_keeps_the_replaced_file_s_permissions(tmp_path):
     """mkstemp is 0600; a file the user could read yesterday must stay readable."""
-    import os
-
     from k2kmaced.macfile import write_bytes_atomic
 
     target = tmp_path / "BOOT.MAC"
@@ -283,6 +286,17 @@ def test_write_bytes_atomic_keeps_the_replaced_file_s_permissions(tmp_path):
 
     assert target.read_bytes() == b"new"
     assert os.stat(target).st_mode & 0o777 == 0o644
+
+
+def test_write_bytes_atomic_replaces_the_file_everywhere(tmp_path):
+    """The part of the above that is true on every platform."""
+    from k2kmaced.macfile import write_bytes_atomic
+
+    target = tmp_path / "BOOT.MAC"
+    target.write_bytes(b"old")
+    write_bytes_atomic(target, b"new")
+    assert target.read_bytes() == b"new"
+    assert list(tmp_path.iterdir()) == [target]   # no temp file left behind
 
 
 def test_an_odd_length_object_is_refused_rather_than_grown_by_a_byte():

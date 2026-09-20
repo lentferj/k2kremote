@@ -1057,7 +1057,10 @@ def test_stop_waits_for_the_read_in_flight_and_then_says_nothing():
 
         def get_screen_text(self):
             self.in_read.set()
-            time.sleep(0.4)
+            # Long enough that the test is certainly inside this window when it
+            # calls stop(), on a loaded runner too -- the whole point is that
+            # the read is IN FLIGHT at that moment.
+            time.sleep(1.0)
             self.left_read.set()
             return super().get_screen_text()
 
@@ -1065,11 +1068,12 @@ def test_stop_waits_for_the_read_in_flight_and_then_says_nothing():
     frames, errors = [], []
     worker = _worker(bridge, frames, errors, mirror_panel=False)
     worker.start()
-    assert bridge.in_read.wait(3), "the worker never started its first read"
-    before = len(frames)
+    assert bridge.in_read.wait(5), "the worker never started its first read"
 
     worker.stop()
 
     assert bridge.left_read.is_set(), "stop() returned mid-read"
     assert not worker.is_alive()
-    assert len(frames) == before, "a frame was delivered after shutdown began"
+    # The very first read was still in flight, so its frame is the one the
+    # shutdown gate has to swallow: any frame at all here is that frame.
+    assert frames == [], "a frame was delivered after shutdown began"

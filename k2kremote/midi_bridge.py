@@ -319,12 +319,17 @@ class ThrottledOut:
             message[_DEVICE_ID_INDEX] = self._device_id
 
         with self._lock:
-            wait = self._gap - (time.time() - self._last)
+            # monotonic(), not time(): a rate limiter must not be steered by a
+            # wall-clock adjustment (NTP, a DST change, somebody setting the
+            # clock), and on Windows `time.time()` ticks in ~15.6 ms steps --
+            # coarser than a fifth of the floor this exists to enforce, so the
+            # gap it measured could be short by more than a tenth of itself.
+            wait = self._gap - (time.monotonic() - self._last)
             if wait > 0:
                 time.sleep(wait)
                 self.throttled_seconds += wait
             self._port.send_message(message)
-            self._last = time.time()
+            self._last = time.monotonic()
 
     def __getattr__(self, name):
         return getattr(self._port, name)
