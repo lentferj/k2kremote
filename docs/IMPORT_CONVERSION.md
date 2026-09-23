@@ -154,15 +154,127 @@ a bank saved on the K2000R with known LoVel/HiVel.
 
 The K2000's own importer computes exactly that. `0x164C66`, in full:
 
+### The 92-byte staging record: the layout closes
+
+Found at sign-off, checking a peer's claim that only three bytes of it were
+mapped. `0x1641D4`, the loop body:
+
 ```
-lo = src[88] >> 4                       ; 92-byte Akai staging record
+moveal %sp@(100),%a0        ; staging array base
+movew  %sp@(528),%d0        ; ZONE counter  (bounded by 8, see the loop above)
+mulsw  #92,%d0              ; 92 bytes per ZONE
+addal  %d0,%a0
+movew  %sp@(526),%d0        ; KEY counter   (bounded by 88)
+addal  %d0,%a0
+moveb  %a0@,%d0             ; staging[zone*92 + key]
+addw   %d0,%d6              ; accumulated, then tstw %d6 -> skip the zone if 0
+```
+
+The record is **per zone**, and its bytes are addressed **by key, 0…87**:
+
+```
++0 .. +87   an 88-byte per-KEY table, one byte per key
++88 .. +89  WORD  -- sign-extended AKAI LOW-velocity byte   (value in +89)
++90 .. +91  WORD  -- sign-extended AKAI HIGH-velocity byte  (value in +91)
+```
+
+**88 + 2 + 2 = 92 exactly, with nothing unaccounted.** `mulsw #92` occurs ten
+times across the builder, so the stride is pervasive.
+
+> **Corrected 2026-09-21, same day.** This first read the tail as *four bytes*
+> — `+88` velocity lo, `+89` lo fraction, `+90` velocity hi, `+91`
+> unaccounted. **They are two words**, and the instruction stream is
+> unambiguous: `movew %d0,%a0@(88)` and `movew %d0,%a0@(90)` write them
+> (`0x1640D0`, `0x1640EC`); `movew %a0@(88),%d0` and `cmpiw #127,%a0@(90)`
+> read them (`0x164C7C`, `0x164C94`). Each is an `extw`-sign-extended source
+> byte, so across the legal 0…127 velocity range the high half is always
+> `0x00` and **the value lives in the odd byte**. The "unaccounted `+91`" was
+> the low half of the second word.
+
+This also **strengthens the 88-key claim**, which had been taken partly on
+analogy with the Roland arm. Both `cmpiw #88` sites are genuine key loops with
+their own increments: `addqw #1,%sp@(526)` at `0x1640AC` and `0x1641F0`, each
+followed by `blts` back to `0x164082` / `0x1641D4`. The companion loop at
+`0x164082` reads a per-key **word** table from the source at
+`%a3@(0x2E + 2·key)`, converts it through `0x1630C0`, and stores one byte per
+key.
+
+### `0x1630C0` traced: it names nothing
+
+Suggested by a third GLM session (relayed via `mpc2emu`) as *"the cheapest
+single-function trace left on any path — it either names the 88-byte table or
+refutes the obvious reading"*. **Traced, and it does neither:**
+
+```
+0x1630C0:  movew %sp@(4),%d0
+           lsrw  #8,%d0
+           rts
+```
+
+**Three instructions — the high byte of a word.** It carries no semantics, so
+it cannot name anything. `0x1630B8`, eight bytes earlier and the one the `+88`
+word passes through, is **byte-for-byte identical** — two copies of the same
+accessor, which also kills the tempting reading that they are a hi/lo pair.
+
+What the trace *does* establish:
+
+```
+staging[zone*92 + key] = high_byte( a3@(0x2E + 2*key) )   ; 0x164082..0x1640AA
+staging[zone*92 + 88]  = extw( high_byte( a3@(0x28) ) )   ; 0x1640B8..0x1640D0
+```
+
+The **source** carries an 88-entry array of *words* at `a3@(0x2E)` and the
+importer keeps only each one's top byte. Whatever the table means, it is a
+one-byte projection of a two-byte source field — a real constraint, and the
+place to look next is the source structure at `+0x2E`, **not** the accessor.
+
+**Method note, because the suggestion was specific and its justification was
+wrong.** "One function, and it moves an `[S]` to a `[C]` or kills it" was
+worth acting on — it cost three minutes — but a generic accessor was never
+going to name a table, and that was visible from the call site before the
+trace. It paid off elsewhere: re-reading the callers against the word layout
+is what exposed the byte/word error above. **A cheap suggestion can be wrong
+in its stated reason and still be the right thing to do.**
+
+**What this does and does not establish.** The addressing arithmetic is read
+straight off the instruction stream. The **semantics** of the 88-byte table
+are *not* established — a keygroup index per key is the obvious reading and is
+undemonstrated — and where any of it is filled from on disc is still untraced.
+So the Akai source side is no longer "three bytes wide", but it is not a
+converter either: structure without semantics and without the disc-fill path
+builds nothing.
+
+*Method note:* this was found only because a peer asked "is more mapped than
+you said?" about a number **this project had supplied**. "Three of its bytes"
+was written without ever checking whether the other 89 were addressed.
+
+```
+a0 = staging + zone*92
+lo = (WORD[+88] >> 4) & 0xFF            ; lsrw #4 on the WORD, then moveb
 if lo != 0:
-    if src[89] & 0x0F: lo += 1          ; round UP on any remainder
+    if byte[+89] & 0x0F: lo += 1        ; round UP on any remainder
     if lo > 7: lo = 7
     if lo > hi: lo = hi
-hi = src[90] >> 4                       ; with src[90] == 127 -> 7, else clamp <= 6
+hi = 7 if WORD[+90] == 127              ; cmpiw #127 -- on the WORD
+     else clamp((WORD[+90] >> 4) & 0xFF, <= 6)
 return (lo << 3) | (7 - hi)             ; 0x164CE6..0x164CF0
 ```
+
+> **What the earlier byte-wise version got wrong, and what it got right.** It
+> read `lo = src[88] >> 4` and `hi = src[90] >> 4`. Byte `+88` is the *sign
+> half* of a word and is `0x00` for every legal velocity, so taken literally
+> that formula yields `0` always. Taken as it was *meant* — "the velocity
+> value's high nibble" — it is right, because the word shift `0x00VV >> 4`
+> truncated to a byte **is** `VV >> 4` across the whole 0…127 range. So the
+> arithmetic and the hardware agreement were never in danger; **the offsets
+> were.** The values are at `+89` and `+91`.
+>
+> The round-up now reads as what it obviously is: the source byte's **high
+> nibble is the mark and its low nibble the remainder**, which is why the same
+> byte is consulted twice.
+>
+> `(lo << 3) | (7 − hi)` is untouched, and so is the two-independent-
+> derivations claim: `negb` / `addqb #7` / `lslb #3` at `0x164CE6`…`0x164CF0`.
 
 The final three instructions are `negb` / `addqb #7` on the high mark and
 `lslb #3` on the low one — **`(lo << 3) | (7 − hi)`**, their field description
@@ -424,6 +536,35 @@ Searched, all negative:
 * a **second keymap prototype does** exist, at `0x18862A`, named
   `"New Sample"` — and it is `method = 1, entrySize = 1` as well, so both ROM
   prototypes are the 1-byte form;
+
+  > **This bullet is stated over an incomplete enumeration.** There is a
+  > **third** ROM prototype, at **`0x188436`**, cloned by the Roland *sample*
+  > path (`moveal #0x188436,%a4` at `0x169C20` — visible in this document's
+  > own §3.2 trace, unrecognised at the time). Its name is
+  > **`"Abcdefghijkl"` — twelve characters** where the other two carry ten,
+  > and its header words differ:
+  >
+  > ```
+  > 0x188436   9800  0058  0010   "Abcdefghijkl"   (12)
+  > 0x18862A   9401  00AE  000E   "New Sample"     (10)
+  > 0x1888E4   9401  00AE  000E   "New Keymap"     (10)
+  > ```
+  >
+  > All three carry the name at `addr + 6`; the difference is the header, so
+  > it is a **differently shaped object**, not merely a wider name. Whether it
+  > bears on the `method`/`entrySize` question is **not** established — it
+  > does not obviously carry `0x17`/`6` either — but *"so both ROM prototypes
+  > are the 1-byte form"* was a claim about a population of two that turned
+  > out to be three. **A negative result is only as good as the enumeration it
+  > is stated over**, and this one was not exhaustive. Flagged by `eosed` via
+  > `mpc2emu`, verified here in the image.
+  >
+  > *One discrepancy worth recording rather than smoothing:* their reading of
+  > the first header word is `0x0098` / `0x0194` where mine is `0x9800` /
+  > `0x9401` — a byte swap, on the first word only; words two and three agree
+  > exactly on all three prototypes. On a big-endian 68000 the reading above
+  > is the natural one, but the disagreement is unresolved and a reader should
+  > check the bytes rather than either of us.;
 * the type-dispatched object fixup (`0x10A99C` → `0x10AD7C` for type 133)
   writes neither constant.
 
@@ -1092,3 +1233,400 @@ three was findable by being more careful: knowing which split makes a field
 speak requires the semantics, and the semantics were in another project.
 `mpc2emu`'s way of putting it is the lesson — **they are findable by asking
 someone who holds the other half.**
+
+
+---
+
+## §3.4 — The K2000's Ensoniq support is audio-only
+
+*Authorised by Jan 2026-09-21 (relayed via `mpc2emu`, confirmed directly).
+Offline; no hardware.*
+
+**Result: the K2000 has no Ensoniq program converter, and this is a confirmed
+absence rather than an untraced gap.** The machine accepts Ensoniq media as a
+source of **sample data only**.
+
+### The argument is a complete reference set, not a walk
+
+The format code lives at `a5@(0x14AA)`, set by the mount at `0x11C660`. Every
+reference to it in the 1 MiB image:
+
+```
+26 references total
+25 in the file/disk layer            0x11xxxx - 0x12xxxx
+ 1 in the converter region           0x168B98  -- and it tests format 5
+```
+
+`0x168B98` is the single converter-region reference and it is **not Ensoniq**:
+it compares the format code against **5**, and the code around it
+(`cmpib #46,%a4@` — `'.'`, plus the format strings at `0x190A59` / `0x190A81`)
+is directory listing, skipping dot entries.
+
+**So no code in the converter region tests for format 3 at all.** The only
+format-3 test in the entire ROM is `0x113514`, and it is paired with format 2.
+
+### What that one test actually selects — weaker than first reported
+
+`0x113514` stores `0x1071FC` into `sp@(38)` when the record type is 16 and the
+format is 2 or 3. `0x1071FC` writes `0x580000`…`0x5C0000` and the hardware
+ports `0x780007` / `0x78000B` — bulk transfer into sample RAM.
+
+> **Corrected before publication.** This was first described (and relayed to
+> `mpc2emu`) as the Ensoniq arm selecting *"a distinct transfer handler,
+> replacing what the other formats get"*. **`0x1071FC` is not distinct.** It
+> is installed into the global slot `a5@(0x125C)` **unconditionally** at three
+> further sites — `0x1129C2`, `0x1156EA`, `0x161FA8` — so it is the machine's
+> **generic** sample-data transfer routine, not an Ensoniq one. The format-2/3
+> branch selects the standard handler into a local slot; it does not introduce
+> Ensoniq-specific code.
+>
+> This makes the conclusion *stronger*, not weaker: the Ensoniq path does not
+> merely lack a converter, it lacks any Ensoniq-specific code beyond the
+> sniffer itself.
+
+### And no object is ever built on that path
+
+Object construction goes through the lookup at `0x1032EA` with a type word.
+Every such call site in the converter region lies in the **Akai** builder
+(`0x163C1A`…`0x163C8E`, plus the Program-199 fetch at `0x1645E2`) or the
+Roland one. **There is no third converter region**, and no object-construction
+site sits on any format-3-conditioned path.
+
+### Status
+
+**`[C-neg]` — confirmed absence.** Method: exhaustive enumeration of
+references to the format variable, plus exhaustive enumeration of
+object-lookup call sites, both across the whole image. That is the strongest
+form of negative available without running the machine, and it is stronger
+than the "no conversion path has been traced" it replaces, which was an
+absence of evidence.
+
+**What would still overturn it:** an Ensoniq conversion reached without ever
+consulting the format code — e.g. dispatched from the browser on a value
+derived earlier and held in a register. Judged unlikely, because both known
+converters *are* reached that way and both still leave object-construction
+fingerprints, and there is no third set of those.
+
+
+---
+
+## §3.2 — Roland sample audio: located, decoded, validated on disc
+
+*Authorised by Jan 2026-09-21. Offline; no hardware. This closes the
+"never looked at, not once" half of blocker #1 — the **locating** half. See
+the open list at the end for what is still not known.*
+
+### The disc's area map, read out of the ROM
+
+Every area base the Roland code uses is an `addil` constant in `0x169`–`0x16B`,
+and they all end in `0x5600`:
+
+```
+0x0A0600  Volume directory        32 B records
+0x0A1600  Performance directory   32 B
+0x0A5600  Patch directory         32 B
+0x0AD600  Partial directory       32 B
+0x0CD600  Sample directory        32 B
+0x10D600  256 B records
+0x115600  512 B records (320 read)
+0x155600  512 B records
+0x1D5600  128 B  -- patch parameters (BA1:MC-202 verified here, section 6b)
+0x255800   48 B  -- SAMPLE PARAMETERS   (area base 0x255600 + 0x200)
+0x2B5800         -- SAMPLE AUDIO (PCM)  (area base 0x2B5600 + 0x200)
+```
+
+Every area carries a `0x200` header and its records start at `base + 0x200`,
+uniformly — including the two new ones. **Forgetting that header is what made
+the first read of the 48-byte area return all-`0xFF`.**
+
+### Where the PCM is
+
+`0x169BC4`:
+
+```
+d0 = block
+d0 = (d0 << 3) + d0        ; * 9
+d0 <<= 10                  ; * 1024
+d0 += 0x2B5600
+```
+
+**`offset = 0x2B5600 + block × 9216`.** So the 9 × 1024 granularity is real
+and appears at *two* independent sites — here as the data stride, and at
+`0x169A3E` as the scale on the directory's `+0x1E` size field. That settles
+this project's own standing caveat that the 9 KB figure was "code-only, and
+odd enough that I would not build on it". It is the unit of the format.
+
+**`block` is a running total, not the directory ordinal.** Sample *n* starts
+at the sum of `size` over every preceding entry:
+
+```
+offset(n) = 0x2B5800 + (sum of size[0..n-1]) * 9216
+extent(n) = size[n] * 9216 bytes, zero-padded after the audio ends
+```
+
+> **Corrected — the base was `0x200` low, and the way it hid is the lesson.**
+> First written as `0x2B5600`, the ROM's `addil` constant. **`0x2B5600` is 512
+> bytes of pure `0xFF`** — the same `0x200` header every other area in this
+> format carries, and which this document already applied to the parameter
+> records two sections down while omitting it here. Caught by `mpc2emu`
+> re-deriving the model independently.
+>
+> **Every validation below passed against the wrong base**, and both were
+> structurally incapable of catching it:
+>
+> * the **global fit** sums 4128 extents — *a constant base cancels out of a
+>   total*. It tests the increments and says nothing about where the ruler
+>   starts;
+> * the **envelope tiling** put every sample 512 bytes early, which is 256
+>   samples *inside the previous sample's zero padding* — 5.8 ms of prepended
+>   silence, inaudible, hidden inside the very padding the model was checked
+>   against.
+>
+> **The format's own padding concealed it from the only other check
+> available.** `mpc2emu`'s rule, taken: **validate a base by landing on one
+> object and reading its first bytes — never by summing.**
+
+### Validated on the disc, two independent ways
+
+**Envelope.** Consecutive entries tile exactly, and the padding shows up where
+it should — `last` is the RMS of the final 2 KiB of a sample's own extent,
+`pre` the 2 KiB before the next one starts:
+
+```
+  5 'CHO:F#1^       L' size= 27 blk=    5  start= 364.2 mid=1169.8 last=   0.0
+  6 'CHO:F#1^       R' size= 25 blk=   32  pre=   0.0   mid=1381.1 last= 805.7
+  7 'CHO:A1^        L' size= 30 blk=   57  pre= 805.7   mid=2639.2 last=   0.0
+  8 'CHO:A1^        R' size= 30 blk=   87  pre=   0.0   mid=2157.1 last=   0.0
+```
+
+**Global fit.** 4128 sample entries summing to **56,125 blocks = 517,248,000
+bytes**. `0x2B5600 + 517,248,000 = 0x1EFFEA00`, against an ISO of
+`0x1F1BD000` — the audio ends **1.79 MB before the end of the image**, and
+nothing overruns. A wrong stride or a wrong base cannot fill a 521 MB disc to
+within 0.4 % by accident.
+
+### Encoding: 16-bit signed LITTLE-endian linear
+
+Measured rather than assumed, on `CHO:F#1^ L`, by smoothness — mean absolute
+sample-to-sample delta over the signal range, 4096 samples from mid-sample:
+
+```
+LE s16   range  4553   mean|delta|    74.0   ratio 0.0163   <- audio
+BE s16   range 65535   mean|delta| 20042.6   ratio 0.3058   <- noise
+```
+
+Little-endian, consistent with the rest of the format (the ROM's own
+little-endian word reader at `0x1698AE`). **Ratio 0.016 against 0.306 is a
+20× separation**, so this is not a marginal call.
+
+### Stereo pairing: adjacent entries, `L`/`R` name suffix
+
+```
+5 'CHO:F#1^       L'   ->   6 'CHO:F#1^       R'
+7 'CHO:A1^        L'   ->   8 'CHO:A1^        R'
+```
+
+**756 `L`-suffixed and 716 `R`-suffixed** of 4128 on CD 2. The counts do *not*
+match, so "every `L` has an `R`" is false as a rule — 40 entries end in `L`
+without a partner, and a name ending in `L` for other reasons is possible.
+Pair by name-stem equality and adjacency, not by suffix alone.
+
+### The 48-byte sample parameter record, partly decoded
+
+At `0x255600 + 0x200 + index × 48`:
+
+```
++0x00  16  name, ASCII                    "CHO:F#1^       L"
++0x18   4  LE32, three related pointers   } +0x18 / +0x1C / +0x20,
++0x1C   4                                 } deltas CONSTANT at 2560 and 1024
++0x20   4                                 } across every sample checked
++0x2A   2  LE16 size in 9216-byte blocks  matches the directory's +0x1E
++0x2D   1  root key, MIDI note number     F#1 -> 42, A1 -> 45
+```
+
+**Root key verified on three samples**, against their own names: `CHO:F#1^`
+gives 42 on both L and R, `CHO:A1^` gives 45 — a three-semitone name
+difference producing a three-semitone field difference.
+
+**The three pointers are NOT decoded, and are explicitly not loop points** —
+but the first reason given here for that was wrong, and is replaced.
+
+> **Retracted: "their deltas are identical, 2560 and 1024".** That was
+> measured on **three** samples and asserted of the format. Over all 4128
+> records:
+>
+> ```
+> +32 - +28 = 1024   on 4122 of 4128   effectively constant, as stated
+> +28 - +24 = 2560   on 1316 of 4128   NOT constant -- generalised from 3
+> ```
+>
+> This is this project's own standing check — *count distinct values before
+> believing an agreement* — failed by the session that filed it, in the same
+> document. Caught by `mpc2emu` running the full population.
+
+**The conclusion survives on a better reason.** Measured across the whole
+directory, against each sample's own padded extent (`size × 9216`):
+
+```
+(+28 - +24) exceeds the sample's own byte length on 2507 of 4128
+ +20        exceeds the sample's own byte length on 3721 of 4128
+ +20        is exactly ZERO                       on  314 of 4128
+ +20        lies within the sample                on   93 of 4128
+```
+
+> **On the `+20` figure, and a wrong explanation retracted.** `mpc2emu`
+> measured 4035 where this measured 3721, and the reconciliation offered from
+> here — *"you are testing against actual audio length, I against the padded
+> block extent"* — **was wrong.** Both sides used the padded extent. The
+> entire difference is the **314 records whose `+20` is exactly zero**, which
+> they counted as "not a valid offset" and this counted as not-exceeding:
+> `3721 + 314 = 4035`. Two correct numbers and one category boundary.
+>
+> The plausible, good-faith, unchecked explanation would have been believed by
+> both of us. **The explanation is the thing nobody checks** — it arrives
+> wearing the authority of the measurement it purports to reconcile. The 314
+> zeros are unexplained and are the only sub-population of that record anyone
+> now has a reason to look at again.
+
+**No loop offset can lie beyond the end of the sample it belongs to.** That
+holds on the full population rather than on three hand-picked records, and it
+rules the fields out as loop points regardless of their spacing. They are also
+not disc offsets for the audio — tested against the envelope, sample 5's
+`0x1D44000` lands mid-signal with no boundary. Most likely S-770 RAM addresses
+written at mastering time. **Recorded as unknown rather than guessed.**
+
+#### Census: eleven of sixteen positions cannot test byte order at all
+
+`mpc2emu`'s, reproduced here record-for-record. Per two-byte-aligned position
+in the 48-byte record, how many of the 4128 records have **both** bytes
+non-zero — i.e. how many could ever fail a byte-order check:
+
+```
++16 +18 +36 +38 +40 +42      0 of 4128   can NEVER discriminate
++28 +32                      4
++24                         40
++46                         12
++20                         97           effectively useless
++22 +26 +30 +34 +44    876 … 2581         carries the whole of the evidence
+```
+
+**Six positions can never test byte order on any record in this corpus, and
+five more are useless in practice. Five positions carry all of it.** So
+"treat agreement on small-valued fields as no evidence" is not a caution, it
+is arithmetic: an endianness confirmed on any of the other eleven is confirmed
+on nothing.
+
+**And the sting, which follows from the census rather than from the rule:**
+the five discriminating positions are `+22`, `+26`, `+30`, `+34` — the **high
+halves of the four 32-bit fields nobody has decoded** — and `+44`. So the byte
+order of this record is attested *only* by fields whose meaning is unknown.
+
+Worse for this project's own claims: **the two fields actually validated in
+this record are both byte-order-blind.** `+42` (size) is in the never-column,
+and `+45` (root key) is a single byte and immune. The size field matching the
+directory's `+0x1E` proves **consistency between two fields, not their
+order** — read both big-endian and they still agree with each other. The real
+evidence for `+42` is the global fit, where a swapped reading misses the image
+size by orders of magnitude. That one is earned; the cross-match is not, and
+this document cited it as though it were.
+
+#### The negative holds under either byte order
+
+Checked after `mpc2emu` traced their `0x0098`/`0x9800` discrepancy to a
+transcription reflex of their own. The "exceeds its own sample" test was run
+again reading all four 32-bit fields **big-endian** instead of little:
+
+```
+order     +20 > extent     (+28 - +24) > extent
+little           3721                     2507
+big              3778                     3847
+```
+
+**Thousands of violations either way.** So the conclusion below does not rest
+on this project's little-endian assumption — a reader who disagrees about the
+byte order still cannot make these fields into loop points. Worth stating,
+because a negative result that depends on a decoding assumption is only as
+strong as the assumption.
+
+### `[C-neg]` The loop points are not in the 48-byte record at all
+
+All four 32-bit fields behave like RAM addresses by the test above, and no
+remaining field is wide enough to hold a loop pair. So *"decode the rest of
+those 48 bytes"* is **not** the remaining work — the loop pair lives
+somewhere else on the disc, in an area not yet identified. Independently
+reached here and by `mpc2emu`.
+
+### Sample rate: 44.1 kHz, measured from the audio itself
+
+No field encodes it, so it was measured rather than read. The method needs no
+hardware and no rate field: **the root key is known (`+0x2D`), so the pitch of
+the audio determines the rate.** Autocorrelate a sustained region, take the
+period *P* in samples, and `rate = f(root) × P`.
+
+Run across the choir set, whose entries are labelled in ascending semitones:
+
+```
+name              root   period   rate
+CHO:F#1^  L         42      484   44769
+CHO:A1^   L         45      404   44440
+CHO:C2^   L         48      342   44738
+CHO:ES2%  L         51      290   45113
+CHO:F#2%  L         54      242   44769
+CHO:A2%   L         57      204   44880
+CHO:C3%   L         60      170   44476
+```
+
+**44.1 kHz**, and the spread is explained entirely by integer-period
+quantisation (±1 sample at *P* = 170 is ±0.6 %). The load-bearing part is not
+the absolute value but that **the periods track the labels exactly** — the
+ratios are 1.198, 1.181, 1.179, 1.198, 1.186, 1.200 against a true semitone
+ratio of 1.189. A wrong root-key field or a wrong rate could not produce a
+clean geometric sequence across seven entries.
+
+This also **confirms `+0x2D` is a standard MIDI note number** (A4 = 69 = 440
+Hz): using the root directly yields 44.1 kHz, while root + 12 would yield 88.2
+kHz, which is not a rate. Note that Roland's *displayed* names sit an octave
+below the C4 = 60 convention — the field says 42 where the name says `F#1`.
+
+**What this does not establish.** Whether the format supports other rates.
+A broader sweep of 82 periodic samples returned an apparent 22.05 kHz cluster
+(4) and an above-48 kHz cluster (32) — **these are far more likely
+autocorrelation octave errors and mislabelled roots than real rates**, and
+they are recorded as unresolved rather than as evidence of a second rate.
+Claiming two rates from that data would be the "count distinct values before
+believing it" failure in a new costume.
+
+### `+0x24` (offset 36) is NOT the rate
+
+It was the best candidate on distribution alone — 6 distinct values, `0` and
+`2` splitting 2057/1925 — which is exactly the shape a rate code would have.
+**Measured, both values give ~44 kHz** (medians 44869 and 44056), so it is not
+a rate. What it does track is content: every `f36 = 2` entry examined is an
+*unpitched* one — `CHO:SSS`, `CHO:SCHSCH`, `CHO:HHH`, the choir consonants —
+whose autocorrelation is noise (the L and R halves of one sample return
+periods of 25 and 84). **Loop-on/loop-off is the obvious reading and is not
+demonstrated.**
+
+*This is the method note worth keeping from the exercise:* the distribution
+fingerprint picked the right field for the wrong reason. It found a
+near-binary flag, and a near-binary flag is what a rate code looks like **and**
+what a loop flag looks like. Distribution narrows the candidates; only a
+measurement against the signal decides between them.
+
+### Still open
+* **Loop points.** Not in the three pointers above; not yet located.
+* **Compression.** The S-7xx format stores 16-bit linear *and* a compressed
+  form. Every sample examined here is linear; **nothing has been done to
+  detect or decode the compressed case**, and no flag for it has been found.
+* The `−2` bias in the ROM's own index arithmetic at `0x169BC4`. The empirical
+  model needs no bias, so the ROM's index is a different variable from the
+  running total used here. Harmless for reading a disc; unresolved as code.
+
+### What this changes
+
+Blocker #1 said *"parameters without PCM do not make a converter"*. The PCM is
+now located, sized, byte-ordered, and stereo-paired, with a root key. **A
+linear-format S-7xx sample can be extracted from an image today.** What still
+blocks a faithful converter is **rate and loop points** — an extractor that
+ignores both produces audio at the wrong speed with no sustain, which is not a
+conversion. So the blocker narrows sharply rather than lifting.

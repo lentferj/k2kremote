@@ -8114,7 +8114,128 @@ a field   ->  read the raw values before interpreting them; a flag does not
 a reason  ->  when a hypothesis dies, grep for what was justified by it
 a summary ->  check every law against the numbers cited beside it
 two readings -> when they disagree, stop reading and go back to the artefact
+a sweep   ->  join the lines first; a phrase grep over wrapped markdown
+              misses the wrapped copies and exits clean
+a heading ->  never restate a quantity the body derives; delete the
+              duplicate instead of resolving to keep both in step
+a flagged ->  block the computation that depends on it. An unread
+assumption    quantity must not produce a SCORE -- trace it first, or
+              put the condition in the same sentence as the number
+a base    ->  validate it by landing on ONE object and reading its first
+              bytes. A total cancels the base and tests only the stride
+a reconc- ->  when two measurements disagree and an explanation makes
+iliation      them agree, TEST the explanation. It arrives wearing the
+              authority of the numbers it reconciles
+byte order -> prove it on a field with TWO non-zero bytes. Small values
+              are weak discriminators, and a format of small values can
+              be read end-to-end in the wrong order without complaint
+corrobor- ->  it must come from OUTSIDE the assumption it supports.
+ation         Agreement between two readings of one convention says
+              nothing about the convention
 ```
+
+**Five of these are worth more than the rest, and they are the five that
+remove the opportunity instead of adding a resolution:**
+
+```
+STRUCTURAL   the sweep   -- fixes the instrument, so the next session
+             (unwrap)       inherits it and cannot run the broken version
+STRUCTURAL   the heading -- deletes the second copy, so there is nothing
+             (delete)       left to keep in step
+
+STRUCTURAL   the flagged  -- the precondition sits inside the sentence
+             assumption      that carries the number, so the number cannot
+                             be quoted without it
+
+STRUCTURAL   the base    -- one object read directly, instead of a sum
+                            that cancels the very constant being tested
+
+STRUCTURAL   byte order -- proved on a field that CAN fail, so agreement
+                           is evidence rather than arithmetic coincidence
+
+RESOLUTION   the rest   -- each depends on somebody remembering, at the
+                           right moment, to run it
+```
+
+#### Who caught each, which matters more than who phrased it
+
+`mpc2emu` pushed back on an earlier version of this list that credited checks
+to whoever wrote the sentence. They were right: that credits the phrasing and
+hides the mechanism.
+
+```
+unwrap                    caught by this project, in a PEER's file
+delete-the-duplicate      caught by this project, in a PEER's file
+block-the-flagged-assn    caught by eosed, in their OWN -- the only self-catch
+validate-a-base           caught by mpc2emu, in THIS project's file
+prove-byte-order          caught by this project, in a PEER's file
+```
+
+**Four of five were caught across a session boundary. One was caught
+internally** — and that one only because the session had just withdrawn four
+results and was re-reading its own scores for an unrelated reason, which is
+the incidental-looking mechanism again.
+
+So the honest summary is not "five instruments were built". It is: **five
+instruments were built, and the record shows that almost none of them would
+have been found by the session that needed them.** That is an argument for the
+peer boundary being load-bearing, not for the checks being sufficient. A
+future session reading this list alone, with no peer, should expect it to
+under-perform — the checks are the residue of the mechanism, not a substitute
+for it.
+
+### The test for whether a new rule here is real
+
+`mpc2emu`'s, and it is the most useful sentence on this page because it
+applies to every future addition rather than to any past failure:
+
+> **Each of the three fires at a moment that already exists in the work.**
+> The unwrap happens when you `grep`. The delete-the-duplicate happens when
+> you edit the heading. The block happens when you compute a score. **None of
+> them needs a new moment to be remembered at.**
+>
+> *If a proposed rule needs its own moment of recollection, it is a promise
+> with a rule's grammar.*
+
+So the test for a fourth is not "is it true" or "did it come from a real
+failure" — both are true of all seven promises below it. It is: **name the
+action you are already taking when it fires.** If the answer is "when I
+remember to check", it belongs in the lower list, and writing it in the
+imperative will not move it up.
+
+Applied honestly to the seven, most fail: *grep for what the dead hypothesis
+justified* and *check every law against the numbers beside it* both require
+stopping to do a thing that nothing else prompts. They are worth keeping —
+seven promises kept some of the time is better than none — but they should not
+be mistaken for the three above them, and the record of this day is what
+happens when they are.
+
+The third came from `eosed`, via `mpc2emu`, and it is the sharpest of the
+three. They withdrew **four** Ensoniq results in one sitting: `fp@(12)` in the
+EOS walker is a position threaded in by the *caller*, not the wavesample
+struct's file offset, so every score of the form `req = next − base − 48` was
+comparing a decoded length against something that is not a length.
+
+**The assumption was flagged, in bold, in the same file, before any of the
+four scores were computed — and each of them cited the flag while stepping
+over it.** It was correctly scoped, correctly labelled, not stale, and not in
+a heading. **Every sweep on this list would have passed it.** That is what
+makes it structural: the failure is not that the caveat was missing or lost,
+it is that a caveat *annotates* while a number *asserts*, and the number
+travels. A clean `n/N` with its precondition two sections away is a finished
+result to every reader including its author.
+
+The distinction was `mpc2emu`'s phrasing of it and it is the sharpest thing to
+come out of the day: **a resolution is a promise about future attention, and
+the record below shows what those are worth.** The heading rule exists because
+its predecessor — *"fix the headline, the table and the summary row in the
+same edit"* — was written down by two sessions and then broken three times in
+one paragraph by the sessions that wrote it. It was not ignored. It was
+followed, and it still failed, because an append breaks a restated count and
+no amount of intending to fix both survives that.
+
+So when a check can be written either way, **write the structural one**, and
+treat a resolution as the fallback for cases where nothing can be removed.
 
 * **The number.** "21.4% of LFO1→Pitch routings carry a negative byte, 669
   files" sat here three weeks and reproduced nowhere; re-measured with the
@@ -8225,6 +8346,261 @@ read of the disc — `BA1:MC-202`, CD 2 `0x1E1600`, `sub[5] = 0`, `sub[6] = 0` �
 produced the answer in a minute, needed no hardware, and was available the
 whole time. *When two careful readings disagree, stop reading and go back to
 the artefact.*
+
+### A phrase sweep over hard-wrapped markdown is not a sweep (2026-09-21)
+
+Two of the standing checks above — *the caveat* and *the reason* — are
+implemented as "grep for the words". **Both are defeated by a line break at
+the wrong column, silently, with exit code 0.**
+
+Found at sign-off on `mpc2emu`'s consolidated document. Their AKAI section
+carried a subtitle retired by the section beneath it, and it survived their
+sweep and very nearly survived this project's because the phrase wraps:
+
+```
+... the source side is one
+field wide.
+```
+
+`grep "one field wide"` returns only the corrective paragraph that quotes it
+inside a single line — two hits, both in the text that retires the claim,
+which reads exactly like a clean file. **A clean grep gets believed**, so this
+is worse than not sweeping.
+
+```
+tr '\n' ' ' < FILE | grep -o -i "the phrase being retired"
+```
+
+**Run against this project's own docs immediately, it found a real one.**
+`ROLAND_IMPORT.md` §4 still called `src[5] * 100 + src[6]` "a Kurzweil object
+id" — twice, flat, with no correction anywhere in the file — a full day after
+the gloss was retracted in `IMPORT_CONVERSION.md`. That is the **primary
+disc-side reference**, the document handed to a peer project as the starting
+point, and it taught the wrong meaning of the single field that went on to
+produce two downstream errors. The retraction had been written once, in the
+other file, and nobody swept for where else the claim lived.
+
+**Fifth instance of one shape in a day**, which is what makes it structural
+rather than careless: the correction lands where the discovery happened and
+the claim survives everywhere it had been copied.
+
+```
+1  bit 5 "unconditional"    3 tables kept it     eye (self, while gathering)
+2  "NEW DEFECT" framing     heading only         peer (mpc2emu caught mine)
+3  "one field wide"         subtitle kept it     peer, by accident of ordering
+4  "a Kurzweil object id"   1 file of 2          TOOL (the sweep, own repo)
+5  delete-lockup guard      2 files of 3         TOOL (the sweep, peer's repo)
+```
+
+**Three of the five were caught by something that does not scale** — one by
+eye, two by a peer, and one of those two only because an unrelated `sed` had
+put the line on screen minutes earlier. The tool accounts for two, both in the
+last hour of the day, after it existed.
+
+*Corrected 2026-09-21, same day.* This first read "the first three were caught
+by eye, by a peer, and by a peer; only the fourth was caught by a tool", and
+that was then relayed to `mpc2emu` as **"four of five do not scale"** and
+committed into their method section — one line below *"read every hit's
+context, not the count"*. **Neither session checked a count, in the paragraph
+about checking counts.** Caught only by diffing their commit to answer a
+question about scope and reading the arithmetic on the way past: accident, for
+the third time today. The shape does not spare the document that describes it.
+
+### Do not restate, in a heading, a quantity the body derives (2026-09-21)
+
+The heading/body rule filed above says *fix the headline, the table and the
+summary row in the same edit*. **That rule failed three times in one evening
+in a single paragraph**, and the third failure showed why it was the wrong
+rule.
+
+`mpc2emu`'s method section has a bullet tallying instances of the
+heading/body pattern. Its lead restated the count; its table listed the
+instances. Every new instance appends a row. So:
+
+```
+lead "five"  / table 7    ->  corrected
+lead "ten"   / table 17   ->  the same error, two edits later
+```
+
+and the table's own **item 10** is *"this bullet's lead saying five while its
+table said seven"* — the paragraph recording the previous occurrence of the
+error it was currently committing.
+
+**This is structural, not careless.** A heading that restates a quantity the
+body computes is correct only in the instant between two edits. Any append
+breaks it again, and "remember to fix both" does not survive contact with an
+append — three demonstrations, by two sessions that had both written the rule
+down.
+
+**So the fix is not to count more carefully; it is to delete the duplicate.**
+Let the table and its totals be the only place a count appears. One source of
+truth cannot drift from itself. Where a heading number is genuinely wanted it
+must be the *last* thing edited, and nothing in a hand-maintained document
+guarantees that.
+
+*Generalised:* every check filed today that says "keep two places in step" is
+weaker than the edit that removes one of the places. Prefer deleting a
+restatement to disciplining it — the same reason `k2kfields.py` points at
+`k2kromtables.py` instead of copying the tables.
+
+### A sum cannot validate a base (2026-09-21)
+
+`mpc2emu`'s, from re-deriving this project's Roland audio model independently.
+The model located the PCM at the ROM's own `addil` constant `0x2B5600`. **The
+real base is `0x2B5800`** — `0x2B5600` is 512 bytes of `0xFF`, the `0x200`
+header every area in that format carries, and which the same document applied
+correctly to the parameter records two sections away.
+
+**Two validations passed against the wrong base, and neither could have
+failed:**
+
+```
+global fit       summed 4128 extents against the image size
+                 -> a constant base CANCELS out of a total
+envelope tiling  checked silence at each sample's start and end
+                 -> every sample began 512 bytes early, i.e. 256 samples
+                    inside the PREVIOUS sample's zero padding: 5.8 ms of
+                    prepended silence, inaudible
+```
+
+So the format's own padding hid the error from the only other check
+available. **A total tests the increments and says nothing about where the
+ruler starts.**
+
+The rule: **validate a base by landing on one object and reading its first
+bytes.** One record, read directly, would have shown `0xFF` at `0x2B5600` in a
+second — and did, the moment it was looked at.
+
+*Why this is a structural check and not a promise:* it fires at the moment a
+base constant is first used to read something, which is an action already
+being taken. It replaces a *weaker* check with a *cheaper* one, which is the
+shape to prefer — the summing validation took 4128 records and was worthless
+for this; the direct read took one and was decisive.
+
+**Related failure in the same section, same day:** *"their deltas are
+identical, 2560 and 1024"* was measured on **three** samples and asserted of
+the format. Over 4128 records, `+32 − +28 = 1024` holds 4122 times but
+`+28 − +24 = 2560` holds only **1316** times. The conclusion it supported
+survived on a different and better reason — those fields exceed the sample's
+own length on thousands of records, which no loop offset can do — but *count
+distinct values before believing an agreement* is on the list above, filed by
+the session that then broke it two sections below.
+
+### The explanation is the thing nobody checks (2026-09-21)
+
+Two sessions measured the same field of the same 4128 records and got 4035 and
+3721. This project offered the reconciliation: *"you are testing against the
+actual audio length, I against the padded block extent."* Plausible, specific,
+offered in good faith, and **wrong** — both had used the padded extent.
+
+The real split, measured:
+
+```
++20 >  padded extent   3721      <- one session's number
++20 == 0                314
+0 < +20 <= extent         93
+                       -----
+                        4128      3721 + 314 = 4035, the other's number
+```
+
+**One category boundary, two correct numbers.** The 314 records whose value is
+exactly zero were counted as "not a valid offset" by one side and as
+"not exceeding" by the other.
+
+**Why this is its own shape.** Every other entry on this page is a claim that
+was wrong. This is a claim that was *right on both sides* plus a story about
+why they differed — and the story is the only part nobody re-measured, because
+it arrives already agreeing with two numbers that are each correct. It is the
+most credible-looking artefact in the entire failure catalogue.
+
+It also cost a real finding for an hour: the **314 zeros** are a genuine
+sub-population of that record, unexplained, and the false reconciliation
+explained them away as a definitional artefact. *An explanation that dissolves
+an anomaly is worth less than the anomaly.*
+
+Caught by `mpc2emu` re-deriving rather than accepting — which is the only way
+this shape is ever caught, since no sweep looks at prose that agrees with the
+data.
+
+### Byte order must be proved on a field that can disprove it (2026-09-21)
+
+`mpc2emu` misread one header word of three — `0x0098` where the ROM holds
+`0x9800` — and the other two words came out right. Their own diagnosis of why
+it survived their eye is the useful part, and it generalises past the slip:
+
+**Two of the three words agreed, so the line read as self-consistent, and the
+one word with a non-zero high byte was the only one that could ever have shown
+the error.** A field holding a small value carries a zero byte, and a zero
+byte is nearly order-agnostic in practice — so **in a format full of small
+values, most fields cannot fail a byte-order check.** They can be read
+end-to-end in the wrong order without a single field complaining.
+
+The check: **prove byte order on a field with two non-zero bytes**, and treat
+agreement on small-valued fields as no evidence at all. In this project's
+material the discriminating evidence is: the Roland sector-0 counts validated
+against actual record counts on three discs; the sample `size` field validated
+by a global fit that a swapped reading would miss by orders of magnitude; and
+the PCM itself, where little- against big-endian is a 20× separation in
+smoothness. Those are the readings that are *earned*. A small flag field
+matching expectations is not.
+
+**Audited this project's own Roland claims against it**, and the one that
+mattered survives: the `[C-neg]` that the four 32-bit fields of the sample
+parameter record are not loop points holds under **both** byte orders — they
+exceed their own sample's length on 3721/2507 records read little-endian and
+3778/3847 read big-endian. *A negative result that depends on a decoding
+assumption is only as strong as the assumption*, and this one does not depend
+on it.
+
+**Also worth recording about how it was caught.** One word of nine disagreed
+between two sessions. The disagreement was reported without an explanation
+attached — deliberately, an hour after a tidy explanation for a different
+disagreement had turned out to be invented. `mpc2emu` then re-derived and found
+the fault was theirs. Their note: *had "probably a transcription difference"
+been offered, I would very likely have accepted it, because it would have been
+true and would have stopped the check.* **A true explanation can end an
+investigation just as effectively as a false one.**
+
+### Self-generated corroboration (2026-09-21)
+
+Two instances in one evening, on the same record, neither noticed at the time:
+
+```
++36's DISTRIBUTION had exactly the shape a rate code would have
+   -> near-binary, 2057/1925. So does a loop flag. Measured: both
+      classes are 44.1 kHz. The shape was a restatement of the
+      hypothesis, not evidence for it.
+
++42 MATCHED the directory's +0x1E, cited as confirming the reading
+   -> it confirms the two fields are CONSISTENT. Swap both and they
+      still agree perfectly. It says nothing about which way round
+      either is read.
+```
+
+**Both felt like independent support. Both were restatements of the thing
+being tested**, derived from the same data and the same assumption as the
+claim. `mpc2emu`'s framing, which is the general rule: *agreement between two
+readings of the same convention is not evidence about the convention.*
+
+**This is the easiest failure in the catalogue to produce by accident**,
+because unlike the others it *feels* like doing extra work. Looking for a
+second line of support is the correct instinct; the failure is that the second
+line was generated from inside the assumption, so it could not have come out
+differently. A corroboration that cannot fail is not a corroboration.
+
+The test: **name what the corroborating evidence would look like if the claim
+were false.** For `+42` against `+0x1E` the answer is *identical*, and that
+ends it in one sentence.
+
+*What earned evidence looked like on the same claims:* the global fit, where a
+swapped `size` reading misses the image size by orders of magnitude; and the
+PCM smoothness measurement, 20× between orders. Both could have come out the
+other way. Neither is a restatement.
+
+**And the closing caution, `mpc2emu`'s:** *a check written by the person who
+needs it is still read by the person who wrote it.* Four of the five
+structural checks above crossed a session boundary to be found. The boundary
+is the instrument; the checks are its residue.
 
 ### A porting trap: two formats, opposite polarity (2026-09-21)
 

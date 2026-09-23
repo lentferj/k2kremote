@@ -178,15 +178,39 @@ irregular.
 `0x16A2CC` onwards converts a Roland record into Kurzweil terms. The first
 piece of arithmetic found there (`0x16A40A`):
 
+> ### RETRACTED later the same day — this section's central gloss is wrong
+>
+> **`src[5] * 100 + src[6]` is not an object id. It is a tuning in cents**,
+> `coarse × 100 + fine`, and the third term is not a bank base but
+> `record[+38]`, a per-record cents base. The full law, hardware-confirmed on
+> seven imports and disc-confirmed on one:
+>
+> ```
+> +2  + 2z   the Kurzweil Sample object id   <- the id lives HERE
+> +10 + 2z   a tuning in cents = coarse*100 + fine + record[+38]
+> +38        a per-record cents base
+> ```
+>
+> The `× 100` was read as a bank multiplier when it is cents-per-semitone.
+> The id has its own field two words earlier, so `+10 + 2z` never needed to
+> be one. See `IMPORT_CONVERSION.md` §5 for the retraction and §6b-ter for
+> the measurement; `BA1:MC-202` (CD 2, `0x1E1600`) has `coarse = 0`,
+> `fine = 0` and a measured `−134` cents, which comes entirely from `+38`.
+>
+> **This gloss went uncorrected here for a day after it was retracted
+> elsewhere**, and it supplied the premise for two further errors. It is left
+> in place below rather than deleted, because it is the mistake the rest of
+> the investigation was spent unwinding.
+
 ```
 dest_id = src[5] * 100 + src[6] + bank_base
 ```
 
-— a Roland bank/number pair turned into a Kurzweil object id, offset by the
-bank the user chose in the load dialog. That is the shape the rest of the
-mapping will take, and it is the part worth having: the disk walk above is
-re-derivable from format notes, but *what Kurzweil decided a Roland parameter
-means* exists only here.
+— ~~a Roland bank/number pair turned into a Kurzweil object id, offset by the
+bank the user chose in the load dialog~~ **(retracted — see the block above)**.
+That is the shape the rest of the mapping will take, and it is the part worth
+having: the disk walk above is re-derivable from format notes, but *what
+Kurzweil decided a Roland parameter means* exists only here.
 
 ### What the converter builds, per patch
 
@@ -196,7 +220,9 @@ then fills a per-patch structure four times over (`cmpiw #4` at `0x16A452`):
 in. Per zone `i`:
 
 ```
-dest[0x0A + 2i] = src[5] * 100 + src[6] + bank_base   ; a Kurzweil object id
+dest[0x0A + 2i] = src[5] * 100 + src[6] + bank_base   ; RETRACTED: not an id,
+                                                     ; a tuning in cents, and
+                                                     ; the 3rd term is +38
 dest[0x12 + 2i] = src[2]        (word)
 dest[0x1A + i]  = src[7]
 dest[0x1E + i]  = src[9]
@@ -211,6 +237,20 @@ Kurzweil object**: `0x1645E2` calls the object lookup with type `132`
 Layer 1 of Program 199" (15-31), confirmed in code rather than taken on the
 manual's word. The keymap side uses a **ROM prototype**: a "New Keymap"
 template object at `0x1888E4`, referenced nine times across the importer.
+
+**There are three ROM prototypes, not two.** The sample path clones a third at
+**`0x188436`**, named **`"Abcdefghijkl"` — twelve characters**, with header
+words `0058`/`0010` against `00AE`/`000E` for the other two, so it is a
+differently shaped object and not just a wider name:
+
+```
+0x188436   9800  0058  0010   "Abcdefghijkl"   cloned at 0x169C20 (sample path)
+0x18862A   9401  00AE  000E   "New Sample"
+0x1888E4   9401  00AE  000E   "New Keymap"
+```
+
+See `IMPORT_CONVERSION.md` §"Still loose" — the third prototype makes one of
+the four negative searches a claim stated over an incomplete enumeration.
 
 So an imported object is a clone of a template with the imported values
 written into it — which is exactly why the drop list matters: any field the
