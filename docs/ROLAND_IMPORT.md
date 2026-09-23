@@ -407,6 +407,55 @@ sibling `eosed` project doing the same job on the E-mu EOS ROM today:
   an address kept in a register across several uses shows up once.
 * A count in a header need not describe the body that follows it.
 
+## 5a. ROM anchors for the keymap fill
+
+The addresses behind the fill conclusions, kept because the conclusions are
+cited elsewhere without them and "record the scan that produced it" applies to
+our own findings first. Verified instruction by instruction in the v3.87J
+image, 2026-09-21. These came out of a GLM-5.3-Flash analysis that was checked
+here; the analysis file itself is not tracked, since everything it established
+is below and everything it got wrong was corrected before it was used.
+
+| address | what it establishes |
+|---|---|
+| `0x16AB28` | `addqw #1,%sp@(250)` / `cmpiw #88,%sp@(250)` / `bltw 0x16A7A4` — the fill loop runs over **88 keys** |
+| `0x16A7A4` | `moveq #9` / `addw %sp@(250)` — so the entry index is **`I = 9 + key`, 0…87**, not `9 + zone_counter` |
+| `0x16A874`…`0x16A89E` | the record's sample-reference word goes to `find_object(134, id)`, then `0x10B90A` for the body, then `moveb %a0@(12)` — the root byte is byte 12 of **that object's** body, not a staged record byte |
+| `0x16A870`/`0x16A872` | `andw record[+18+2z],#0xFF00` / `bne 0x16A8DA` — a non-zero high byte **skips** the whole root-key lookup and the `(A − 12 − I) × 100` term |
+| `0x16A44A` | `record[+18 + 2z] ← src[2]`, a word from the Roland partial data — so the key-tracking cancellation is **gated on a byte the disc supplies**, not applied unconditionally |
+| `0x1032EA` / `0x10B90A` | `find_object(type, id)` and object-body fetch, the pair every lookup above goes through |
+
+`I = 9 + key` corrected `IMPORT_CONVERSION.md`, which had said `9 + zone_counter`;
+that error had already been relayed to `mpc2emu` as a resolution of their tuning
+objection and was withdrawn. Calling type 134 "the Sample" is interpretation —
+our vendored enum names it `Soundblock` — and "the root key" for byte 12 is an
+inference from the arithmetic's shape, not a reading of the object.
+
+**Two leads never checked**, flagged rather than carried as findings:
+
+* the boundary-copy claim for entries 0–8 and 96–127. The `cmpiw #127` loop at
+  `0x16AB20` is *consistent* with it, which is corroboration and not
+  confirmation.
+* the volume chain through `0x16C5B8` / `0x15390C`.
+
+The analysis also cited `0x103310`, `0x16A62A`, `0x16A726`, `0x16A9F6`,
+`0x16AA8E`, `0x16AA98`, `0x1835B0` and `0x190BF3` in its working. None of those
+were verified here and none is retained: an unchecked address is a lead, and a
+lead nobody is following is not worth the weight of looking like a finding. They
+are recoverable from git history if a reason to chase them appears.
+
+**One refuted claim, recorded because of where it sits.** The same analysis
+argued the ramp "flattens each key to its own sample's pitch rather than
+silencing high keys, because the keymap's per-key transposition and the tuning
+offset cancel". `mpc2emu` measured the construction on a K2000R: on pitched
+material it drove high keys to −72 semitones and they went **silent**. The sum
+is zero on paper, but reaching it needs a −92-semitone per-entry tuning the
+engine does not deliver. Near the root (`root == key`, a fixed-pitch drum map)
+the construction is correct and appears in real third-party banks. The
+instructive part is *which* paragraph was wrong: everything read off the
+disassembly held, and the one that left the disassembly and reasoned about
+music did not.
+
 ## 6. Status
 
 Reconnaissance and the disk walk, done offline. The parameter mapping is
