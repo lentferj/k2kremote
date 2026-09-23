@@ -56,7 +56,8 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 from k2000.definitions import ObjectType
 from k2kremote.k2kromtables import (ENV2_FILFREQ_CT, FILTER_COARSE_HZ,
-                                     LFO_PITCH_CT, LFO_RATE_CHZ)
+                                     LFO_PITCH_CT, LFO_RATE_CHZ,
+                                     ROLAND_RATE_HZ)
 
 
 @dataclass(frozen=True)
@@ -208,6 +209,123 @@ def _f1_coarse_hz(raw: bytes) -> Optional[int]:
     return FILTER_COARSE_HZ[b + 48]
 
 
+
+# --- Soundblock / Keymap -----------------------------------------------
+#
+# These four were not found by DUMP-diffing panel edits, which is how every
+# Program entry above was found. They come from tracing the import paths in
+# the OS ROM and were then checked against objects the K2000 itself wrote
+# during the Roland and AKAI imports (docs/IMPORT_CONVERSION.md). That is a
+# different provenance, not a weaker one -- the check is still the machine.
+
+#: A Soundfilehead sits at Soundblock body+12, so its own field offsets are
+#: 12 higher here. Named so the arithmetic is visible rather than folded in.
+_SFH = 12
+
+
+def _sample_rate_hz(raw: bytes) -> Optional[int]:
+    """Soundblock offset 40 (`Soundfilehead.samplePeriod`) -> the sample rate.
+
+    The firmware writes `1e9 / rate` **truncated**, not rounded: the divide
+    at ROM 0x18352C is a restoring division that discards the remainder.
+    Confirmed on device output at the one rate where the two differ --
+    an AKAI import at 44100 wrote 22675, where rounding gives 22676.
+
+        20833 ns -> 48000 Hz      (Roland kit imports, 2026-09-21)
+        22675 ns -> 44100 Hz      (AKAI Voice Spectral imports, 2026-09-22)
+
+    **Inverting the truncation does not recover the rate.** `1e9/22675` is
+    44101.4, so rounding gives 44101 -- close, tidy and not a rate the
+    machine can produce. So this does not invert: it asks which of the six
+    rates the ROM's own table holds (0x169D90) truncates back to this
+    period, which is exact.
+
+    A period no table rate produces decodes to None. That is the common
+    case for anything not imported -- a sampled or ROM sample may sit at a
+    rate the import path never writes -- and None is the right answer there
+    rather than a plausible number.
+    """
+    period = int.from_bytes(raw[:4], "big")
+    if period == 0:
+        return None
+    for rate in ROLAND_RATE_HZ:
+        if int(1e9 / rate) == period:
+            return rate
+    return None
+
+
+def _sample_loop_state(raw: bytes) -> Optional[str]:
+    """Soundblock offset 13 (`Soundfilehead.flags`) -> looped or one-shot.
+
+    **Bit 0x80 is inverted**: CLEAR means looped, SET means one-shot. That
+    reading was confirmed by contrast rather than by assertion -- two
+    imports of different material, the same field, differing in exactly that
+    bit and matching the source both times:
+
+        Roland percussion kits   flags 0xB0   bit set    one-shot
+        AKAI sax multisample     flags 0x30   bit clear  looped
+
+    The rest of the byte is not decoded here. The corpus holds 0x00, 0x04,
+    0x70, 0x72, 0xB0 and 0xF0, and no reading of the remaining bits survives
+    all six, so this returns only what bit 7 says.
+    """
+    return "one-shot" if raw[0] & 0x80 else "looped"
+
+
+def _sample_root_note(raw: bytes) -> Optional[str]:
+    """Soundblock offset 12 (`Soundfilehead.rootkey`) -> the note name.
+
+    A standard MIDI note number: an AKAI sample whose header said D#6 (87)
+    imported as 87 while its *name* said `D 5`, which is how the header was
+    shown to be the source rather than the name (2026-09-22).
+
+    Octave numbering is **C4 = 60**, the standard convention, and it is the
+    panel's own: the CUTCAL readings recorded for `_f1_coarse_hz` above show
+    the device displaying `A 4 440Hz` and `C 6 1047Hz`, which puts middle C
+    at C4. It also matches the AKAI side, where header root 87 is D#6.
+
+    A first draft of this said `C0 = 0` and rendered 60 as `C5`. That was
+    asserted without evidence, and the evidence refuting it was already in
+    this file.
+    """
+    n = raw[0]
+    if not 0 <= n <= 127:
+        return None
+    names = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+    return f"{names[n % 12]}{n // 12 - 1} ({n})"
+
+
+def _keymap_entry_layout(raw: bytes) -> Optional[str]:
+    """Keymap offset 2 (`method`) -> what one entry in the table contains.
+
+    The method is a bitfield selecting which fields each entry carries, and
+    `entrySize` at offset 10 is their total width. The order is the bit
+    order, which is how a 6-byte `0x17` entry decodes:
+
+        0x10  tuning i16      0x08  tuning i8     0x04  volumeAdjust i8
+        0x02  sampleID i16    0x01  subSample u8
+
+    Checked against imported keymaps whose first entries were known
+    independently: `0x17` gave `tuning +4352, vol -44, sample 16582, sub 1`,
+    matching the values recorded for those objects.
+    """
+    method = int.from_bytes(raw[:2], "big")
+    parts, width = [], 0
+    if method & 0x10:
+        parts.append("tuning i16"); width += 2
+    elif method & 0x08:
+        parts.append("tuning i8"); width += 1
+    if method & 0x04:
+        parts.append("volumeAdjust i8"); width += 1
+    if method & 0x02:
+        parts.append("sampleID i16"); width += 2
+    if method & 0x01:
+        parts.append("subSample u8"); width += 1
+    if not parts:
+        return None
+    return f"{' + '.join(parts)} = {width} B/entry"
+
+
 #: Only offsets independently confirmed by DUMP-diffing two panel-driven
 #: states go here -- see the module docstring for why this list is short.
 KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
@@ -249,6 +367,37 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
         notes="RESOLUTION_NOTES §56/§57/§62; signed, 1 % per unit, +-100 %",
         decode=_panner_adjust_pct,
     ),
+
+    (ObjectType.Soundblock, _SFH + 0): Field(
+        name="Sample Root", size=1, unit="",
+        notes="IMPORT_CONVERSION.md; Soundfilehead.rootkey, MIDI note. "
+              "Shown the K2000's way (C0 = 0), so 60 reads C5 not C4.",
+        decode=_sample_root_note,
+    ),
+    (ObjectType.Soundblock, _SFH + 1): Field(
+        name="Sample Loop", size=1, unit="",
+        notes="IMPORT_CONVERSION.md; Soundfilehead.flags bit 0x80, and it "
+              "is INVERTED -- clear = looped. Confirmed by contrast: "
+              "0xB0 one-shot kits against 0x30 looped multisamples. "
+              "The other bits are not decoded; no reading survives all six "
+              "values the corpus holds.",
+        decode=_sample_loop_state,
+    ),
+    (ObjectType.Soundblock, _SFH + 28): Field(
+        name="Sample Rate", size=4, unit="Hz",
+        notes="IMPORT_CONVERSION.md; Soundfilehead.samplePeriod, "
+              "TRUNC(1e9/rate) -- the ROM divide at 0x18352C discards the "
+              "remainder. Device wrote 22675 at 44100, where rounding "
+              "would give 22676.",
+        decode=_sample_rate_hz,
+    ),
+    (ObjectType.Keymap, 2): Field(
+        name="Keymap Method", size=2, unit="",
+        notes="IMPORT_CONVERSION.md; bitfield selecting the per-entry "
+              "fields, in bit order. entrySize at offset 10 is their total "
+              "width -- 0x17 gives 6 bytes.",
+        decode=_keymap_entry_layout,
+    ),
 }
 
 
@@ -281,7 +430,10 @@ def describe_field(obj_type: ObjectType, offset: int, raw: bytes,
     value = field.decode(raw)
     if value is None:
         return f"{hexed} ({field.name}: unmapped for this byte)"
-    return f"{hexed} ({field.name}: {value} {field.unit})"
+    # A unitless field -- a note name, a loop state -- would otherwise print
+    # a trailing space inside the parens.
+    suffix = f" {field.unit}" if field.unit else ""
+    return f"{hexed} ({field.name}: {value}{suffix})"
 
 
 def filter_cutoff_byte_to_hz(b: int) -> float:
