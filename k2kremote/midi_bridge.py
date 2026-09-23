@@ -967,6 +967,43 @@ class MidiBridge:
         from k2000.messages import Dir
         return self._ask(Dir(obj_type, idno)).name
 
+    def object_info(self, obj_type: ObjectType, idno: int) -> "Info":
+        """The whole `INFO` for one object — name, **size**, RAM flag (DIR).
+
+        `object_name` threw away everything but the name. The size is the
+        piece that matters: it is the only way to know how many bytes an
+        object actually has before reading it, and `read_object_bytes` will
+        happily hand back more (see its docstring).
+        """
+        from k2000.messages import Dir
+        return self._ask(Dir(obj_type, idno))
+
+    def read_object_whole(self, obj_type: ObjectType, idno: int,
+                          timeout: Optional[float] = None) -> bytes:
+        """Every byte of an object and **not one more** — DIR for the size,
+        then one DUMP of exactly that many bytes.
+
+        This is what almost every caller of `read_object_bytes` actually
+        wants, and it is the only safe way to ask for "the whole object".
+        Asking `read_object_bytes` for a generous size does **not** fail and
+        does not truncate — it returns padding up to the object's *declared*
+        extent, which is indistinguishable from real content:
+
+            requested 900 -> got 796 bytes, while DIR reported 540
+
+        Measured on this K2000R (2026-09-22) against an AKAI-imported keymap.
+        Trusting the returned length there would have said "this keymap holds
+        a full 128 entries" when the object holds 85 — a clean, confident,
+        wrong answer, and the reading that happened to be right earlier was
+        right only because the request happened to equal the DIR size.
+
+        Costs one extra round trip. At the ≥120 ms send gap that is the price
+        of not guessing, and every caller that reads a whole object should
+        pay it.
+        """
+        info = self.object_info(obj_type, idno)
+        return self.read_object_bytes(obj_type, idno, 0, info.size, timeout)
+
     def list_bank(self, obj_type: ObjectType, bank: int, *, ram_only: bool = True,
                   quiet_for: float = 2.0) -> Tuple[List["Info"], bool]:
         """Every object INFO the K2000 reports for one bank — DIRBANK (0x0C).
@@ -1112,6 +1149,13 @@ class MidiBridge:
         missing object, so silence rather than a DNAK is a real protocol
         fact worth having, not a timeout tuning problem — check the object
         exists first if a DUMP might otherwise hang.
+
+        **And `size` is taken on trust — an over-read is silent.** Asking for
+        more bytes than the object holds returns *padding to the declared
+        extent*, not a short read and not an error, so the reply's length
+        tells you nothing about the object's. Use :meth:`read_object_whole`
+        when you want the whole thing; use this one when you already know the
+        offset and width you are after.
         """
         reply = self._ask(
             Dump(obj_type, idno, offset, size, EncodingFormat.BitStream),

@@ -1488,3 +1488,47 @@ def test_a_reply_that_is_the_request_echoed_is_not_an_answer():
     # and one echo followed by the real thing: the retry gets it
     replies[:] = [AllText(), ScreenReply(b"K2000" + b"\x00" * 316)]
     assert isinstance(bridge._ask(AllText(), 0.2), ScreenReply)
+
+
+def test_object_info_returns_the_whole_info_not_just_the_name():
+    from k2000.definitions import ObjectType
+    from k2000.messages import Dir, Info, SysexMessage
+
+    def fake(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        assert isinstance(decoded, Dir)
+        return Info(decoded.type, decoded.idno, 540, True, "ACCORDION 1")
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub")
+    info = bridge.object_info(ObjectType.Keymap, 300)
+
+    assert (info.size, info.name, info.in_ram) == (540, "ACCORDION 1", True)
+
+
+def test_read_object_whole_asks_for_exactly_the_dir_size():
+    """The over-read guard: DIR says 540, so the DUMP must ask for 540.
+
+    Asking for more does not fail and does not truncate -- the K2000 pads to
+    the object's *declared* extent (measured: requested 900, got 796, DIR
+    said 540), which is indistinguishable from real content.
+    """
+    from k2000.definitions import ObjectType
+    from k2000.messages import Dir, Dump, Info, Load, SysexMessage
+
+    asked = {}
+
+    def fake(message, timeout):
+        decoded = SysexMessage.decode(bytes(message.encode()))
+        if isinstance(decoded, Dir):
+            return Info(decoded.type, decoded.idno, 540, True, "ACCORDION 1")
+        assert isinstance(decoded, Dump)
+        asked["size"] = decoded.size
+        asked["offset"] = decoded.offset
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
+                    b"\x00" * decoded.size)
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub")
+    data = bridge.read_object_whole(ObjectType.Keymap, 300)
+
+    assert asked == {"size": 540, "offset": 0}
+    assert len(data) == 540
