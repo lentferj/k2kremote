@@ -3053,8 +3053,10 @@ is the only one of the three that structurally matches the model's per-zone
 which is identically 0 wherever a sample is not shared (so no regression on
 byte-identical unity banks).
 
-**Measured on the panel, 2026-09-01** (all edits discarded via the exit
-prompt; field verified back at `0.0dB` on every range afterwards):
+**Measured on the panel, 2026-09-01 — the keymap *range* `VolumeAdjust`, the
+third row of the table above, and nothing else here was measured** (all edits
+discarded via the exit prompt; field verified back at `0.0dB` on every range
+afterwards):
 
 ```
   STEP    +1 click -> 0.5dB   +2 -> 1.0dB   +3 -> 1.5dB   +4 -> 2.0dB
@@ -3064,10 +3066,55 @@ prompt; field verified back at `0.0dB` on every range afterwards):
           returning to C 0-B 3 still read 63.5dB
 ```
 
-**The low rail is −63.5 dB, NOT −64.0.** The *sample* editor's equivalent
-reaches −64.0 (signed i8, byte 0x80), but the keymap field uses **bytes
+**The low rail is −63.5 dB, NOT −64.0.** The keymap field uses **bytes
 −127..+127 and never 0x80** — so a writer must clamp to ±127. This is the one
-value the panel cannot produce.
+value the panel cannot produce, and it was reached by driving both rails
+deliberately, not inferred from the byte width.
+
+**The sample editor's rail IS −64.0 dB — measured 2026-09-23, both rails
+driven.** EditRomSample:MISC, `VolumeAdjust`, on a ROM sample (RAM was empty;
+ROM sample parameters edit fine in the editor and are discarded on exit):
+
+```
+  STEP    1 click -> 0.5dB  (0.0 -> -0.5)
+  LOW     -200 clicks -> -64.0dB;  1 more click -> -64.0dB;  20 more -> -64.0dB
+  HIGH    +400 clicks -> 63.5dB;   1 more click -> 63.5dB
+  RESTORE -127 clicks -> 0.0dB, and RootKeynum back at G#1 as found
+```
+
+At 0.5 dB/unit that is bytes **−128..+127**, i.e. **0x80 is reachable here**,
+and the rail is asymmetric exactly as the manual's Sample Editor table (15-11)
+says: `Volume Adjust  -64.0 to 63.5 dB`.
+
+**So the two fields genuinely differ**, which is the whole point of this note:
+
+| field | rail | bytes | 0x80 |
+|---|---|---|---|
+| Soundfilehead `volumeAdjust` (sample editor) | −64.0 .. +63.5 dB | −128..+127 | **reachable** |
+| Keymap range `VolumeAdjust` | −63.5 .. +63.5 dB | −127..+127 | **never** |
+
+Same 0.5 dB/unit step, different low rail, one byte apart. A writer must clamp
+the keymap field to ±127 and may use the full i8 for the sample field.
+
+> **This was asserted for three weeks before anybody drove it.** Until
+> 2026-09-23 this paragraph stated the −64.0 as a contrast to the measured
+> keymap rail, inside a block headed *Measured on the panel*, having been
+> inferred from the field being a signed i8 — the inference this note's own
+> closing line warns against. It happened to be right. That is worse than
+> being wrong, not better: it had a measurement's authority from its position
+> on the page, mpc2emu's KRZ writer clamped to `[-128, 127]` on the strength
+> of it, and had the rail turned out to be ±127 that writer would have been
+> emitting a byte the panel cannot produce. The claim was true-shaped,
+> correctly attributed and adjacent to real data, and none of that is
+> evidence. What settled it was going to look for the sweep, finding none,
+> and then doing it.
+
+**Three fields, one name, one step size, and they differ at a single value.**
+All three are 0.5 dB/unit, so a scale measured on one transfers; a *rail* does
+not. mpc2emu's reader cited this note's measurement without naming which of the
+three it covered, and was correct only because the citation happened to sit at
+the keymap read site. A measurement of one of a set of confusable fields has to
+name its field **at the measurement**, not only in the surrounding section.
 
 Per-key-range scoping is now established **by experiment** rather than from
 the manual's wording.

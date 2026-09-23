@@ -155,6 +155,19 @@ screens and stays clean. **Known limits (so `p` pause is still the only guarante
 detection must happen before you press Yes/OK; a delete with no on-screen confirm
 wouldn't be caught.
 
+## Soundfilehead `volumeAdjust` low rail — RESOLVED (2026-09-23)
+
+**Status:** closed. Measured on the K2000R, both rails driven:
+**−64.0 .. +63.5 dB, bytes −128..+127, 0x80 reachable.** Matches the manual's
+Sample Editor table (15-11) and differs from the keymap range field, which
+stops at ±127 and never produces 0x80 (§37).
+
+The claim had been asserted since 2026-09-01 inside a block headed *Measured
+on the panel* without ever being driven; it was right, which is not the same
+as having been known. Full sweep and the method note in RESOLUTION_NOTES §37.
+mpc2emu's `[-128, 127]` clamp on the per-sample field is correct and needs no
+change.
+
 ## `k2kmon learn` — the one inspector mode not verified on hardware
 
 **Status:** implemented; `watch`, `ask`, `read`, `compare` and `types` were all
