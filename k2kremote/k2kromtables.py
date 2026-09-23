@@ -116,3 +116,57 @@ LFO_RATE_CHZ = (
     2500, 2500, 2500, 2500,
 )
 
+
+
+# --------------------------------------------------------------------------
+# The sample-import tables, read out of the same image (2026-09-21/22).
+#
+# Unlike the three above, these were not found by matching panel readings --
+# they came from tracing the Roland and AKAI import paths, and were then
+# checked against objects the K2000 itself wrote (docs/IMPORT_CONVERSION.md).
+# --------------------------------------------------------------------------
+
+#: ROM 0x169D90: `moveb %a1@(44),%d0; andiw #15,%d0; cmpiw #5; bhis` then a
+#: six-entry PC-relative jump table at 0x169DA8. Index is the low nibble of
+#: the Roland sample record's byte +44; 6..15 fall through to the default.
+#:
+#: Confirmed on device output: an import at code 1 wrote samplePeriod 22675,
+#: which is TRUNC(1e9/44100) and not the rounded 22676.
+ROLAND_RATE_HZ = (48000, 44100, 24000, 22050, 30000, 15000)
+
+#: What codes 6..15 get (the `bhis` default arm at 0x169DDC).
+ROLAND_RATE_DEFAULT_HZ = 44100
+
+#: ROM 0x1F4B02..0x1F9602: 9601 BE u16, addressed as `0x1F9602 + 2*i` for
+#: i = 0 down to -9600, i.e. **one entry per cent**, searched downwards for
+#: the first entry <= (rate << 16) / 96000.
+#:
+#: The entries are `round(65536 * 2**(i/1200))` -- exactly, on 9594 of 9601.
+#: The seven exceptions are listed below rather than smoothed over, because
+#: they say something about the firmware: six of them sit within 0.0021 of a
+#: rounding boundary and the ROM rounds them UP from *below* .5, so its own
+#: table was computed at lower precision than a double. The seventh is the
+#: u16 ceiling.
+CENTS_RATIO_EXCEPTIONS = {
+    0: 65535,       # 65536 does not fit a u16
+    -80: 62577,     # exact 62576.499354 -> ROM rounds up
+    -759: 42275,    # exact 42274.497923
+    -807: 41119,    # exact 41118.499555
+    -910: 38744,    # exact 38743.499933
+    -1052: 35693,   # exact 35692.499964
+    -1547: 26817,   # exact 26816.500000
+}
+
+
+def cents_ratio(i: int) -> int:
+    """The ROM's entry for `i` cents below unity, reproduced byte-exactly.
+
+    `i` runs 0 down to -9600. Returns the BE u16 the ROM holds at
+    `0x1F9602 + 2*i` -- the law where it holds, the measured value where it
+    does not.
+    """
+    if not -9600 <= i <= 0:
+        raise ValueError(f"cents index {i} outside the table's 0..-9600")
+    if i in CENTS_RATIO_EXCEPTIONS:
+        return CENTS_RATIO_EXCEPTIONS[i]
+    return round(65536 * 2 ** (i / 1200))
