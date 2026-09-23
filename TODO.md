@@ -869,6 +869,60 @@ Two properties it must have, both from how the failure actually happened:
 * the layer count comes from the object size, not from counting matches, since
   counting matches is the bug.
 
+## Roland (and Akai) sample import — firmware anchors
+
+**Status:** open — the disk walk is done and validated offline
+(2026-09-21); the parameter mapping is not. Written up in
+[`docs/ROLAND_IMPORT.md`](docs/ROLAND_IMPORT.md).
+**Blocked on:** nothing. No hardware needed, and none was used.
+
+The K2000 reads Roland and Akai sample disks (Musician's Guide 15-31/15-32,
+"Reading Samples"), and that code is in the v3.87J ROM
+(`~/temp/k2k_fw/k2000_v387j.bin`, mapped at `0x100000`). Everything below was
+found by reading the image, not by guessing:
+
+| What | Where |
+|---|---|
+| Roland object hierarchy, as the manual names it | strings `Volume`/`Perform`/`Patch`/`Sample` at `0x190CB4`… |
+| Roland loader / browser | the code that uses them, `0x16BAEE`…`0x16BC52` |
+| `open("ROLAND.S", 0x8000, 0)` — three call sites | `0x1213F6`, `0x12A918`, `0x16BC24`, all into the file-open at `0x17562E` |
+| Akai partition mount, and its refusal | `0x12A710`…`0x12A742` (`"Akai partition not found."`) |
+| Macro-list line formatter, incl. the `AkP`/`Vol`/`Perf`/`Patch`/`Samp`/`Rol` tags | `0x1288AC`…`0x12893E` |
+| Sample-load loop (`"Loading sample %s,"`) | `0x16A09C`, gated on the selected object type in `a5@(0x5D2A)` |
+| Third-party object type, per macro entry | byte `5` of the entry = format (`4` = Roland), byte `4` = object type — already folded into `docs/MAC_FORMAT.md` §3 |
+
+The source disks are on hand: `Sound & Vision - Gigapack I CD 1/2 (Roland)` in
+`~/Dokumente/SYNTHS/K2000R/Soundsets/Best Service/Roland`, both raw S-770 disk
+images (`S770 MR25A` at offset 4, `SYS-772 HardDisk Sys Ver. 1.04`,
+volume `ID0: Giga`) — the same family the firmware's Volume/Performance/Patch/
+Sample hierarchy describes.
+
+*What it needs*, in the order that each step's result decides the next:
+
+1. ~~**How the K2000 recognises a Roland disk.**~~ **DONE.** Three byte
+   compares on sector 0 (`'S'`, `'7'`, `_`, `'0'` at 4, 5, 7), which is why no
+   `S770` string exists in the ROM. The whole format-detection table came with
+   it: four sniffers run in order from the mount at `0x11C660`.
+2. ~~**The Roland on-disk structures.**~~ **DONE and validated against the two
+   CDs**: five little-endian counts in sector 0, four directories at hardcoded
+   offsets, 32-byte records tagged `0x40`…`0x44` by class. The header's own
+   Performance/Patch/Partial counts match the records on the disk exactly.
+   One thing is still open — the `0x200` offset between three of the four
+   bases and the first record of their class (see the doc).
+3. **The Roland → Kurzweil mapping**: which KRZ objects a Patch becomes, how
+   layers are built (15-31 says from Layer 1 of Program 199), and what happens
+   to keymaps and stereo pairs. Started: the converter is at `0x16A2CC` and
+   its first arithmetic is `dest_id = src[5]*100 + src[6] + bank_base`. Hunt
+   **lookup tables and hardcoded constants**, and enumerate what the importer
+   *drops* — that is where the sibling `eosed` project's day on the same job
+   in the EOS ROM says the value was.
+4. Only then, if it is worth it: a host-side converter.
+
+A hardware cross-check exists and is cheap once the rig is free: serve one of
+the two ISOs off the ZuluSCSI, load a Patch on the instrument, save it as a
+`.KRZ`, and diff that against what the decompiled mapping predicts. That turns
+every claim in step 3 into something checkable without trusting the reading.
+
 ## External code review (GLM-5.3-Flash) — full-repo findings
 
 **Status:** CLOSED — worked through on 2026-09-20. All 29 findings, the

@@ -82,7 +82,7 @@ object framing).
 |---|---|---|---|
 | `0:2` | 2 | `length` | total bytes of this entry, **including** this field. **Bit `0x8000` is the K2000's "selected" marker**, not part of the length — see below |
 | `2:4` | 2 | `drive` | drive-ID code — §5 |
-| `4:6` | 2 | — | `0` in every observed entry; meaning unknown |
+| `4:6` | 2 | `source` | **the third-party source format and its object type** — `0` in every entry we have because every one of them loads a Kurzweil file. Byte `5` is the format (`0` = Kurzweil, `4` = Roland), byte `4` the object type within it (`0` Volume, `1` Performance, `2` Patch, `3` Sample; bit 0 marks an Akai partition). Read off the firmware, not off a file — see §7 |
 | `6:8` | 2 | `bank` | `0`, `100` … `900`, or `0xFFFF` = **Everything** |
 | `8:10` | 2 | `mode` | load-mode code — §5 |
 | `10:12` | 2 | — | **uninitialised**: `0x000E`, `0x88A4`, `0x0000`, `0x0008` across six entries of one file |
@@ -98,6 +98,13 @@ The fields marked uninitialised are firmware leftovers, not data: they differ
 between entries that are otherwise identical in kind. `macfile.py` keeps them
 so an untouched entry re-serialises byte-for-byte, and zeroes them on any entry
 you actually edit.
+
+For an Akai or Roland entry, `path` is not a directory path: the firmware reads
+the **byte at `30`** as the Akai partition letter and converts it with
+`- 'A'`, refusing the entry with "Akai partition not found." when it comes out
+negative (`0x12A710` in v3.87J). So the field at `30` carries the partition or
+volume the object lives in, and the macro list line is formatted
+`%16.16s %s:%s` from *filename*, the type tag and that field.
 
 ### `0x8000` in the length word — the selection marker
 
@@ -259,6 +266,13 @@ Nothing here has touched the K2000. When a session is authorised:
   none of which the observed macro exercises.
 * **Object lists** (§6): record one macro entry with a selected-object list and
   diff it against the same entry without one.
+* **The `source` word at `4:6`**: every entry we have is `0`. Put a Roland disk
+  on the SCSI bus, add one of its Volumes/Performances/Patches/Samples to a
+  macro, save it, and read the word back — the firmware says byte 5 should be
+  `4` and byte 4 the object type, and the list line should read `Vol:`/`Perf:`/
+  `Patch:`/`Samp:` with `Rol` in the format column. Same for an Akai partition
+  (`AkP`, byte 4 bit 0). Anchors in the v3.87J ROM: the formatter at `0x1288AC`,
+  the partition-letter read at `0x12A710`.
 
 The procedures are written up in
 [`RESOLUTION_NOTES.md`](RESOLUTION_NOTES.md) — see *MAC editor*.
