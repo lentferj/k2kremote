@@ -6467,6 +6467,42 @@ mpc2emu counted their corpus against this the same evening:
     LFO1 -> Pitch routings in 669 files:   1,941
     carrying a NEGATIVE byte (>= 128):       415   = 21.4%, across 87 files
 
+> **Retracted 2026-09-21. Those four numbers do not reproduce and should not
+> be quoted.** Asked to split the corpus by origin, mpc2emu could not find
+> `1,941 / 415 / 21.4% / 87 files` anywhere in their repository — not in their
+> notes, not in the parser's own comment, which records a different
+> measurement entirely (`lfo1_to_pitch` negated on **8.8% of round-tripped
+> zones**, 2026-08-24, explicitly about their *own* output). The figure
+> reached this document by message three weeks ago and arrived without its
+> corpus.
+>
+> **Re-measured properly**, over 148 distinct E4B files grouped by a marker
+> their writer cannot produce (a cord table outside their template):
+>
+> ```
+> provably NOT theirs    92 files   7067 LFO1->Pitch cords   160 negative   2.3%
+> template-compatible    56 files   2020 cords                 7 negative   0.3%
+> ```
+>
+> So the *direction* holds and then some — the negatives are concentrated in
+> third-party banks, ten times over, which is exactly what "this is real
+> K2000-era material and not our round trip" predicts. The *magnitude* was
+> wrong by about a factor of ten.
+>
+> **The bug is untouched.** A negative amount byte read as full depth turns a
+> −10 cent vibrato into six octaves whoever wrote the file, and 160 cords
+> across 92 third-party banks is ample justification for the fix. Only the
+> frequency changes.
+>
+> Kept visible rather than edited away, because the failure is the point:
+> **numbers travel between projects and evidence does not.** This one crossed
+> in a message, lost its corpus on the way, and sat here for three weeks
+> looking like a result. It was only checked because a sibling project made
+> the identical mistake the same night with a much more impressive number
+> ("1514 of 1514", of which ~1140 were their own writer's output) and said so
+> — which prompted the question here. The split that catches it takes one
+> line: group by a feature your own writer cannot produce.
+
 **And the failure was not "a large positive" as predicted here — it was the
 maximum.** Every negative byte fell past their `min(b, 123)` clamp, returned
 the table's 7200-cent ceiling, and was then taken as full one-sided depth. **A
@@ -8012,6 +8048,101 @@ shadowing was years-old and completely invisible for exactly as long as
 nothing joined the thread. The same shape appeared in `k2kmaced`'s image
 handling: a `.lzo` was decompressed three times per open because nobody had
 ever counted, and counting was a four-line test.
+
+### Numbers travel; evidence does not (2026-09-21)
+
+A figure from a sibling project sat in these notes for three weeks — "21.4% of
+LFO1→Pitch routings carry a negative byte, 669 files" — and turned out not to
+reproduce anywhere, in either repository. It had crossed in a message and
+arrived without the scan that produced it. Nothing about it looked wrong: a
+round file count, a percentage, an attribution to a project that had genuinely
+done the work. Re-measured with the corpus split by origin it is **2.3%**.
+
+The rule adopted on both sides, in both directions:
+
+> **A number that arrives without its corpus is not a measurement, it is a
+> rumour with a decimal point.**
+>
+> When quoting a peer's figure into a tracked file, the scan goes in the same
+> sentence. When sending one, the scan goes unasked.
+
+The point is that this is not "verify what peers send", which nobody sustains.
+It is "record the scan or do not record the number" — one line, at the only
+moment it is free.
+
+**And the split that catches this class of error takes one line: group by a
+feature your own writer cannot produce.** It is what separated 27 load-bearing
+keymap observations from 1446 of a converter agreeing with itself, and what
+turned a phantom 21.4% into a real 2.3% concentrated ten-to-one in third-party
+banks — the direction the finding needed, arrived at honestly.
+
+### Three standing checks (2026-09-21)
+
+Filed together rather than scattered, because a reader who finds one should
+find the set. Each came out of a real failure in these two projects over two
+days, each costs one command, and each has a **negative result that proves it
+discriminates** — a check that fires on everything is not a check.
+
+```
+a number  ->  record the scan that produced it, or do not record the number
+a corpus  ->  group by a feature your own writer cannot produce
+a caveat  ->  when a measurement lands, grep the words that described it
+```
+
+* **The number.** "21.4% of LFO1→Pitch routings carry a negative byte, 669
+  files" sat here three weeks and reproduced nowhere; re-measured with the
+  corpus split it is 2.3%. A figure that arrives without its corpus is a
+  rumour with a decimal point.
+* **The corpus.** Group by something the writer under test cannot emit. For
+  `.KRZ` that is a keymap method outside `0x13`/`0x17`: `LFOSET2.KRZ`,
+  `MXKRSRC.KRZ`, `OBERHEIM.KRZ`, `PADS__PADS_ROM.KRZ`, `PADS__SYNSTR1.KRZ`,
+  `SYNTHS__OBERHEIM.KRZ` are provably independent of both projects. A named
+  set beats "remember to check provenance", because the second is advice and
+  the first is a command line.
+* **The caveat.** *Negative result that matters:* the sweep below touched the
+  `rename()` truncation note and **left it standing** — real `DIRBANK` replies
+  show stored names come back at exactly 16 characters, which says nothing
+  about what `CHANGE` does when *sent* a longer one. Two different operations.
+  A sweep that retired everything it touched would be a worse tool than one
+  that retires two and leaves eleven.
+
+### A caveat can outlive its measurement inside one week (2026-09-21)
+
+`mpc2emu` found a fourth failure shape: their parser carried
+`zone_volume += v / 2.0  # unit unverified` while their writer carried *this
+project's* panel measurement of that exact unit. Not a wrong value — a
+**disclaimer with no expiry**, which makes correct code look untrustworthy and
+invites the next reader to "fix" it. They then swept their repo for the words
+and found a second, written twelve hours earlier by the same session that
+later took the measurement three files away.
+
+**The sweep run here found one too, and it is sharper.** `k2kfields.py`'s
+module docstring said the dense byte↔value tables "exist only in a chat
+transcript with a sibling project, not in this repository". They are in
+`k2kromtables.py`, read out of the firmware in §70 — and **the same file
+imports them twenty-six lines below the sentence denying they exist**. Six
+days stale, in the most-read paragraph of the module that exists to state what
+this project does and does not know.
+
+The habit, from `mpc2emu` and adopted here: **when a measurement lands, grep
+for the words that used to describe the thing, in the same session.** One
+grep, most hits stay, and a retirement is written as a dated correction rather
+than a silent deletion — so anyone who quoted the caveat can see it was
+withdrawn and why.
+
+**Why it is not a care problem.** Three instances, three timescales — three
+weeks, twelve hours, six days — and **none of them is rot**. The edit that
+creates the obligation and the edit that discharges it live in different
+files, different sessions, often different days, and nothing in a normal
+workflow puts them in the same frame. Mine is the clearest case: a module
+docstring denying the existence of data the module *imports twenty-six lines
+below it*. Nobody could read those two lines together and believe both — the
+point is that nobody reads them together.
+Four instances across two projects in two days — a number without its corpus,
+a sentence without its source, an inference without the bytes, a caveat that
+outlived its measurement — and **none was found by the project that owned the
+claim**. All four were written carefully. The cheap fix is not more care; it
+is handing the prose to whoever holds the code.
 
 ### The rule that keeps coming back
 

@@ -24,16 +24,30 @@ them would overclaim what this project has actually verified:**
   F1 FRQ page, never via DUMP). These are only ever applied to a byte the
   caller already knows the location of — never auto-detected.
 
-Within :data:`KNOWN_FIELDS`, the byte<->value conversions themselves have a
-further honesty boundary worth keeping visible rather than smoothing over:
-the *exact* mapping was only ever established as a closed-form formula over
-part of each byte's range, plus a handful of individually-verified spot
-values (ceilings, mostly). The dense point-by-point tables from the RE
-session that found this exist only in a chat transcript with a sibling
-project, not in this repository — reconstructing them from memory here
-would be exactly the kind of unverified claim this project has spent all
-night catching in other people's work. :func:`decode` returns ``None``
-for a byte outside a formula's *proven* range rather than guess.
+Within :data:`KNOWN_FIELDS`, the byte<->value conversions have an honesty
+boundary worth keeping visible, and **it moved on 2026-09-14** — the
+paragraph that used to stand here said the dense point-by-point tables
+"exist only in a chat transcript with a sibling project, not in this
+repository". They are in this repository: :mod:`k2kremote.k2kromtables`,
+read out of the firmware in RESOLUTION_NOTES §70, with their ROM addresses
+recorded — and *this file imports them twenty-six lines below*. The caveat
+outlived its measurement by six days while sitting above the import that
+refutes it.
+
+What is true now, per field:
+
+* **Table-backed, exact over the whole byte range** — the decoders that index
+  :data:`~k2kremote.k2kromtables.LFO_RATE_CHZ`,
+  :data:`~k2kremote.k2kromtables.FILTER_COARSE_HZ`,
+  :data:`~k2kremote.k2kromtables.ENV2_FILFREQ_CT` and
+  :data:`~k2kremote.k2kromtables.LFO_PITCH_CT`. These are the firmware's own
+  display tables, not a fit to them.
+* **Formula-backed, proven over part of the range** — the rest, e.g.
+  :func:`_amp_veltrk_db`, which still returns ``None`` outside the range that
+  was actually verified rather than extrapolating.
+
+So :func:`decode` returns ``None`` for a byte a *formula* cannot vouch for,
+and a real value everywhere a *table* covers.
 """
 from __future__ import annotations
 
