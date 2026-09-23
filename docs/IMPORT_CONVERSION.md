@@ -3119,3 +3119,358 @@ everything and predicts nothing.
 > The loss is not predictable from the source and varies between structurally
 > identical programs in the same run. Check the zone count before reading
 > anything into a difference, and treat the device side as the lossy one.
+
+## The S1000 form, and the stereo arm (2026-09-22)
+
+*Jan imported the first volume of each of the first three partitions of the
+S1000-form disc (Voice Spectral II) to banks 200/300/400. `mpc2emu`
+pre-registered `[188, 189] only`. Raw at `~/temp/akai_id7_readback.json`.*
+
+**Refuted on five of six — and the refutation confirms the claim in a stronger
+form.**
+
+```
+prog   diff vs 199                          km      CAL[7:9]
+200    [57, 185, 189, 259, 271]             200      201
+300    [57, 184, 185, 188, 189, 259, 271]   300      301
+400    [188, 189]                           400        0    <- as predicted
+```
+
+The keymap names explain it: `H PHRS 01AMJ-L-1` / `-R-1`, `SCAT 01-L-1` /
+`-R-1`, and `WHISPERS  -1` with no suffix. **Five programs are stereo;
+`WHISPERS` is mono and matches the prediction byte for byte.**
+
+### The extra bytes are the stereo mechanism already in this document
+
+```
+                lyr[8]  bit5    CAL[7:9]   0x53[2]  0x53[14]
+199 template     0x04   False        0      0x00     0x04
+stereo imports   0x24   True      id+1      0x70     0x94
+mono import      0x04   False        0      0x00     0x04
+```
+
+Each was measured on the **Roland** arm earlier and reappears unchanged:
+
+* `lyr[8]` bit 5 as the stereo marker, **`0x24` / `0x04`** — the identical
+  values read off the seven Roland imports;
+* `0x53 body[2] = 0x70` (pan **+7**) and `body[14] = 0x94` (pan **−7**) — the
+  ±7 pair within one layer;
+* `CAL[7:9]` — the second keymap, one per channel.
+
+Offset 57 is `lyr[8]`; 184/185 and 188/189 are the two 16-bit keymap ids
+(P300's high bytes differ because its ids exceed 255; P200's do not); 259 and
+271 are `0x53[2]` and `0x53[14]`.
+
+**Nothing else moved.** `HOB0[0] = 62`, `HOB0[1] = 0`, `HOB1[1] = 0` on all
+six, identical to 199.
+
+> **The importer converts nothing.** It clones Program 199, writes the keymap
+> pointer(s), and for a stereo source sets the stereo flag, the second keymap
+> slot and the ±7 pan pair — **mechanical wiring the K2000 needs to play two
+> channels**, not conversion of AKAI parameters.
+
+**Two disc forms, 26 programs, melodic and drum, mono and stereo.** The claim
+is now about the importer rather than about one disc form.
+
+### `CAL[7:9]`, resolved
+
+`mpc2emu` was right that the slot is used; this project was right that it was
+`0` on everything then measured. **Both held because ID5's material is
+entirely mono.** Their inference from the `DBL.REED -1/-2` naming was still
+wrong — those are two *layers* — but the slot does exactly what they said, on
+stereo sources.
+
+### The ladder, on a third arm
+
+**Every keymap here is `668 = 28 + 5×128`** — eight identical ones in bank 2
+for four programs of differing content. With `mpc2emu`'s twelve
+K2000-converted Roland banks at 156/284/412/540/668/796, that is **three arms
+on one ladder**, and the allocation question is not about AKAI at all.
+
+## S1000 mono, six more programs (2026-09-22)
+
+*Three all-mono ID7 volumes. `mpc2emu` pre-registered: mono programs differ
+from Program 199 at the keymap-id pair only, `CAL[7:9] = 0`, the 199 values
+for `lyr[8]`/`0x53`, and no filter converted. Raw at
+`~/temp/akai_id7_mono_readback.json`.*
+
+### The banks were 5, 6 and 8
+
+The volumes were reported as loaded to 200ff/300ff/400ff. **Those banks still
+held the previous stereo load** (`H PHRS`, `SCAT`, `WHISPERS`); the new
+material was in banks **5, 6 and 8**, with 7 skipped. Found by scanning all
+ten banks after the names did not match.
+
+> **Trusting the stated banks would have re-diffed the previous stereo import
+> and reported it as the mono result** — five programs differing at
+> `[57, 185, 189, 259, 271]`, which is precisely the refutation the prediction
+> named. A confident, wrong, *pre-registered* refutation, from reading the
+> right objects in the wrong place.
+
+### Confirmed, all six
+
+```
+prog  diff vs 199   km   CAL[7:9]  lyr[8]  0x53[2]  0x53[14]  HOB0[0]  HOB1[1]
+ 500  [188, 189]   500      0      0x04    0x00     0x04       62        0
+ 501  [188, 189]   501      0      0x04    0x00     0x04       62        0
+ 600  [188, 189]   600      0      0x04    0x00     0x04       62        0
+ 601  [188, 189]   601      0      0x04    0x00     0x04       62        0
+ 800  [188, 189]   800      0      0x04    0x00     0x04       62        0
+ 801  [188, 189]   801      0      0x04    0x00     0x04       62        0
+```
+
+**169 keygroups carrying AKAI filter 99, all arriving as `NONE`.** The widest
+filter test yet, and negative.
+
+*All six keymap ids are ≥ 256, so the `id < 256 → [189] only` arm was not
+exercised* — noted rather than counted as confirmed.
+
+**Ladder holds**: every keymap `668 = 28 + 5×128`, on volumes of 29, 7, 30,
+30, 29 and 24 keygroups. **Keygroup count does not move the allocation** —
+7 keygroups and 30 keygroups both got 668.
+
+### Unexplained: every sample is duplicated
+
+```
+bank   disc samples   K2000 objects   names appearing twice
+ 5         36              72                36
+ 6         60             100                40
+ 8         53             100                47
+```
+
+Each AKAI sample becomes **two Soundblock objects of the same name**, both 68
+bytes. Bank 5 is exactly 2×; banks 6 and 8 hit the **100-object bank ceiling**
+(`40×2 + 20` and `47×2 + 6`), so every distinct sample arrives but the
+duplication is truncated.
+
+**Not the stereo mechanism** — these are mono with `CAL[7:9] = 0` throughout.
+
+### Resolved: the PCM is loaded twice
+
+`mpc2emu` proposed that the duplicates might be one object seen through two
+type codes — type 38 and type 134 are the same object in file and RAM
+numbering — which would make the doubling an artefact of walking two type
+spaces. **Refuted:**
+
+```
+enumeration used ObjectType.Soundblock = 134   (ONE type space)
+
+bank 5: 72 objects, 72 DISTINCT ids, 500..571
+id gap within a name-pair:  bank 5 -> 36   bank 6 -> 60   bank 8 -> 53
+```
+
+Every id is distinct, and **the gap equals the volume's sample count**, so the
+layout is two complete consecutive blocks of N. The 100-object limit is the
+**bank's**, not the enumeration's — and no distinct sample is lost, because
+the first block is always complete.
+
+**Reading a pair settles what they are.** Objects 500 and 536 differ at
+**exactly 12 of 68 bytes, offsets 20–35, and nowhere else** — the
+Soundfilehead's four 32-bit pointers:
+
+```
+500   sampleStart 0x029984F2  alt 0x029984D2  loop 0x029A0EC9  end 0x029A0EC9
+536   sampleStart 0x02C8B0A2  alt 0x02C8B082  loop 0x02C93A79  end 0x02C93A79
+```
+
+Identical root (60), flags (`0x30`), `maxPitch` (6147) and `samplePeriod`
+(22675). **Two objects pointing at two distinct regions of sample RAM holding
+the same audio — the volume's PCM is loaded twice.** Bank 5's volume is
+6.20 MB on disc and occupies roughly 12.4 MB of sample RAM.
+
+**ID5 does not do this.** `SOPRANO SAX2` gave 19 objects for 19 disc samples.
+That would be **the first behavioural difference found between the two AKAI
+disc forms** — and it is a RAM-consumption difference, not a conversion one,
+so it leaves *the importer converts nothing* untouched.
+
+### The stereo case, closed from data already held
+
+Banks 2/3/4 still held the ID7 *stereo* load, and their object lists settle it
+without disc-side counts — the structure is self-evidencing:
+
+```
+bank 2   64 objects   32 distinct names   ids 200..263   each name at n, n+32
+   'HPS01AMJ C-L', 'HPS01AMJ C-R', 'HPS01AMJ#D-L', 'HPS01AMJ#D-R', ...
+bank 3   16 objects    8 distinct names   ids 300..315   each name at n, n+8
+bank 4   20 objects   10 distinct names   ids 400..419   each name at n, n+10
+   'WHISPER 01', 'WHISPER 02', ...   <- no L/R suffix: MONO
+```
+
+**The channel confound is visible and separable.** In banks 2 and 3 the
+`-L`/`-R` split is *already inside* the distinct-name count — `…C-L` and
+`…C-R` are two different names. The duplication sits **on top of** it, each
+distinct name appearing twice at a gap equal to the distinct-name count:
+
+```
+bank 2   16 stereo AKAI samples -> 32 channel objects -> 64 with duplication
+bank 3    4 stereo              ->  8                 -> 16
+bank 4   10 mono                -> 10                 -> 20
+```
+
+**Bank 4 is the control that makes it airtight** — `WHISPERS` carries no
+`-L`/`-R`, is mono, and still doubles. **The duplication is not the channel
+mechanism in disguise.**
+
+So the claim tightens from *"ID7 mono duplicates"* to **"ID7 duplicates"**,
+with stereo **tested rather than excluded**, on the same gap-equals-N
+structure in all six banks across both loads.
+
+### Two hypotheses died first, and both were `mpc2emu`'s
+
+*Recorded because two dead candidates are what make this a finding rather than
+a guess.*
+
+1. **Two type codes.** Types 38 and 134 are the same object in file and RAM
+   numbering, so an enumeration walking both would double everything.
+   Refuted: one type space, distinct ids, gap = N.
+2. **A short parser.** Their AKAI reader skips 18 `type 0x00` directory
+   records on that disc — so perhaps the volumes really hold 2N and *their*
+   count was short, making "loaded twice" an artefact of their parser rather
+   than a property of the machine. **They killed it themselves** by checking
+   that none of the 18 belongs to these volumes — including the candidate that
+   would have exonerated the K2000.
+
+### The two numbers type-check independently
+
+`12 + 32 + 2×12 = 68` is exactly the object `KRZ_FORMAT.md` §3.1 describes
+(KSample + Soundfilehead + two Envelopes), and Soundfilehead at `body+12` puts
+its four 32-bit pointers at exactly **20..35** — the twelve bytes measured.
+**Neither number was chosen with the other in view**, so the agreement is
+evidence rather than restatement.
+
+And `samplePeriod = 22675` arrived unprompted again, in 72 more objects on a
+second disc form, with nobody looking for it either time.
+
+**What it costs a user:** not lost samples — every distinct sample arrives.
+**Double sample-RAM consumption, and a 60-sample volume filling a bank to
+100/100**, which would block anything else importing there.
+
+## Both arms of the keymap-id diff are measured (2026-09-22)
+
+`mpc2emu` flagged *"mono program, keymap id < 256 → differs at `[189]` only"*
+as an **untested branch of their own prediction**, and this project confirmed
+the flag rather than checking the data already published.
+
+**It was exercised by the very first AKAI load.**
+
+```
+Program 199 keymap id = 1   (high byte 0)
+
+P200..P205   km 200..205, high byte 0   diff vs 199 = [189]
+```
+
+The ID5 `SOPRANO SAX2` programs. Their keymap ids are below 256, so their high
+bytes are `0` — and Program 199's keymap id is `1`, high byte also `0`. **Only
+the low byte moves.**
+
+```
+id  < 256   ->  [189]        six ID5 programs
+id >= 256   ->  [188, 189]   twelve ID7 programs
+```
+
+*Verified from `~/temp/akai_sopranosax2_readback.json` rather than memory,*
+because a later summary here described those programs as differing at
+"offsets 188–189" when the measurement had always been `[189]` alone — the
+scope of a result drifting in the retelling while the number stayed put.
+
+### The disc-side triple-check
+
+Computed by `mpc2emu` with none of this project's numbers in view:
+
+```
+01 H PHRS 01   32 samples, all -L/-R  -> 16 stereo   (measured: 16)
+01 SCAT   01    8 samples, all -L/-R  ->  4 stereo   (measured:  4)
+01 WHISPERS    10 samples, no suffix  -> 10 mono     (measured: 10)
+```
+
+### Which dead hypothesis mattered
+
+Of the two that died before the duplication finding could be stated, **the
+parser-undercount one was the dangerous candidate.** A reader silently
+dropping half a volume is a far worse defect than a machine loading audio
+twice, and it explains every number measured here just as well. It would have
+been believed. **It cost one command to kill, and it is the reason the finding
+can be stated at all.**
+
+### O6's open list
+
+```
+[?] the 100-object ceiling's owner -- 11 CLASSMIX1, 3.56 MB, all-mono,
+    exactly 49 samples: 98 objects if the ceiling is the bank's, 100 if not.
+    The only volume on ID7 that discriminates cleanly; there is no 51.
+[?] what sets the keymap allocation -- content-independent, three import
+    arms on one 28 + k*128 ladder, no candidate
+```
+
+Everything else in the topic is measured: **32 programs, two disc forms,
+melodic, drum, mono and stereo, and nothing has ever converted a synthesis
+parameter.**
+
+# REFUTED: the importer does convert one parameter (2026-09-22)
+
+*Ilio Analog Meltdown, S3000 form, 52 programs across two banks — the stereo
+cell, with eleven distinct AKAI cutoff values and both keymap-id widths.
+`mpc2emu` pre-registered the byte sets and named the refutation clause: **any
+byte outside the stereo set moving.** It fired. Raw at
+`~/temp/akai_ilio_readback.json`.*
+
+```
+pattern                                    n   bytes  off2  lyr8   off54
+[57, 185, 189, 259, 271]                  22    272     1   0x24     0
+[57, 184, 185, 188, 189, 259, 271]        14    272     1   0x24     0
+[54, 57, 184, 185, 188, 189, 259, 271]     8    272     1   0x24     3   <-- NEW
+[2, 189, 272]                              6    496     2   0x04     0
+[2, 188, 189, 272]                         2    496     2   0x04     0
+
+Program 199:  bytes 274  off2 1  lyr8 0x04  off54 0
+```
+
+**Offset 54 is `0x09 body[5]` — `lyr[5]`, the velocity mark**, the
+`(lo << 3) | (7 − hi)` field. Eight programs carry **3**, decoding as **LoVel
+mark 0, HiVel mark 4**. Program 199 and the other 44 carry 0.
+
+> **That is an AKAI source parameter reaching the K2000 object.** Not
+> plumbing — the velocity range of the source keygroup. **"The importer
+> converts nothing" is refuted after 32 programs across two disc forms.**
+
+**And it exposes a contradiction in this project's own record, flagged rather
+than resolved.** The field map annotates `54 + 224k` as *"the derived 0…7 byte
+(**Akai only**)"*, while the `0x164C66` velocity arithmetic was later
+re-attributed to the **Ensoniq** builder at `0x16368A` on dispatch evidence.
+**Both cannot be right.** Either the AKAI path has its own velocity
+computation, or the re-attribution needs revisiting.
+
+## Everything else holds, and the filter test is the good one
+
+**No duplication on the S3000 arm.** Bank 2: 34 objects, 34 distinct names.
+Bank 3: 66/66. `mpc2emu`'s RAM inference — 26.53 + 19.03 = 45.56 MB against a
+64 MB machine, so doubling would have needed 91.1 MB — agrees with the direct
+count, which is worth having separately.
+
+**`HOB0[0] = 62` on all 52 programs**, across **eleven distinct AKAI cutoff
+values (40–90)** and **559 stereo keygroups**. *This is the test the previous
+one could not be:* the ID7 volumes were flat filter 99 on all 169 keygroups,
+which an importer mapping 99→NONE and converting everything else would have
+passed. This load could not.
+
+**`lyr[8]`**: 44 × `0x24` stereo, 8 × `0x04` mono. **Both id-width arms
+exercised in stereo**, as registered.
+
+## "Mono" here means two-layer
+
+The 8 mono programs are **496 bytes = 2 layers**, diffing at `[2, …, 272]`.
+That resolves the expected keymap counts of 54 and 42:
+
+```
+bank 2   24 stereo x 1 layer x 2 keymaps  +  6 mono x 2 layers x 1 keymap = 60
+bank 3   20 stereo x 1 layer x 2 keymaps  +  2 mono x 2 layers x 1 keymap = 44
+```
+
+**Stereo takes one layer with two keymaps via `CAL[7:9]`; multi-zone takes
+multiple layers with one keymap each** — the same shape as the `DBL.REED`
+pair.
+
+## The ladder, fourth arm
+
+`412 × 90` and `540 × 14`, every one `28 + k×128`. **363 stereo keygroups in a
+single volume did not move it.**
