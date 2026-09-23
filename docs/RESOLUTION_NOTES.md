@@ -8098,6 +8098,47 @@ not a copy of the request.**
 request's is refused, retried once, and then reported as a loopback rather
 than handed back as an answer.
 
+### Four questions to ask before collecting any data (2026-09-21)
+
+**Ask these first.** Everything in the longer list below fires *while* you
+work; these four are answerable **by inspection, before a single record is
+read**, and each one retired hours of work on 2026-09-21 that no amount of
+care would have saved.
+
+```
+what can my METHOD distinguish?     -> inspect the ANSWER SET. If the
+                                       failure mode maps a right answer
+                                       onto another LEGAL one, the
+                                       experiment is already decided.
+                                       (Roland rates: six arms, three
+                                       exact octave pairs, and the method
+                                       was pitch.)
+
+what can my EVIDENCE vary?          -> an invariant cannot test the
+                                       quantity it is invariant under.
+                                       (Period ratios survive a uniform
+                                       factor of two; the octave was the
+                                       only thing in dispute.)
+
+what ALTERNATIVES am I holding?     -> a result can be strong, correct,
+                                       and decisive against every
+                                       alternative but the live one, and
+                                       the evidence cannot tell you the
+                                       set is incomplete.
+
+what does my AGREEMENT rest on?     -> two methods agreeing is evidence
+                                       only if they COULD have disagreed.
+                                       (Two independent parsers converged
+                                       because both silently dropped every
+                                       stereo sample.)
+```
+
+**The fourth is the one that surprised both sessions**, because the agreement
+it killed was independent in the strong sense — different sessions, different
+code, no shared lineage, no discussion of implementation. It passed every
+other test on this page. What was shared was not an assumption but a **side
+effect neither author chose or knew about.**
+
 ### Standing checks (2026-09-21)
 
 Filed together rather than scattered, because a reader who finds one should
@@ -8132,6 +8173,44 @@ byte order -> prove it on a field with TWO non-zero bytes. Small values
 corrobor- ->  it must come from OUTSIDE the assumption it supports.
 ation         Agreement between two readings of one convention says
               nothing about the convention
+a negative -> enumerate the decode's assumptions and say which were
+              tested: width, alignment, unit, signedness, order. One
+              of five named is one of five tested
+an anomaly -> never retire it as an artefact of your OWN instrument
+              without testing the instrument. Blaming your tool looks
+              like humility and buries findings
+a median  ->  publish the spread with it. A summary statistic is a
+              CLAIM about a distribution; giving it alone is not
+              compression, it is substitution
+a percent ->  print the denominator and every filter that made it, and
+              check RETENTION IS UNIFORM across the groups compared.
+              Unequal retention makes two percentages incomparable
+a predic- ->  report it as a prediction, never as a percentage. Named
+tion          in advance is a different KIND of evidence, and scoring
+              it throws away the property that made it strong
+an answer ->  inspect the ANSWER SET before running the method. If the
+set           failure mode maps a right answer onto another LEGAL one,
+              the experiment is decided before any data is loaded
+a category -> a method that cannot emit "none of the above" will never
+              report a missing category. It absorbs it silently
+an invar- ->  it cannot test the quantity it is invariant UNDER. Ask
+iant          what transformations a consistency result survives, and
+              whether the disputed quantity is one of them
+a quantity -> if it moves with your PARSER it is not a property of the
+              data. Before reconciling two numbers, check the quantity
+              is determined at all
+agreement ->  two methods agreeing is evidence only if they COULD have
+              disagreed. Check what each silently drops before treating
+              convergence as corroboration
+a figure  ->  computed to VERIFY a claim must not be republished as an
+              INSTRUCTION. The two purposes want different arithmetic
+              and nothing marks the moment the role changes
+two closed -> an identity between them is not a verification of an
+forms         IMPLEMENTATION. Both can only agree or not; neither can
+              tell you what the code does
+a constant -> borrowed from a format document: check WHOSE OUTPUT that
+              document describes. It was correct where written and had
+              no reason to say it did not cover your case
 ```
 
 **Five of these are worth more than the rest, and they are the five that
@@ -8601,6 +8680,480 @@ other way. Neither is a restatement.
 needs it is still read by the person who wrote it.* Four of the five
 structural checks above crossed a session boundary to be found. The boundary
 is the instrument; the checks are its residue.
+
+### A negative is only as strong as the assumptions it names (2026-09-21)
+
+This project published a `[C-neg]` — *"the Roland loop points are not in the
+48-byte sample parameter record"* — and it was **wrong**. The loop points are
+in that record, at `LE24 +17 / +21 / +25` in samples, satisfying
+`alt <= loopStart < loopEnd <= length` on 99.5 % of CD 2 and 95.0 % of CD 1.
+
+**The test read `LE32 at +20`, which is `rec[20] | loopStart << 8`** — eight
+bits too wide and one byte off. It "exceeded the sample length" because the
+window was misaligned, not because the field was an address.
+
+**The audit was the failure, not the arithmetic.** Byte order was tested
+exhaustively — both directions, full population, and a published census of
+which positions could even discriminate. The negative then named **byte
+order** as its assumption. A decode has at least five:
+
+```
+width       32-bit assumed. It is 24.          NOT TESTED
+alignment   +20 assumed. It is +21.            NOT TESTED
+unit        bytes assumed. It is samples.      NOT TESTED
+signedness  unsigned assumed. loopStart is signed.  NOT TESTED
+order       little-endian.                     tested exhaustively
+```
+
+One of five, tested exhaustively, and the conclusion published as though the
+other four did not exist. **A `[C-neg]` that names one assumption of five has
+tested one of five.**
+
+**The census had already measured the signature and it was read for the wrong
+question.** `+22`, `+26`, `+30`, `+34` carrying all the byte-order
+discriminating power are the **high bytes of the 24-bit fields**; "`+16`/`+18`
+can never discriminate" is the same fact at two-byte granularity. It was
+written up here as an epistemics point about endianness. **The data said
+"24-bit" and was quoted saying something else** — a measurement can be
+correct, published, and read for the wrong question.
+
+**Why a wrong negative is worse than a wrong positive.** A wrong `[S]`
+misleads; a wrong `[C-neg]` *redirects*. Another analysis read this one,
+trusted it, and told a further session explicitly **not** to look in the
+48-byte record and to trace the patch/partial path instead. It reasoned
+correctly from a false premise published here. A negative closes a door, and
+doors stay closed.
+
+### Dismissing an anomaly as an artefact of your own instrument (2026-09-21)
+
+The dissolved-anomaly rule has a second form, and it is the more insidious
+one.
+
+Measuring Roland sample rates, this project found an apparent 22.05 kHz
+cluster and wrote, in its own commit message: *"far more likely
+autocorrelation octave errors and mislabelled roots than real rates"*, and
+declined to record a second rate. **It was a real population.** The format has
+a rate-code field with six values, and code 3 is 22050.
+
+The reasoning was not careless — it was *cautious*. Octave errors are real,
+the estimator does produce them, and refusing to claim two rates from noisy
+pitch estimates is exactly what the rest of this page recommends. **Blaming
+your own tool looks like epistemic humility, which is why it is not
+challenged.** Explaining an anomaly away with a story about the *data* invites
+scrutiny; explaining it away with a story about your *instrument* sounds like
+rigour.
+
+The check: **an anomaly may only be retired as an instrument artefact after
+the instrument has been tested for that artefact.** Here that was one
+measurement away — a sample with independently known pitch, or a second
+estimator. Neither was run, and the finding cost a day.
+
+*Note the residue:* the octave ambiguity is still live. Rate codes 2 and 3
+measure at exactly 2.00× their table values, and **that is produced identically
+by "table correct, estimator on the octave" and by "table a factor of two
+low".** Three of five arms are confirmed by measurement; those two are
+consistent but undiscriminated, and are recorded that way rather than folded
+in.
+
+### A median is not a summary, it is a substitution (2026-09-21)
+
+**Two sessions committed this independently, within an hour, on the same
+data.** That is what makes it a shape rather than a lapse.
+
+A rate table named five sample rates from a firmware jump table. Both sessions
+tested it by measuring pitch and both reported **medians**:
+
+```
+reported   code 0 -> median 0.999   "direct confirmation"
+actual     code 0 -> 61 at ~1.00, 45 at ~2.00, 104 scattered
+                     = 50.5% on-grid, a coin flip
+```
+
+**The median sat on target because the scatter was symmetric around it**, not
+because the prediction held. The other session wrote *"every measurement lands
+on exactly 1.00 or 2.00"* while holding a code that scattered on 9 of 14; this
+one wrote *"direct confirmation"* over 104 scattered records out of 210. Same
+error, same hour, larger *n* here to be wrong with.
+
+**Why it is not carelessness.** Both of us reached for a median *because the
+raw distribution was inconvenient* — not consciously, but that is the
+selection pressure. A median is the statistic that survives contact with messy
+data, which is exactly why it is the one that hides messy data. And unlike
+every other entry on this page, the number reported was **true**: the median
+really was 0.999. A true summary of a distribution that does not support the
+claim is a harder thing to catch than a false number.
+
+The check: **publish the spread beside the statistic**, always. Here the
+honest form is four columns — on-target, on-double, scattered, percentage —
+and it changes "three arms confirmed" to "two", which is what it did.
+
+**And it has a version one step earlier in the pipeline — the denominator.**
+The other session's `14/14` was a subset selected on `corr >= 0.85` and a
+pitched root range, published without either filter. This session's `79.3 %`
+and `68 %` were **551 of 2064**, after dropping 1489 records on a `size < 20
+blocks` threshold chosen for a comfortable analysis window, and were offered
+as the honest figures *while being credited as such by the session that had
+just disclosed its own filter*. It took their disclosure to prompt the check.
+
+**The compounding failure is non-uniform retention**, which is worse than the
+filter itself:
+
+```
+code   sampled   measured   kept
+   0       768        210   27.3%
+   1       797        222   27.9%
+   4       130         75   57.7%
+   2       206         27   13.1%
+   3       134         17   12.7%
+```
+
+A fourfold spread across the codes being ranked against each other. **Two
+percentages computed over differently-filtered populations are not
+comparable**, and the table presented them as though they were. What survives
+is only the pair with matching retention — 27.3 % against 27.9 % — which does
+support code 1 over code 0. The rest had to be downgraded to *unmeasured*
+rather than *scattered*.
+
+*Filed next to the instrument-artefact rule because the two combined to
+produce a published `[C]` that was wrong twice over:* the medians hid that the
+prediction was failing, and "my estimator locked onto the octave" excused the
+part that did not fit. Removing either one would have exposed it.
+
+### Evidence named in advance is a different kind, not a better score (2026-09-21)
+
+`mpc2emu`'s, and the best single piece of epistemics from the whole exchange.
+
+A firmware jump table named five Roland sample rates **before any audio was
+measured**. One of them, code 4, is **30000 Hz** — an odd value that no fit
+would propose. Both sessions then measured pitch and reported code 4 as
+"68 % on-grid".
+
+**That 68 % is worthless.** It sits on 57.7 % retention where the codes it was
+compared against retained 27 % and 13 %, so it is comparable to nothing. But
+the *real* evidence for code 4 was never the percentage:
+
+> **No retention artefact, no filter and no scatter can manufacture a correct
+> odd number named in advance.**
+
+Converting the prediction into a percentage **destroyed the property that made
+it strong** and replaced it with a weaker claim that then failed its own
+audit. The prediction was the evidence; the score was a downgrade wearing the
+costume of a measurement.
+
+**The rule: report a prediction as a prediction.** Named-in-advance and
+fitted-after are different *kinds*, not different strengths of the same kind,
+and a percentage silently converts the first into the second. When a number
+was named before the data was seen, say so and say when — that fact is not
+improvable by measurement and is not replaceable by it.
+
+*How both sessions lost it:* the percentage was the format the rest of the
+table was already in. Nothing prompted the conversion except the shape of the
+surrounding report — which is the same pressure that produces a median instead
+of a distribution.
+
+### The four crossings, and why this is not a success story (2026-09-21)
+
+Recorded above the Roland findings deliberately, at `mpc2emu`'s suggestion and
+this project's reasoning: **the findings will be superseded and the pattern
+will not.**
+
+```
+this project wrote the instrument-blaming rule, and did not apply it
+                                          to its own live claim
+mpc2emu applied it to theirs    -> overturned a published [C]
+this project applied it to its own -> overturned a "direct confirmation"
+mpc2emu disclosed a filtered denominator
+that disclosure is the only reason this project examined its own
+                                -> found a fourfold retention confound
+```
+
+**Four crossings. Each one somebody else's disclosure making the question
+concrete. Nobody careless. Nobody first to their own error. And every rule
+written by the session that then failed to apply it.**
+
+The conclusion is `mpc2emu`'s and it should not be softened:
+
+> **It took four crossings to get one rate code honestly measured, and the
+> only reason there were four crossings is that we happened to be talking. A
+> single session with the same rules and the same care would have published
+> five confirmed arms tonight.**
+
+That is the load-bearing caution for anyone reading the standing-checks list
+above. **The checks are necessary and demonstrably not sufficient.** Each was
+written down before the failure it describes and did not prevent it. What
+fired them, every time, was a second party holding the same data and reaching
+a different answer — and that is not a practice a solitary session can adopt.
+
+### Inspect the answer set before running the method (2026-09-21)
+
+`mpc2emu`'s, and it retired hours of work from both sessions in one sentence.
+
+The K2000 sets a Roland sample rate from a six-arm jump table
+(`0x169D90`, read out of the ROM here). The arms are **three exact octave
+pairs**:
+
+```
+code 0  48000  =  2 x  code 2  24000
+code 1  44100  =  2 x  code 3  22050
+code 4  30000  =  2 x  code 5  15000
+```
+
+Both sessions then spent hours determining rates **by measuring pitch**, whose
+characteristic failure is the octave. **Every code's octave partner is itself a
+table value**, so a factor-of-two error maps a code onto another *legal*
+answer rather than an obviously wrong one — and nothing in the results can
+look wrong. The disc compounds it with two conflicting pitch references: the
+root-key byte and the note in the sample name disagree by `+12` on 413 records
+of CD 2 and by `0` on 397, **a split population, so not even correctable
+wholesale.**
+
+> **A measurement that can only ever return "X or 2X" is not a measurement of
+> X, and the tell is in the ANSWER SET rather than in the data.**
+
+Two octave pairs in a six-entry table are visible **by inspection, before a
+single sample is loaded.** The experiment was decided in advance and neither
+session looked. Both published `[C]`s; both withdrew them.
+
+*What made it survive so long:* the results were internally consistent,
+reproducible across sessions, and agreed to fractions of a percent. They were
+consistent because the artefact is deterministic — the same wrong reference
+gives the same wrong answer every time, on both machines, to any precision you
+like. **Reproducibility is not independence.**
+
+### Before reconciling two numbers, check the quantity exists (2026-09-21)
+
+Two sessions measured "what fraction of code-1 Roland samples have a root-key
+field twelve semitones above the note in their name" and got **50.3 %** and
+**65.7 %**. The obvious response — and the one this project proposed — was to
+report both attributions as a range and note that the conclusion was
+insensitive to it.
+
+**That is one step short, and `mpc2emu` took it.** They ran four defensible
+note-extractors over the same records instead of defending one. Re-run here
+with five, on this project's own data:
+
+```
+note anywhere in the name              n=582   +12  54.3%
+word-boundary  (the original)          n=455   +12  65.7%
+word-boundary, no ES/AS alias          n=387   +12  62.8%
+anywhere, no ES/AS alias               n=514   +12  50.6%
+note must be the trailing token        n=115   +12   3.5%
+```
+
+**3.5 % to 65.7 % across five reasonable readings of the same 4128 records.**
+The quantity is a property of the extractor, not of the disc.
+
+**And the original figure is the extreme of its own range.** 65.7 % is the
+highest of the five, chosen before any of the others were written and for no
+reason at all — there was no argument for the word-boundary variant over the
+others, it was simply the first regex that worked.
+
+> **A quantity that moves with your parser is not a property of the data.
+> Before reconciling two numbers, check whether the quantity is determined.**
+
+Reporting a range treats the disagreement as two measurements of a real thing.
+It was not: it was two *selections of which records exist*.
+
+*This is the retention confound one stage earlier.* There, a filter chose
+which records were **compared**; here, a parser chooses which records are
+**there at all**. Both sit upstream of the statistic and neither is visible in
+it — and both were found only because the other session disclosed their own
+version first.
+
+### The strict parsers agreed because they exclude the same third of the disc (2026-09-21)
+
+`mpc2emu` flagged the one piece of structure in the parser disagreement and
+explicitly refused to resolve it: the two independent extractor lineages agree
+at exactly one point — **the strictest reading, "the note must be the trailing
+token", 3.7 % against 3.5 %** — and diverge as they loosen. Their framing was
+that this is equally consistent with *"the loose variants admit names that
+carry no note"* and with *"both strict variants select the same small easy
+subset"*, and that the second would make the agreement worth nothing.
+
+They named the test — are the records the strict variants keep representative
+of the 4128? — and said neither session had run it. **Run here, and the answer
+is unambiguous.**
+
+The strict subset is **345 of 4128 (8.4 %)**, and against the full disc:
+
+```
+                      all %   strict %
+stereo suffix  L       18.3        0.0
+               R       17.3        0.0
+loop mode      0       47.0       68.4
+               2       51.1       30.4
+rate code      2       10.0       21.7
+               5        1.4        0.0
+```
+
+**Zero stereo samples. Not under-represented — absent.** And the reason is
+mechanical rather than statistical: **a stereo sample's name ends in `L` or
+`R`, so the note can never be its trailing token.** The strict rule and the
+stereo marker compete for the same character position, so the parser excludes
+every stereo sample *by construction* — better than a third of the disc, and
+with it the whole of the `0x53` pan pair material.
+
+**So the agreement means nothing.** Two independent lineages converged because
+both implement the same exclusion, not because both found the same truth.
+Their second hypothesis is the correct one and the first is refuted.
+
+> **Two methods agreeing is evidence only if they can disagree. Check what
+> each one silently drops before treating convergence as corroboration.**
+
+*This is the corroboration rule with a sharper edge.* That one says
+corroboration must come from outside the assumption it supports. Here both
+parties were outside each other — different sessions, different code, no
+shared lineage — and the convergence was still worthless, because the shared
+thing was not an assumption but a **side effect**: neither author chose to
+exclude stereo samples, or knew they had.
+
+*And it is the answer-set rule pointed at agreement instead of at outputs:*
+`mpc2emu` was right that it would have become "the strict parser is the
+correct one" by repetition. It took twenty minutes to refute and would have
+been quoted for months.
+
+### A constant borrowed across a scope boundary (2026-09-21)
+
+The third and worst form of the role-change shape; `mpc2emu` wrote the
+operational version.
+
+This project predicted a mode-1 or mode-3 Roland import would carry
+`Soundfilehead.flags = 0x78` — `0x70` plus the bit 3 the firmware sets. The
+device emits **`0xB0`**, so it should have been `0xB8`. The `0x70` came from
+`mpc2emu`'s `KRZ_FORMAT.md`. **That document describes what their writer
+emits; the prediction was about what the K2000 emits.**
+
+```
+role change   a number computed to VERIFY, reused as an INSTRUCTION
+              -> something in it was arithmetically wrong for the new use
+scope change  a constant DOCUMENTED for one producer, applied to another
+              -> nothing in it is wrong anywhere. Only its subject changed.
+```
+
+**Why this is the worst of the three:** the source document is not wrong, not
+stale, contains no error, and **had no reason to qualify itself.** A caption
+can be re-read; a scope is not written down at all, because a document is
+about its own subject and says so only by being about it.
+
+> **When you borrow a constant from a format document, check whose output that
+> document describes.**
+
+*The tell, in hindsight:* `0x70`/`0xF0` is documented as a **choice between
+two states**, and the device's `0xB0` is neither — because the device also
+varies bit 6 (`needsLoad`), which a writer never does, having no reason to
+emit a sample that is already resident. **A two-state field in a writer's
+document was a three-or-more-state field in the machine**, and nothing but
+device output could have shown it.
+
+### A correct number whose role changed (2026-09-21)
+
+The hardest case in this catalogue, and the last one found.
+
+This project published a table of `samplePeriod` values as *"what a converter
+writes"*. They were `round(1e9/rate)`. **The K2000 truncates** — `0x18352C` is
+a restoring division that discards the remainder — so three of the six were
+one nanosecond wrong.
+
+The origin is the point: **the column had been computed with `round()` in
+order to check `mpc2emu`'s corpus-fitted formula**, which is itself
+`round(1e9/sr)`. For *that* purpose the arithmetic was correct. It was then
+reused as an instruction, where the device's truncation is what matters.
+Nothing marked the moment the figure changed role.
+
+**`mpc2emu` has two instances that are worse, and the reason is instructive:**
+their retention-filtered sample published as a population, and their `14/14`
+published as a rate result. In both, **the number was fully correct in its
+first role** — the sample did describe its survivors, the fourteen were
+fourteen of fourteen. Mine at least contained a `round()` that was wrong for
+the new purpose, so something was in principle catchable.
+
+> **Not a wrong number, not a stale number, not a number with a bad
+> denominator: a correct number whose role changed silently between one
+> paragraph and the next. And a caption is not something anybody re-derives.**
+
+*Why it resists every other check on this page:* the sweep finds stale text,
+the denominator rule finds hidden filters, the median rule finds hidden
+spreads. All of them interrogate the **number**. This one is entirely in the
+**sentence around it**, and the number survives every audit because it was
+never wrong.
+
+### A clean check is what a correct caveat usually looks like (2026-09-21)
+
+`mpc2emu`'s, and it is the counterweight this whole catalogue needs.
+
+`maxPitch` was marked `[S]` for twenty minutes on the ground that two closed
+forms agreeing is not a verification of an implementation — the firmware runs
+a **log table**, not either formula. Reading the table showed the formula
+reproduces the emitted value **exactly**, on all six dispatch rates. The
+caveat found nothing.
+
+> **A check that comes back clean is what a correct caveat looks like most of
+> the time. If every caveat we raised found something, we would be raising far
+> too few.**
+
+Recorded because a document this size, consisting almost entirely of caught
+errors, teaches the opposite by accident: that raising a doubt should produce
+a finding, and that a doubt which produces nothing was noise. **The caveat was
+correct, it caused the reading, and the reading is what turned a corroborated
+formula into a known one.** Nothing before the reading distinguished that
+outcome from a one-cent table.
+
+### An invariant cannot test the quantity it is invariant under (2026-09-21)
+
+The most convincing argument this project made all day, and it was built on
+the one property that the thing in dispute preserves.
+
+Claiming a 44.1 kHz sample rate, this document argued:
+
+> *"The periods track the labels exactly — 1.198, 1.181, 1.179, 1.198, 1.186,
+> 1.200 against a true semitone ratio of 1.189. A wrong root-key field or a
+> wrong rate cannot fake a clean geometric sequence across seven entries."*
+
+Every word true. **And it tests nothing.** The dispute was over an *absolute
+octave* — whether the reference pitch was the root-key byte or the note in the
+sample name, which differ by twelve semitones. **Ratios between successive
+periods are invariant under a uniform factor of two.** Halve every frequency
+and the sequence is identical. The argument demonstrates that the *relative*
+pitches are internally consistent and is silent on the only quantity anybody
+was arguing about.
+
+**Why it was so persuasive:** it is a genuinely strong result. Seven entries
+agreeing to fractions of a percent really does rule out a great many things —
+a mislabelled root on any individual record, a scattered rate field, a broken
+estimator. It rules out everything *except* the one hypothesis in play.
+
+> **Ask what transformations a consistency result survives, and whether the
+> disputed quantity is one of them.** If it is, the result is evidence about
+> something else.
+
+*Filed next to the answer-set rule because they are the same failure from two
+directions:* the answer set rule says look at what your method can
+**distinguish**; this one says look at what your evidence can **vary**. Both
+are answerable before any data is collected, and neither was asked.
+
+### A method blind to one of its own categories absorbs it (2026-09-21)
+
+The corollary, from this project's side of the same exchange.
+
+The ROM table has **six** arms. The circulated version had five, reading
+`5+ -> 44100` and folding code 5 into the default. **Code 5 is 15000 Hz**, a
+distinct arm at `0x169DD4` via jump-table entry `002c`, with the default
+beginning at 6 (`cmpiw #5` / `bhis`).
+
+**No amount of pitch measurement could ever have found that.** The estimator
+had no way to emit "none of the above" — 15 kHz material was not reported as
+anomalous, it was *absorbed* into whichever bucket the arithmetic produced. An
+entire missing category, invisible to hours of measurement, found in ninety
+seconds by reading the dispatch.
+
+> **A method that cannot emit "none of the above" will never report a category
+> missing.** Its silence about a category is not evidence of absence; it is
+> not evidence of anything.
+
+*Practical form:* before trusting a classifier's output, ask what it does with
+an input outside its classes. If the answer is "assigns the nearest one", then
+every count it reports is conditional on the class list being complete — and
+it cannot tell you whether it is.
 
 ### A porting trap: two formats, opposite polarity (2026-09-21)
 

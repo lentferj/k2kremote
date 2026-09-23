@@ -1548,7 +1548,55 @@ byte order still cannot make these fields into loop points. Worth stating,
 because a negative result that depends on a decoding assumption is only as
 strong as the assumption.
 
-### `[C-neg]` The loop points are not in the 48-byte record at all
+### ~~`[C-neg]` The loop points are not in the 48-byte record at all~~ — REFUTED
+
+> **This negative was wrong, and it was wrong in the way that does the most
+> damage.** The loop points **are** in the 48-byte record. `mpc2emu` found
+> them; verified here on both images before accepting:
+>
+> ```
+> altStart    LE24 at +17
+> loopStart   LE24 at +21    SIGNED -- negative is the no-loop sentinel
+> loopEnd     LE24 at +25
+> ```
+>
+> in **samples**, satisfying `alt <= loopStart < loopEnd <= length`:
+>
+> ```
+> CD 2   4109 / 4128   99.5 %
+> CD 1   5473 / 5761   95.0 %
+> ```
+>
+> Reproduced to the record. The CD-2 outliers are two legitimate shapes —
+> negative `loopStart` on mode-2 one-shots, and `altStart > loopStart` where
+> an attack-skip and a body loop are independent.
+>
+> **How the negative was reached:** the test read `LE32 at +20`, which is
+> `rec[20] | loopStart << 8` — a misaligned window over the real field. It
+> "exceeded the sample length" because it was eight bits too wide and one byte
+> off, not because the field was an address.
+>
+> **The assumption audit was the real failure.** This document tested byte
+> order exhaustively — both directions, full population, 4128 records — and
+> published the negative naming byte order as *the* assumption. A decode has
+> at least five: **width, alignment, unit, signedness, order.** Four were
+> never examined, and all four were wrong or unchecked. *A `[C-neg]` that
+> names one assumption of five has tested one of five.*
+>
+> **And the census had already recorded the signature.** `+22`, `+26`, `+30`,
+> `+34` carrying all the byte-order discriminating power are the **high bytes
+> of the 24-bit fields**; "`+16`/`+18` can never discriminate" is the same
+> fact at two-byte granularity. It was written down here as an epistemics
+> point about endianness and read as a curiosity. The data said "24-bit" and
+> was quoted saying something else.
+>
+> **What it cost, which is the part worth carrying:** a wrong `[C-neg]`
+> redirects where a wrong `[S]` merely misleads. Another analysis read this
+> negative, trusted it, and told a further session *not* to look in the
+> 48-byte record and to trace the patch/partial path instead — reasoning
+> correctly from a false premise published here.
+
+### Superseded text follows
 
 All four 32-bit fields behave like RAM addresses by the test above, and no
 remaining field is wide enough to hold a loop pair. So *"decode the rest of
@@ -1556,7 +1604,234 @@ those 48 bytes"* is **not** the remaining work — the loop pair lives
 somewhere else on the disc, in an area not yet identified. Independently
 reached here and by `mpc2emu`.
 
-### Sample rate: 44.1 kHz, measured from the audio itself
+### The 48-byte record, as it now stands
+
+```
++0x00  16  name, ASCII
++0x11   3  altStart    LE24, samples
++0x15   3  loopStart   LE24, samples, SIGNED -- negative = no loop
++0x19   3  loopEnd     LE24, samples
++0x24   1  loop mode   enum (see below)
++0x2A   2  size in 9216-byte blocks (matches the directory's +0x1E)
++0x2C   1  rate code   low nibble
++0x2D   1  root key    MIDI note number
+```
+
+**Rate code table** — read out of the ROM at `0x169D90`, which settles both
+the values and the bounds:
+
+```
+0x169D90:  moveb %a1@(44),%d0          ; record[+44]
+0x169D94:  andiw #15,%d0               ; low nibble
+0x169D98:  cmpiw #5,%d0
+0x169D9C:  bhis 0x169DDC               ; >5 -> default
+0x169D9E:  addw %d0,%d0
+0x169DA0:  movew %pc@(0x169DA8,%d0:w),%d0
+0x169DA4:  jmp   %pc@(0x169DA8,%d0:w)
+
+jump table at 0x169DA8:  000c 0034 0014 001c 0024 002c
+```
+
+Resolving each offset against `0x169DA8`:
+
+```
+code 0  -> 0x169DB4   movel #48000
+code 1  -> 0x169DDC   movel #44100
+code 2  -> 0x169DBC   movel #24000
+code 3  -> 0x169DC4   movel #22050
+code 4  -> 0x169DCC   movel #30000
+code 5  -> 0x169DD4   movel #15000      <- a SIXTH rate
+6..15   -> 0x169DDC   movel #44100      (the bhi default)
+```
+
+> **Correction to the table as first circulated.** It was written
+> `5+ -> 44100`, folding code 5 into the default. **Code 5 is 15000 Hz**, a
+> distinct arm at `0x169DD4` reached by jump-table entry `002c`. The default
+> begins at **6**, not 5, and is enforced by `cmpiw #5` / `bhis`.
+>
+> **And the `22050` arm is read correctly** — `movel #22050` at `0x169DC4`,
+> reached from jump-table index 3. So the systematic disagreement measured on
+> code-3 material is **not** a misread jump table; the firmware really does
+> set 22050 for code 3. The ROM answer and the audio answer are both solid
+> and they disagree, which moves the question to the disc rather than the
+> code. A root key one octave low accounts for it exactly: the implied rate
+> measured is ~44,005, and halving it for a one-octave correction gives
+> ~22,002 against a table value of 22050.
+
+#### Tested as a prediction, not a fit
+
+The table was named from the firmware **before** any audio was measured, so
+measuring the audio is a genuine test of it. Pitch against each record's own
+root key, CD 2, every second entry with `size >= 20`:
+
+> **This section first reported medians and called three arms confirmed. Both
+> the method and the count were wrong; corrected below.**
+
+The honest presentation is the **distribution**, not the median:
+
+```
+code   rate    ~1.00   ~2.00   scatter   on-grid
+   1  44100      140      36        46     79.3%    <- supported
+   4  30000       42       9        24     68.0%    <- supported, decisive arm
+   0  48000       61      45       104     50.5%    <- NOT confirmation
+   3  22050        0      10         7     58.8%    <- no 1.00 records at all
+   2  24000        4       9        14     48.1%    <- NOT confirmation
+```
+
+**Two arms are supported, not five and not three.** Code 4 remains what makes
+the table credible — an odd rate, named from a firmware jump table before any
+audio was touched.
+
+#### These percentages are also filtered, and the filter is not uniform
+
+Stated because the other session disclosed a filtered denominator in theirs
+and credited the figures above as "the honest ones". **They are not population
+figures either.** Full accounting:
+
+```
+2064  sampled (every 2nd record of 4128)
+1489  dropped: size < 20 blocks      <- 72% of the sample, an arbitrary
+                                        choice made for a reliable window
+   3  dropped: rate code not in the table
+  21  dropped: correlation < 0.55 (unpitched)
+ 551  MEASURED
+```
+
+**And retention differs by a factor of four across the codes being
+compared:**
+
+```
+code   sampled   measured   kept
+   0       768        210   27.3%
+   1       797        222   27.9%
+   4       130         75   57.7%
+   2       206         27   13.1%
+   3       134         17   12.7%
+```
+
+**What survives this and what does not.** Codes 0 and 1 retain almost
+identically — 27.3 % against 27.9 % — so *that* comparison is like-for-like,
+and code 1's 79.3 % genuinely beats code 0's 50.5 %. **That is the one
+measured arm.** Code 4's 68 % sits on 57.7 % retention and is not directly
+comparable to either; its support is that it was **named in advance from a
+jump table**, which is independent of any retention. Codes 2 and 3 rest on
+13 % retention and should be treated as unmeasured.
+
+*The shape, one step earlier in the pipeline than the median:* the other
+session compressed a population into a subset that survived it; this one
+compressed a distribution into a statistic that survived it; and **this one
+then did the population version too, and only found it while checking their
+disclosure.** Neither of us invented a number. Both of us reported a
+denominator we had chosen and not stated.
+
+> **How this document got it wrong, and it is the same error `mpc2emu` made in
+> the same exchange.** The first version reported *"code 0: median 0.999 —
+> direct confirmation"* while holding a distribution that is **50.5 % on-grid,
+> a coin flip.** The median sat on target because the scatter is symmetric
+> around it, not because the prediction held. **A summary statistic was cited
+> as confirmation over data that contradicted it**, and the data was in the
+> same script's output.
+
+#### The octave explanation is REFUTED, so the 2.00s are real
+
+Both sides had treated ratio-2.00 records as the estimator locking onto the
+octave. `mpc2emu` found the discriminator and it is one extra correlation:
+**autocorrelation locks onto multiples of the true period, so if the true
+period were `P/2`, the half-lag would also correlate strongly.**
+
+Reproduced here on all 109 of this corpus's ratio-2.00 records — correlation
+at half the chosen lag:
+
+```
+<= 0            53
+0 .. 0.5        34     -> 87 of 109 (80%) are NOT octave locks
+>= 0.5          22     -> genuine octave locks
+median       +0.044
+```
+
+**For four records in five, `P` really is the period.** The 2.00s are a
+property of the material, not an artefact of the instrument — so they need an
+explanation and do not have one. `mpc2emu`'s observation that code 3 contains
+**both** 1.00 and 2.00 records is the sharpest constraint: a uniformly wrong
+table cannot produce that, so the cause is per-sample, not per-code. Root keys
+sitting an octave from the sounding pitch is the obvious candidate and is not
+demonstrated.
+
+**And this is the instrument-artefact rule catching a second instance in one
+evening.** *"My estimator locked onto the octave"* is a claim about the
+estimator and is testable like any other. Neither side tested it until one of
+them wrote the rule down; one correlation then overturned a published `[C]`.
+
+### WITHDRAWN: no rate was ever measured, by either session
+
+> **The pitch method could not have worked, and the reason was visible in the
+> ROM table before any audio was loaded.** `mpc2emu` found it after this
+> project's read of the jump table; verified here.
+>
+> **The six arms are three exact octave pairs:**
+>
+> ```
+> code 0  48000  =  2 x  code 2  24000
+> code 1  44100  =  2 x  code 3  22050
+> code 4  30000  =  2 x  code 5  15000
+> ```
+>
+> **Every code's octave partner is itself a table value.** So a method whose
+> failure mode is a factor of two cannot distinguish any arm from its
+> partner — it maps each code onto another *legal* answer rather than onto an
+> obviously wrong one. That is decidable **by inspection of the answer set**,
+> before loading a single sample.
+>
+> **And the disc carries two conflicting pitch references.** The root-key byte
+> at `+0x2D` and the note in the sample *name* do not agree. Measured across
+> CD 2, `root_field − name_midi` under the C4 = 60 convention:
+>
+> ```
+> +12 semitones   413 records
+>   0 semitones   397
+>  +1              79
+> ```
+>
+> **And the disagreement concentrates exactly where the "confirmations"
+> came from:**
+>
+> ```
+> code 1   299 of 511 at +12      <- the choir set, this project's [C]
+> code 4    72 of 104 at +12      <- the "decisive arm"
+> code 0   126 of 273 at   0
+> code 3    45 of  77 at   0
+> ```
+>
+> So "implied rate = period × frequency-of-reference" returns **X or 2X
+> depending on which reference is chosen**, and neither reference is marked as
+> authoritative. Both readings are internally consistent and the disc does not
+> break the tie.
+>
+> **This project's 44.1 kHz is withdrawn as a rate determination.** The choir
+> set reads 44100 on the root reference and ~22050 on the name reference, and
+> those are codes 1 and 3 — both real arms.
+>
+> **The argument that made it look strong was load-bearing for the wrong
+> claim.** This document said: *"the periods track the labels exactly — ratios
+> 1.198, 1.181, 1.179, 1.198, 1.186, 1.200 against a true semitone 1.189 — a
+> wrong root field or a wrong rate cannot fake a clean geometric sequence
+> across seven entries."* **True, and irrelevant.** Ratios are invariant under
+> a uniform factor of two. The sequence proves the *relative* pitches are
+> consistent and says nothing whatever about the absolute octave, which is the
+> only quantity in dispute.
+>
+> **And this project had already seen the tell and dissolved it.** The same
+> commit that claimed 44.1 kHz noted: *"Roland's displayed names sit an octave
+> below the C4 = 60 convention — the field says 42 where the name says
+> `F#1`."* That is not a cosmetic convention. **It is the second reference,
+> observed, written down, and filed as a naming quirk** — the dissolved-anomaly
+> rule for the third time today, in its third costume.
+>
+> `mpc2emu`'s rule, taken: **a measurement that can only ever return "X or 2X"
+> is not a measurement of X, and the tell is in the answer set, not in the
+> data. Look at what a method can distinguish before asking what it found.**
+
+### Superseded: 44.1 kHz on the choir set
 
 No field encodes it, so it was measured rather than read. The method needs no
 hardware and no rate field: **the root key is known (`+0x2D`), so the pitch of
@@ -1588,7 +1863,14 @@ Hz): using the root directly yields 44.1 kHz, while root + 12 would yield 88.2
 kHz, which is not a rate. Note that Roland's *displayed* names sit an octave
 below the C4 = 60 convention — the field says 42 where the name says `F#1`.
 
-**What this does not establish.** Whether the format supports other rates.
+**What this does not establish — and it turned out to matter.** Whether the
+format supports other rates. **It does**: the choir set is rate code 1, and
+the disc carries all six codes. CD 1 is mostly code 0 (48 kHz). *"44.1 kHz"*
+was never a property of the format, only of the material measured — and the
+earlier suspicion of a 22.05 kHz cluster, dismissed here as an octave
+artefact, was pointing at a real code-3 population. **Dismissing an anomaly
+as an artefact of one's own instrument is the same move as explaining it
+away**, and it cost this finding a day.
 A broader sweep of 82 periodic samples returned an apparent 22.05 kHz cluster
 (4) and an above-48 kHz cluster (32) — **these are far more likely
 autocorrelation octave errors and mislabelled roots than real rates**, and
@@ -1630,3 +1912,323 @@ linear-format S-7xx sample can be extracted from an image today.** What still
 blocks a faithful converter is **rate and loop points** — an extractor that
 ignores both produces audio at the wrong speed with no sustain, which is not a
 conversion. So the blocker narrows sharply rather than lifting.
+
+
+---
+
+## The rate values ARE settled — the open question was the wrong one
+
+*2026-09-21, after the pitch work was withdrawn.*
+
+The status row read *"every rate VALUE is open and cannot be settled from the
+disc."* That conflates two questions, and only one of them was ever open:
+
+```
+1. What rate does the K2000 ASSIGN to code N?     <- ANSWERED, from the ROM
+2. What rate was the material RECORDED at?        <- undecidable by pitch,
+                                                     and not needed
+```
+
+For a device-faithful converter — Jan's standard, *"matching the device is the
+only definition of correct that can be checked"* — **question 1 is the only
+one that matters.** Question 2 is a fact about Roland's mastering, not about
+the conversion, and a converter that reproduces the K2000's behaviour is
+correct whether or not the K2000 is right about the material.
+
+### The rate is not merely read, it is consumed — traced to the object fields
+
+`0x169DE2` onward, immediately after the six-arm dispatch:
+
+```
+d0 = rate << 16
+d0 = d0 / 96000                     ; jsr 0x18352C, fixed-point divide
+-> descending search of a log table at 0x1F9602, floor -9600
+   yielding a cents offset
+
+a0@(4)  = root*100 - 1200 - offset  ; a WORD
+a0@(28) = 1000000000 / rate         ; a LONG
+```
+
+### And `mpc2emu`'s corpus-fitted formulas are the same function
+
+Their `KRZ_FORMAT.md`, derived from observed `.KRZ` files with **no access to
+the firmware**:
+
+```
+4:6    maxPitch      = round(100*rootkey + 1200*log2(48000 / sample_rate))
+28:32  samplePeriod  = round(1e9 / sample_rate)
+```
+
+`a0@(28)` is `samplePeriod`, identically. And the `a0@(4)` arithmetic is the
+`maxPitch` formula, which is not obvious until the algebra is done:
+
+```
+-1200 - 1200*log2(rate/96000)  ==  1200*log2(48000/rate)
+
+code 0  48000   0.0000   vs   0.0000
+code 1  44100   146.7069 vs 146.7069
+code 2  24000  1200.0000 vs 1200.0000
+code 3  22050  1346.7069 vs 1346.7069
+code 4  30000   813.6863 vs 813.6863
+code 5  15000  2013.6863 vs 2013.6863     max |diff| 2.3e-13
+```
+
+**This is a convergence that could have disagreed**, which is the test the
+parser agreement failed. `mpc2emu` fitted `1e9/sr` and `1200·log2(48000/sr)`
+to real files without seeing the ROM; this project read `1e9/rate` and a log
+table against `96000` out of the ROM without seeing their corpus. **A misread
+jump table would not have produced the `48000` constant**, and a wrong corpus
+fit would not have produced the log form. Two derivations, opposite
+directions, same function.
+
+### What a converter writes
+
+```
+code   rate    samplePeriod (ns)   maxPitch - 100*root (cents)
+   0  48000               20833                             0
+   1  44100               22675                           147
+   2  24000               41666                          1200
+   3  22050               45351                          1347
+   4  30000               33333                           814
+   5  15000               66666                          2014
+         ^ TRUNCATED, not rounded -- three of six differ
+```
+
+> **Corrected: the firmware TRUNCATES.** This table first carried
+> `round(1e9/rate)`, because it was computed to check `mpc2emu`'s
+> corpus-fitted formula and then presented as "what a converter writes".
+> **`0x18352C` is a 32-iteration restoring division with the remainder
+> discarded** — no rounding step anywhere in it — so the K2000 writes the
+> truncated value. Caught by `mpc2emu` diffing the two.
+>
+> ```
+> rate     round    firmware (truncate)
+> 48000    20833    20833
+> 44100    22676    22675   <-
+> 24000    41667    41666   <-
+> 22050    45351    45351
+> 30000    33333    33333
+> 15000    66667    66666   <-
+> ```
+>
+> **Three of six.** Inaudible — 1 ns on a 22 µs period is 4·10⁻⁵ of a
+> semitone — and *visible in every byte-diff against a K2000's own import*,
+> which is exactly how a writer gets validated. **A one-unit change in a
+> hardware-confirmed field looks like a typo correction in a diff and is not**;
+> `mpc2emu` has it filed as a decision rather than a defect, which is right.
+
+### `0x1F9602` read — `maxPitch` is now `[C]` and the worst case is zero
+
+The table runs **backwards** from `0x1F9602`: the search starts at `i = 0` and
+decrements to `−9600`, addressing `0x1F9602 + 2i`, so it occupies
+`0x1F4B02`…`0x1F9602` — **9601 `u16` entries, one per cent**.
+
+**The entries are `round(65536 · 2^(i/1200))`**, verified at eight probe
+points:
+
+```
+ i        table   round(65536*2^(i/1200))
+     0    65535   65536    <- saturated, 65536 does not fit a u16
+    -1    65498   65498
+  -100    61858   61858
+ -1200    32768   32768
+ -1347    30101   30101
+ -2400    16384   16384
+ -4800     4096    4096
+ -9600      256     256
+```
+
+**Simulating the firmware's own search** — `ratio = (rate << 16) / 96000`
+truncated by `0x18352C`, then the descending scan for the first entry `≤
+ratio`:
+
+```
+code   rate   ratio    fw i   fw offset   continuous   deviation
+   0  48000   32768   -1200           0        0.000        +0.0
+   1  44100   30105   -1347         147      146.707        +0.3
+   2  24000   16384   -2400        1200     1200.000        +0.0
+   3  22050   15052   -2547        1347     1346.707        +0.3
+   4  30000   20480   -2014         814      813.686        +0.3
+   5  15000   10240   -3214        2014     2013.686        +0.3
+```
+
+**Worst-case deviation from the continuous formula: 0.3 cents** — and in
+every case the firmware's integer is exactly `round(continuous)`. So
+`mpc2emu`'s `round(100·rootkey + 1200·log2(48000/rate))` **reproduces the
+emitted value exactly on all six dispatch rates**, not approximately.
+
+**The operational answer, which is what the reading was for:** a `maxPitch`
+difference appearing in a byte-diff against a K2000 import **is a bug, not the
+table.** The table cannot contribute one, because it agrees with the rounded
+closed form on every rate the dispatch can produce. That removes the unstated
+dependency from the validation method.
+
+> **Status corrected: `maxPitch` is `[C]`**, method — log table read from the
+> image, firmware search simulated over all six dispatch rates. It was `[S]`
+> for twenty minutes on the correct ground that two closed forms agreeing is
+> not a verification of an implementation. The implementation has now been
+> read, and it agrees.
+
+*Superseded caveat, kept because the reasoning was right even though the
+outcome was benign:*
+
+**Caveat on the `maxPitch` column, which is weaker than the period column.**
+`samplePeriod` is now exactly known: one division, truncating, verified in the
+instruction stream. **`maxPitch` is not computed that way by the firmware** —
+it comes from a *descending search of a log table at `0x1F9602`* for the entry
+at or below `(rate << 16) / 96000`, and the cents figures above are the
+**continuous** formula, which matches `mpc2emu`'s corpus fit to 2·10⁻¹³ but is
+not the same operation. The table's own resolution could place an entry a cent
+either side. **The formula is corroborated; the table has not been read**, and
+a byte-exact writer should read it before trusting the last digit.
+
+**Status: `[C]`.** Method: the dispatch read from the ROM (`0x169D90`), its
+consumption traced to two object fields (`0x169DE2`…`0x169E42`), and both
+fields independently corroborated against a `.KRZ` corpus by a second session
+that had not seen the firmware.
+
+**Still `[?]`, and deliberately separated:** whether Roland's material is
+*actually* at the rate its code claims. The pitch method cannot answer it (see
+the withdrawal above), and **a converter does not need it.**
+
+
+---
+
+## The loop-mode dispatch, and the `+44` high nibble
+
+*2026-09-21, answering two items `mpc2emu` left open.*
+
+### `record[+44]`'s high nibble: the K2000 never reads it
+
+They censused every byte of the 48-byte record and found one unexplained
+low-cardinality field — the **high** nibble of `+44`, set on 43 of 5761
+records on CD 1 and 0 of 4128 on CD 2, all percussion, all mode 2, all rate 0,
+all root 60, and all decoding as ordinary 16-bit LE PCM.
+
+**The firmware discards it.** There is exactly **one** read of `record[+44]`
+in the entire Roland region:
+
+```
+0x169D90:  moveb %a1@(44),%d0
+0x169D94:  andiw #15,%d0
+```
+
+and **no `0xF0` mask, `lsr #4` or high-nibble test occurs anywhere in
+`0x169xxx`–`0x16Bxxx`.** So whatever the field means to a Roland S-7xx, it is
+**irrelevant to a device-faithful conversion by construction** — not "unknown",
+but *provably not consumed*. That is the same distinction the rate work turned
+on: what the device does with a field is a different question from what the
+field means.
+
+### The loop mode dispatch at `0x169E6C`
+
+```
+d0 = record[+36]
+  0 -> 0x169E98   normal
+  1 -> 0x169E90   bset #3 on the object's flag byte
+  2 -> 0x169E98   normal
+  3 -> 0x169E90   bset #3
+ <=6 -> 0x169E98   normal          (catches 4, 5, 6)
+  >6 -> 0x169F42   skips the loop setup entirely
+```
+
+The object's flag byte is initialised `moveb #48,%a0@(1)` — `0x30` — at
+`0x169E62`, where `a0` is the Kurzweil object (`a4@`). `+1` is
+`Soundfilehead.flags`.
+
+**Three things follow.**
+
+**1 — modes 0, 2 and 4 take identical arms.** The firmware makes no
+distinction between them at all, which independently confirms `mpc2emu`'s
+geometric finding: the sustain-versus-terminal-hold difference is carried by
+the loop geometry and *cannot* be carried by a flag, because no flag is set.
+Their corpus measurement and this trace were never in conflict.
+
+**2 — modes 1 and 3 are a pair**, and they are no longer unnamed: they are
+the two modes that set **bit 3 of `Soundfilehead.flags`**. What that bit does
+is `mpc2emu`'s side to name — their doc has byte 1 as `0x70` looped / `0xF0`
+one-shot, with `0x40` needsLoad plus playback-enable bits.
+
+**3 — mode 5 is NOT distinguished.** It falls under the `<= 6` arm with 0, 2
+and 4. So the open set is smaller than *"modes 1, 3 and 5 stay unnamed"*: 1
+and 3 share a flag, and 5 is simply a common mode the corpus happens to have
+only twice.
+
+**A testable prediction for the corpus:** if the base flag byte reaches `0x70`
+by the time the object is written, a mode-1 or mode-3 Roland import should
+carry **`0x78`** where every other mode carries `0x70`. Any Roland-imported
+sample in a `.KRZ` corpus with `Soundfilehead.flags = 0x78` is a mode-1 or
+mode-3 sample. **Named before looking**, and cheap to check on their side.
+
+### Compression: not established either way, and this is not a negative
+
+No decompression branch has been found on the path traced here — the sample
+data goes through the generic transfer routine. **That is not evidence of
+absence.** Following the day's own rule: this negative would have to name its
+assumptions, and it names only one — *the object-building path at
+`0x169Bxx`–`0x169Fxx` contains no decode branch.* The **bulk transfer** itself
+has not been traced, and a decompressor invoked from inside it would not
+appear where I looked. Recorded as **untraced**, not as absent.
+
+---
+
+## Device-produced Soundfilehead objects from a Roland import
+
+*2026-09-21. `mpc2emu` recorded the bit-3 prediction as **untestable**, their
+corpus containing no Roland-imported material. This project has some: the
+seven Roland imports Jan loaded to banks 200–800 were dumped over SysEx, and
+`import_dump.json` holds **14 type-134 sample object bodies** from banks 200
+and 300 — the K2000's own output, not a writer's.*
+
+```
+bank   id  root  flags  bit3  maxPitch  mp-100r  samplePeriod   1e9/period
+ 200  200    60   0xB0 clear      6000        0         20833        48001
+ ...  (14 objects, identical in every column)
+ 300  307    60   0xB0 clear      6000        0         20833        48001
+```
+
+### What this confirms on real device output
+
+**`maxPitch − 100·root = 0`**, which is the **code-0** arm exactly. The whole
+chain — `record[+44] & 15` → jump table → `0x169DB4` `movel #48000` →
+`(rate << 16)/96000` → log-table search at `0x1F9602` → `root*100 − 1200 −
+offset` — is confirmed end to end against bytes the K2000 actually emitted.
+Previously it rested on the instruction stream plus a corpus fit.
+
+**`samplePeriod = 20833`**, matching `1e9/48000`. *This does not discriminate
+truncation from rounding* — 48000 is one of the three rates where both give
+20833. The truncation finding still rests on the instruction stream alone; a
+code-1, 2 or 5 import would settle it on hardware, and none of these is one.
+
+### `flags = 0xB0` — a value not in the documented set
+
+`mpc2emu`'s `KRZ_FORMAT.md` has `Soundfilehead.flags` as **`0x70` looped /
+`0xF0` one-shot**. **All 14 device-imported objects carry `0xB0`**, which is
+`0xF0` **without bit 6** (`0x40`, needsLoad) — one-shot, and not needing a
+load because the sample is already resident after the import.
+
+That is a third value from the device itself, alongside the `0x00`, `0x04` and
+`0x72` they have just found in third-party banks. **A reader assuming
+`0x70`/`0xF0` mis-handles the K2000's own Roland output**, not only other
+people's banks.
+
+### Correcting my own prediction
+
+I predicted a mode-1 or mode-3 import would carry **`0x78`** — `0x70` plus
+bit 3. **The base is `0xB0`, so the correct prediction is `0xB8`.**
+
+I built the prediction on `0x70` because that is what `KRZ_FORMAT.md`
+documents — but that document describes **what `mpc2emu`'s writer emits**, and
+the prediction was about **what the K2000 emits**. The two are not the same
+value and I used one for the other.
+
+**That is the verify-versus-instruct shape again**, in its third form tonight:
+not a number computed for one purpose and reused for another, but a number
+*documented* for one context and applied to another. The figure was correct
+where it was written down. Only its scope changed.
+
+**Bit 3 is clear on all 14**, which is consistent with kit material (modes
+0/2/4) and is *not* a test of the prediction — mode 1 and 3 are 17 of 20018
+records across five disc families, so a 14-sample kit import was never going
+to contain one. The prediction stands as `[S]`, now with the right constant,
+and testing it needs a deliberate import of a known mode-1 or mode-3 sample.

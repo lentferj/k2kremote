@@ -49,10 +49,45 @@ return "not mine" — and then scores a signature, differently per medium:
 `FF "CDRM001ID"` at offset 30, so all three SCSI tests hit — `0xFF` at 30,
 `I` at 38, `D` at 39.
 
-Format 5 is the odd one out: it takes a drive number, probes the device
-(`0x1866F0`) and never looks at a sector, which is the shape of a
-CD-ROM/ISO-9660 or Akai-partition probe rather than a signature test. Not
-identified yet.
+**Format 5 is the AKAI path** — identified 2026-09-21. It takes a drive
+number, probes the device (`0x1866F0`) and never looks at a sector, which is
+why it looked like a device probe rather than a signature test: **an AKAI
+S1000/S3000 hard disk is selected by partition letter, not by a magic
+number.** The evidence:
+
+* `0x12A714`: `moveb %a0@(30),%d0` / `extw` / `addiw #-65` — a byte read and
+  **`'A'` subtracted**, i.e. a partition letter `A`, `B`, `C`… turned into an
+  index. Negative means no partition;
+* that branch falls into `0x12A730`, `pea 0x18D4B1` → the string
+  **`"Akai partition not found."`**;
+* the other AKAI string, **`"No Akai sample files found."`**, is at
+  `0x18C0AB`;
+* it all sits in the same region as the format-5 tests (`0x12AADC`,
+  `0x12AAE2`, `0x12B0E8`, `0x12BC3A`).
+
+**And there is no AKAI sniffer, because there is nothing to sniff.** The mount
+writes only `0`, `1`, `3`, `4` and `5` into the format code — `movew #1` at
+`0x11C908`/`0x11C98A`/`0x11CA56`/`0x11CB68`, `#3` at `0x11CAF2`/`0x11CB7E`,
+`#4` at `0x11CB4C`, `#5` at `0x11CB98`, `clrw` elsewhere. **Nothing anywhere
+writes 2**, although two sites test for it. Format 2 remains unassigned by
+this path.
+
+### The AKAI dispatch is by file type, not by disc format
+
+`0x16368A`, the Akai program builder, has **exactly one caller** in the image:
+`0x1221AA`. It is guarded by
+
+```
+0x12218E:  cmpiw #3,%a5@(0,%d2:l)      ; a per-FILE type code, not the disc format
+0x1221AA:  jsr 0x16368A
+```
+
+so an AKAI program is built when a *file* in the mounted partition carries
+type 3 — a sibling of the `cmpiw #5` branch a few instructions later and the
+`0x1652FC` builder above it. **The disc format selects the partition; the file
+type selects the builder.** That is why the Akai arm takes a staging record
+rather than reading the disc itself, and it is the entry point for the
+remaining fill-path work (`O6`).
 
 ### The Roland sniffer is three byte compares, not a string
 
