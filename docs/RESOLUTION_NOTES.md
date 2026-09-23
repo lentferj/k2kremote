@@ -8076,7 +8076,29 @@ keymap observations from 1446 of a converter agreeing with itself, and what
 turned a phantom 21.4% into a real 2.3% concentrated ten-to-one in third-party
 banks — the direction the finding needed, arrived at honestly.
 
-### Three standing checks (2026-09-21)
+### Rig fact: discard one read after connecting (2026-09-21)
+
+Measured while play-testing an imported Roland kit: **the first solicited read
+after opening the connection returned `AllText()` — our own request echoed
+back** — and every read after it was correct.
+
+The vendored matcher cannot catch this. A request with no declared
+`_response_classes` accepts *any* `SysexMessage`, so a loopback of the request
+satisfies it, and `get_screen_text()` returns the string form of the question
+instead of the screen. It was a throwaway read here; used for a measurement it
+would have been a silent wrong answer.
+
+**This is a rig fact, not a k2kremote fact.** `mpc2emu` drives the same
+instrument from its own SysEx scripts and has recorded it too: an echoed
+request would have been read there as a *parameter value*. Anyone scripting
+this K2000R should **discard one read after connecting, or assert the reply is
+not a copy of the request.**
+
+`MidiBridge._ask` now does the latter: a reply whose class equals the
+request's is refused, retried once, and then reported as a loopback rather
+than handed back as an answer.
+
+### Standing checks (2026-09-21)
 
 Filed together rather than scattered, because a reader who finds one should
 find the set. Each came out of a real failure in these two projects over two
@@ -8087,6 +8109,11 @@ discriminates** — a check that fires on everything is not a check.
 a number  ->  record the scan that produced it, or do not record the number
 a corpus  ->  group by a feature your own writer cannot produce
 a caveat  ->  when a measurement lands, grep the words that described it
+a field   ->  read the raw values before interpreting them; a flag does not
+              look like a name
+a reason  ->  when a hypothesis dies, grep for what was justified by it
+a summary ->  check every law against the numbers cited beside it
+two readings -> when they disagree, stop reading and go back to the artefact
 ```
 
 * **The number.** "21.4% of LFO1→Pitch routings carry a negative byte, 669
@@ -8099,12 +8126,124 @@ a caveat  ->  when a measurement lands, grep the words that described it
   `SYNTHS__OBERHEIM.KRZ` are provably independent of both projects. A named
   set beats "remember to check provenance", because the second is advice and
   the first is a command line.
+* **The field.** Dumping the gate byte for 32,000 Roland zones returned
+  `32, 46, 48, 53, 68, 72` — `' '`, `'.'`, `'0'`, `'5'`, `'D'`, `'H'`. A flag
+  byte does not look like a name, and the ASCII exposed a wrong pointer that
+  no amount of re-reading the disassembly had. **The epistemics matter more
+  than the technique:** `mpc2emu` had proposed the same value-range
+  discrimination hours earlier and then used it to *argue a conclusion* —
+  "these values are nonsense together, therefore two structs" — and the
+  reasoning swallowed the signal. Used as a **sanity read of raw values with
+  no conclusion in mind**, it refuted a premise instead. Same tool, opposite
+  direction, opposite result.
+* **The reason.** The fifth shape, found the same day: a *justification* that
+  outlived its evidence. `mpc2emu`'s keymap hole-fill carried a comment calling
+  it "the delete-lockup guard" — a defence against a machine fault. This
+  project then measured the K2000 **ignoring** a dead sample id: nine silent
+  keys, the control sounding beside them, no hang. The guard was being
+  defended on a hazard that does not exist. **It is still worth having, for a
+  different reason** — an entry that inherits its neighbour's sample plays
+  something musical where a dead id plays nothing — so the code never moved
+  and only the story about it was wrong. *That is why this shape survives
+  review:* the behaviour underneath keeps being correct, so nobody re-reads
+  the sentence explaining it. When a hypothesis dies, the things it was used
+  to justify do not announce themselves.
 * **The caveat.** *Negative result that matters:* the sweep below touched the
   `rename()` truncation note and **left it standing** — real `DIRBANK` replies
   show stored names come back at exactly 16 characters, which says nothing
   about what `CHANGE` does when *sent* a longer one. Two different operations.
   A sweep that retired everything it touched would be a worse tool than one
   that retires two and leaves eleven.
+
+### The sixth shape: a summary breaking an invariant neither source broke (2026-09-21)
+
+Found by `mpc2emu` in their own consolidated document, and it is **not** a
+variant of the five above.
+
+> **This section was first filed with the wrong framing and corrected within
+> the hour — see "How this entry was itself wrong" at the end.** The original
+> read: *"this one has both sources correct and the error created by the act
+> of compressing them."* That is false and it flatters everyone involved.
+
+Their `FIRMWARE_IMPORT_ROUTINES.md` stated the Roland tuning base as
+`coarse * 100 + fine`, dropping the third term:
+
+```
+correct     +10 + 2z  =  coarse * 100 + fine + record[+38]
+as written  +10 + 2z  =  coarse * 100 + fine
+```
+
+Three inches above, the same section cited **`-134` cents constant across 64
+entries** as the strongest evidence in the document. `-134` is unreachable
+from `coarse * 100 + fine`; it lives entirely in `record[+38]`. **The document
+contained its own refutation, two paragraphs apart.**
+
+Nothing in either source was wrong. This project's messages had the formula
+right and had the `-134` right; the compression kept both facts and lost the
+term that connects them. So **re-reading the sources could not have caught
+it** — the sources are fine. Only reading the output as an adversary who did
+not write it catches this, which is the argument for review by a *different*
+session rather than a careful second pass by the same one.
+
+**The check that discriminates**, and it is mechanical: for every number a
+document cites as evidence, confirm the document's own stated law can produce
+that number. Here it takes one substitution to fail. The reason it survived
+writing is that both halves were independently verifiable and recently
+verified, so each read as solid on its own.
+
+Worth stating plainly that this project is not the one that caught it in
+itself: it was caught **in a peer's document, by this session, in review** —
+and this session had shipped the same class of defect that morning, with a
+refuted bit-5 claim standing in three of its own tables while the correction
+sat in a later section. Neither was found by the session that wrote it.
+
+#### How this entry was itself wrong
+
+The framing above — compression damaging clean sources — did not survive the
+hour. Checking this project's **own** document against the new rule found
+`IMPORT_CONVERSION.md` asserting that the `−134` showed *"the per-zone
+`coarse × 100 + fine` term is demonstrably present"*, a hundred lines from
+where this session had told `mpc2emu` the opposite. So:
+
+```
+mpc2emu's doc   -134 attributed to coarse*100 + fine   (dropped +38)
+this project    -134 attributed to coarse*100 + fine   (denied +38)
+sent in review  -134 attributed to +38                 (asserted, unchecked)
+the disc        coarse = 0, fine = 0  ->  +38 carries all of it
+```
+
+**Both documents were wrong, in opposite directions, and each looked
+authoritative on its own.** The invariant was already broken upstream;
+compression only put the two halves close enough together to see. The first
+framing exonerated the sources and blamed the summary — which is the
+comfortable reading, and it is backwards: the sources were the problem and the
+summary was the *diagnostic*.
+
+**And what resolved it was neither review nor re-reading.** Two sessions
+cross-reviewing produced two confident opposite claims and no resolution. One
+read of the disc — `BA1:MC-202`, CD 2 `0x1E1600`, `sub[5] = 0`, `sub[6] = 0` —
+produced the answer in a minute, needed no hardware, and was available the
+whole time. *When two careful readings disagree, stop reading and go back to
+the artefact.*
+
+### A porting trap: two formats, opposite polarity (2026-09-21)
+
+Both the K2000's Roland importer and `mpc2emu`'s MPC importer gate the
+key-tracking cancellation on an explicit source flag — same architecture,
+arrived at independently. **The senses are opposite:**
+
+```
+MPC     <KeyTrack>False</KeyTrack>   flag SET = cancel tracking
+Roland  gate byte sub[2] == 8        flag SET = DO track
+```
+
+`mpc2emu` offered the MPC sense as a prior and said to measure rather than
+take the analogy. Measured over 32,000 zones, it loses. Reading it the other
+way round would have made every string zone unpitched and half the kit zones
+tracking — audible the moment anyone played it, but invisible in code review.
+
+**Two formats agreeing on a convention is a coincidence until it is
+measured.**
 
 ### A caveat can outlive its measurement inside one week (2026-09-21)
 

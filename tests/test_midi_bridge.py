@@ -1460,3 +1460,31 @@ def test_the_device_id_shim_can_be_taken_back_off():
     _uninstall_device_id_tolerance()
     assert messages.SysexMessage.has_valid_k2_headers(on_id_5) == before
     _uninstall_device_id_tolerance()          # idempotent
+
+
+def test_a_reply_that_is_the_request_echoed_is_not_an_answer():
+    """Measured on the rig, 2026-09-21: the first read after connecting came
+    back as `AllText()` -- our own packet -- and every read after was correct.
+
+    The vendored matcher cannot catch this. A request with no declared
+    `_response_classes` matches *any* SysexMessage, so a loopback of the
+    request satisfies it and `get_screen_text()` returns the string form of
+    the question. One retry, then a clear failure, beats handing a caller its
+    own request as a measurement.
+    """
+    from k2000.messages import AllText, ScreenReply
+
+    replies = [AllText(), AllText(), ScreenReply(b"K2000" + b"\x00" * 316)]
+
+    def fake(message, timeout=1.0):
+        return replies.pop(0)
+
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub")
+
+    # two echoes in a row: refused rather than returned
+    with pytest.raises(TimeoutError, match="copy of the request"):
+        bridge._ask(AllText(), 0.2)
+
+    # and one echo followed by the real thing: the retry gets it
+    replies[:] = [AllText(), ScreenReply(b"K2000" + b"\x00" * 316)]
+    assert isinstance(bridge._ask(AllText(), 0.2), ScreenReply)

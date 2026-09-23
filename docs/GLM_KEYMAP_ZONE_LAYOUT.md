@@ -64,6 +64,15 @@ SPDX-FileCopyrightText: Copyright (C) 2026  k2kremote contributors
 > the conclusion — which is the rule this project adopted last night and this
 > is the first application of it to its own work.
 >
+> ### Re-checked 14:45 — the six stand, and one upgrades
+>
+> Nothing here needs withdrawing. One item can be sharpened: the document
+> lists the per-zone `tuning` as "the Roland fine-tune number, **if** the
+> K2000 trace shows it is read". It is read, and it is more than a fine-tune —
+> `record[+10 + 2z] = coarse × 100 + fine + record[+38]`, a full cents value,
+> to which the fill conditionally adds `(root − 12 − I) × 100`. See
+> `GLM_ROLAND_KEYMAP_FILL.md` and `IMPORT_CONVERSION.md` §6a.
+>
 > The pattern is last night's with the roles reversed: **the findings that read
 > code held up; the one that read prose carried another project's stale
 > sentence forward with a second name on it.** It surfaced only because it was

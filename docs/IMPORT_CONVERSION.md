@@ -67,7 +67,7 @@ importers write into the cloned program:
 | `178 + 224k` | byte | a source-derived value | **always 0** | unidentified |
 | `186 + 224k` | byte | 0 | 0 | unidentified |
 | `54 + 224k` | byte | computed (`0x164C66`) | **not written** | unidentified |
-| `57 + 224k` | bit 5 | set | set | a flag |
+| `57 + 224k` | bit 5 | set *(stereo only — see §6b)* | set *(stereo only)* | the **stereo marker** |
 | `57 + 224k` | bit 7 | set, conditional | **not written** | a flag |
 | `270 + 224k` | word | bits 4-7 ← pan | same | see *Stereo* below |
 | `259 + 224k` | byte | high nibble ← −pan | same | see *Stereo* below |
@@ -103,7 +103,7 @@ decides whether a field can be computed at all:
 | Field | |
 |---|---|
 | `270`/`259 + 224k` (the ±7 pair) | **constant.** Literally `+7` / `−7`, the sign chosen by which member of a stereo pair the layer is. Nothing from the source reaches it |
-| `57 + 224k` bit 5 | **constant**, set on every layer by both importers |
+| `57 + 224k` bit 5 | ~~**constant**, set on every layer by both importers~~ **REFUTED on hardware — it is a stereo marker, set in the stereo branch only. See §6b and §6b-ter.** |
 | `57 + 224k` bit 7 | **constant**, Akai only, conditional on a per-zone flag mask |
 | `54 + 224k` = `lyr[5]` | **derived** — the velocity mark, see below |
 
@@ -187,6 +187,13 @@ you know why it does it.
 
 ### `lyr[8]` bit 5: the divergence is ours, and the corpus decides against me
 
+> **This section is superseded.** Its premise — "unconditional" — was refuted
+> on the instrument; see **§6b (REFUTED)** and **§6b-ter**, where bit 5 reads
+> `0x24` on four stereo imports and `0x04` on three mono ones. `mpc2emu`'s
+> corpus reading was right and mine was wrong. The section is kept because the
+> *reasoning* below is what the measurement later confirmed, and because the
+> way I got it wrong is the point.
+
 The ROM sets bit 5 on **every** layer, both importers, unconditionally.
 `mpc2emu`'s writer sets it **only for stereo sources**, and their corpus of
 7,608 real layers has it on 86.4% of all-stereo layers against 0.7% of
@@ -256,8 +263,13 @@ zone[i].b1E   = src[9]
 zone[i].b22   = src[4]
 ```
 
-`src[5] * 100 + src[6]` is a Roland bank/number pair becoming a Kurzweil object
-id, offset by the bank chosen in the load dialog.
+~~`src[5] * 100 + src[6]` is a Roland bank/number pair becoming a Kurzweil
+object id, offset by the bank chosen in the load dialog.~~ **WRONG, retracted
+2026-09-21.** It is `coarse × 100 + fine` — a **tuning in cents** — added to
+`record[+38]`, and the field is `record[+10 + 2z]`. The object id lives at
+`+2 + 2z`. The `× 100` was read as a bank multiplier when it is the cents
+scale; see the resolution in §6a. That unverified gloss then supplied the
+premise for two further wrong readings before it was checked.
 
 ## 6. What this is not
 
@@ -425,22 +437,299 @@ helper does not appear in a constant search — but it has been looked for in
 the four places it would most plausibly be, and the hunt is stopped rather
 than continued until something turns up.
 
-### And this is why the tuning formula is the *correct* form
+### RETRACTED: `I` is a key after all, and the formula is per-key
 
-`mpc2emu` flagged `tuning = (A − 12 − I) × 100` as the shape of a bug they had
-fixed: written per key, it double-counts the transposition the K2000 already
-applies through `centsPerEntry`, drives high keys to −72 semitones and silences
-them — so if the importer did that, it would have been noticed in 1994.
+**This section said the opposite and was wrong.** It claimed `I` was
+`9 + zone_counter`, so the cents value was constant across a zone — the safe
+per-zone offset — and that this was what saved the formula from `mpc2emu`'s
+objection. **That was checked wrongly and the conclusion was relayed to them
+as a resolution of their concern.**
 
-It does not. `I` is `9 + zone_counter`, not a key, so the cents value is
-**constant across every entry of a zone** — the per-zone fine offset a pitched
-keymap wants, not the per-key ramp that breaks one. The index being something
-other than a key, which cost a finding above, is the same fact that makes this
-one come out right.
+`sp@(22)` is assigned once **per iteration**, not once. The loop is at
+`0x16AB28`:
 
-**The cheap discriminator stays worth running** when hardware is free: import
-one Roland patch, save the bank, read the `tuning` words. Constant across a
-zone's entries confirms the reading; ramping by 100 per entry refutes it.
+```
+16ab28:  addqw #1,%sp@(250)
+16ab2c:  cmpiw #88,%sp@(250)
+16ab32:  bltw  0x16A7A4          <- back to `moveq #9 / addw sp@(250)`
+```
+
+`sp@(250)` runs **0…87** and re-enters the fill at the very instruction that
+computes `I`. So `I = 9 + key`, running 9…96 — **a per-key index over an
+88-key range.** Found by GLM-5.3-Flash and confirmed here at the address
+above; the earlier reading noted this possibility and then discarded it.
+
+**So `mpc2emu`'s objection stands and is not resolved.** The formula carries a
+−100-per-key term by construction, which is the shape of the bug they fixed.
+
+### What `A` actually is — and it is not a record byte
+
+The same document corrected the other half, verified here at `0x16A874`:
+
+```
+a0   = record + 2 + 2z                 ; the sample reference word
+      movew #134,-(sp) ; jsr 0x1032EA  ; find_object(type 134, that id)
+      jsr 0x10B90A                     ; body of the object
+A    = obj_body[12]                    ; 0x16A89E
+tuning = record_word[10 + 2z] + (A − 12 − I) × 100
+```
+
+`A` is **byte 12 of the body of the type-134 object the record names** — the
+already-imported Kurzweil object, fetched by id — not a staged byte of the
+Roland record. Our vendored enum calls type 134 `Soundblock`; whether that is
+`mpc2emu`'s Sample object, and whether `body[12]` is its root key, is for them
+to say. If it is the root key, `(root − 12 − key) × 100` against
+`centsPerEntry = 100` cancels the keymap's own per-key transposition and flattens
+every key to its sample's own pitch.
+
+### The discriminator is blocked on an unresolved field conflict
+
+`mpc2emu` confirmed both halves against real objects: type **134** is their
+Sample (their file-type codes are ours **−96**: 36/37/38 ↔ 132/133/134), and
+`body[12]` **is** the root key — sample ids 200/202/204 in `AKAICORNERS.KRZ`
+read 48/60/72, C3/C4/C5 of a three-way multisample, with `body[13] = 0x70`,
+the documented flags value for a playable RAM sample. So the 12-byte fixed
+header ends at `body+12`, `Soundfilehead` begins there, and its first byte is
+`rootkey`.
+
+With `I = key − 12` the arithmetic cancels **exactly**:
+
+```
+tuning = (root − 12 − I) × 100 = (root − key) × 100
+```
+
+against the K2000's own `(key − root) × 100` per-key transposition — sum zero,
+every key sounding its sample at the sample's own pitch. `mpc2emu` has
+hardware evidence for the *mechanism*: their writer once emitted
+`100 × (root − 12 − key)`, the same expression an octave out, and it drove
+high keys to −72 semitones and silenced them.
+
+**But the discriminator cannot be run yet, and neither reading should be
+acted on.** The 42-byte records are not disc bytes — they are built in memory
+— and the two traces of that buffer disagree about what its fields hold:
+
+| Field | The converter (`0x16A42A`…) writes | The fill (`0x16A884`…) reads |
+|---|---|---|
+| `+10 + 2z` | `src[5]×100 + src[6] + record[+38]` — ~~a Kurzweil object id~~ **a tuning in cents** | the **tuning base**, to which the cents term is added — *consistent, once the gloss is corrected* |
+| `+2 + 2z` | *(not seen written here)* | the **sample id**, passed to `find_object(134, ·)` |
+| `+18 + 2z` | `a1@(2)`, a word | a **flag**: high byte set ⇒ use the tuning word raw |
+
+Both sides of that table are read off the ROM. They cannot both describe the
+same field *at the same moment*: if `+10 + 2z` holds an object id, the fill
+adds a cents term to an id and stores it as tuning.
+
+### RESOLVED — and the object-id reading in §5 was the error
+
+The converter's destination pointer, never checked directly until now
+(`0x16A352`): `lea %sp@(4),%a3` · `movel %a5@(23696),%d0` ·
+`movew %fp@,%d1 ; mulsw #42` · `addl %d1,%d0` · `movel %d0,%a3@`. So `*a3`
+**is** the record address, and both traces do address the same field. **The
+mistake was not in the addressing — it was in §5's gloss of the value.**
+
+§5 called `src[5]*100 + src[6]` "a Roland bank/number pair turned into a
+Kurzweil object id", inferred from the `× 100` and never checked.
+**`coarse × 100 + fine` is the canonical cents encoding**, and it is this
+format's own scale — `centsPerEntry = 100`. Four reasons it is a tuning, the
+last decisive:
+
+1. it is *consumed* as a tuning base — the cents term is added and the sum
+   stored in the entry's `tuning` i16;
+2. an id plus thousands of cents is nonsense in both units (`mpc2emu`'s
+   argument, which stands even though the inference they drew from it did not);
+3. `semitones × 100 + cents` is this format's convention;
+4. **the sample id already has its own field.** The fill reads
+   `record[+2 + 2z]` into `find_object(134, ·)`, and the disc-walk region tests
+   that same word for negative at `0x16BECE`. `+10 + 2z` need not be an id
+   because `+2 + 2z` is one.
+
+```
++2  + 2z   the Kurzweil Sample object id   (written in the disc-walk region)
++10 + 2z   a tuning in cents = coarse*100 + fine + record[+38]
++38        a per-record cents base
+```
+
+**So there is no firmware bug and the write-order question never needed
+answering**: `+10 + 2z` has one writer and it writes a tuning. The
+contradiction was mine twice over — an unverified gloss, then a conflict built
+on top of it.
+
+### The construction is CONDITIONAL — gated on a byte from the disc
+
+`0x16A85C`…`0x16A872`:
+
+```
+d0 = 0xFF00
+a0 = record + 18 + 2z
+d0 &= *a0
+bne 0x16A8DA            ; high byte set -> SKIP the root lookup and the ×100 term
+```
+
+and the gate's source is traced — `0x16A44A` writes
+`record[+18 + 2z] ← src[2]`, a word out of the **Roland partial data**. So the
+K2000 does **not** cancel key-tracking unconditionally: a byte the disc
+supplies decides, per partial, whether the `(A − 12 − I) × 100` term is applied
+at all.
+
+That answers the question `mpc2emu` posed as "unconditional, or only where the
+source says fixed pitch?" — **conditional**.
+
+### Measured on three discs: the flag is used exactly as you would hope
+
+The gate's source resolves through one more pointer. `0x16A3A0`:
+`*a2 = buffer + 16 + 16·z` — so the 128-byte Roland patch record is **16 bytes
+of name followed by four 16-byte zone sub-records**, and the gate byte is
+`sub[2]`, not byte 2 of the record. The partial data area itself is at disc
+offset **`0x1D5600`**, 128 bytes per record (`addil #1922560` at `0x16A320`,
+`pea 0x80` at `0x16A338`).
+
+| Disc | zones | gate `sub[2] == 0` → cancel tracking | distinct values |
+|---|---|---|---|
+| Gigapack I CD 1 | 16016 | **49 %** | 3 (`0`, `8`, `0xFF`) |
+| Gigapack I CD 2 | 11520 | **1 %** | 6 |
+| L-CDP-05 Solo Strings | 4676 | **0 %** | 2 (`8`, `0xFF`) |
+
+**A near-binary field** — 3 distinct values across 16,016 zones on CD 1, and 2
+across 4676 on Solo Strings. That much is solid.
+
+**Re-measured with the confound removed — the original direction holds and the
+numbers are better.** Filtering to zones that actually carry a sample (bytes
+0–1 ≠ `0xFFFF`) and correcting the data base to `0x1D5600 + 0x800`:
+
+| Disc | used zones | gate `0` → cancel tracking | volumes drum-named |
+|---|---|---|---|
+| Gigapack I CD 1 | 6037 | **99.6 %** | **46 %** (`*Bass-Drums*`, `BD:`, `SD:`, `HH:`) |
+| Gigapack I CD 2 | 5157 | **2 %** | **0 %** (`*CLASSICAL*`, `** CHOIR **`, `CHO:`) |
+| L-CDP-05 Solo Strings | 1327 | **0 %** | 0 % |
+
+**The two Gigapack discs are a natural A/B**: CD 1 is the percussion disc and
+asks for fixed pitch on essentially every used zone; CD 2 is the melodic disc
+and almost never does. The flag tracks the material, measured on the volume
+names independently of the flag itself.
+
+And CD 2's ninety exceptions are coherent: they are `CHO:Women-Comb`,
+`CHO:Glissando`, `CHO:Glis up+do`, `CHO:Voiceless` — glissandi and vocal
+effects, which are exactly the melodic-disc material that should not track the
+keyboard.
+
+*(Two readings were discarded getting here, both by measurement rather than
+argument: "49 % of all zones" counted empty slots, and "gate 8 marks an unused
+zone" was refuted by CD 2 and Solo Strings, where used zones are overwhelmingly
+gate 8.)*
+
+**The superseded paragraph, kept visible:**
+Correcting them the same day they were measured: a partial carries four zone
+slots and **an unused slot also reads `0`**, so an unknown share of CD 1's 49 %
+is empty slots rather than fixed-pitch requests. Separating them needs the
+importer's own used/unused test, which is not a byte in the disc record — it
+is the sign of a value returned by a call at `0x16A3D8` (negative ⇒ the zone is
+skipped and `record[+2+2z]` is set to −1), and that call is not yet traced.
+
+Two things survive the confound and are worth keeping:
+
+* **the flag is real and near-binary**, which is what the ROM said;
+* **the first non-blank partial record on CD 1 — index 16, `" BD:BD Dance 1AI"`,
+  a bass drum — has gate `0` on zone 0**, which is the value that cancels
+  key-tracking. A fixed-pitch instrument asking for fixed pitch is the
+  single cleanest observation in the set.
+
+Also corrected: the data area's first **16 records are `0xFF` blanks**, so
+partial data begins at `0x1D5600 + 0x800`. The earlier scan included those and
+missed sixteen real records at the far end — which is exactly where the
+`0xFF` gate values in the table came from.
+
+So the K2000's importer applies the key-track cancellation **only where the
+Roland source asks for it**, and real discs set that flag the way a sampler
+library would. `sub[5]`, the coarse-tuning byte feeding `coarse × 100 + fine`,
+is `0` in 99 % of zones, which is what a tuning offset should look like.
+
+**The polarity is the opposite of the prior.** `mpc2emu` offered one from their
+side — MPC's `<KeyTrack>` is "set = do not track" — and said to measure rather
+than take the analogy. Measured: Roland's byte is **set = DO track** (`8` skips
+the cancellation). Two formats, opposite conventions, and the analogy would
+have inverted the meaning. They were right to refuse it.
+
+*How the measurement was got right:* the first attempt read byte 2 of the
+128-byte record and produced values like `32, 46, 48, 53, 68, 72` — which are
+`' '`, `'.'`, `'0'`, `'5'`, `'D'`, `'H'`. **ASCII is what exposed a bad pointer
+assumption**; a flag byte does not look like a name. Checking the pointer chain
+then gave the sub-record layout.
+
+### The construction itself: correct for fixed pitch, a defect when misapplied
+
+**Correction, 14:45.** These two files were first described as a before/after
+pair showing a fixed bug. They are not: same size, same timestamp, same run,
+both written by code that already had the fix, and one source is a **drum
+kit**. `mpc2emu` checked the provenance after this project pointed out that the
+"after" file still carried the construction, and retracted the framing while
+keeping the numbers. **The construction is deliberate and correct for
+fixed-pitch material** — cancelling key-tracking is the right rendering of a
+pad that does not transpose, and the idiom appears in real third-party
+soundsets.
+
+The numbers, reproduced here independently, reading each entry's sample root
+from the type-38 object's `body[12]`:
+
+```
+PSCOLD_01.KRZ  keymap 200   tuning −9200 … +2300   (root−key)×100 holds 108/128
+               worst: entry 115 (key 127), sample 201 root 35 → −9200 = −92 semitones
+```
+
+`(35 − 12 − 0) × 100 = +2300` at entry 0 and `(35 − 127) × 100 = −9200` at
+entry 115 — **the firmware's `(A − 12 − I) × 100`, byte for byte, in a file.**
+
+**Misapplied to pitched material it does not flatten; it goes silent.** Their
+hardware measurement was of their own *old* bug, which applied the construction
+to **every** entry including pitched multisamples, and that drove high keys to
+−72 semitones and they stopped sounding. The reason is visible in the numbers rather than in
+the algebra — the *sum* is zero, but to reach zero the engine has to deliver a
+**−92-semitone per-entry tuning**, and it does not. **The cancellation is exact
+on paper and unreachable on hardware past some distance from the root.**
+
+So:
+
+* **near the root it works** — a drum kit (one sample per key, `root == key`,
+  tuning ≈ 0) is unaffected;
+* **far from the root the entry stops sounding** — and an 88-key Roland
+  multisample import is exactly the far case, with roots spread across the
+  keyboard.
+
+*Caveats, theirs and kept:* the measurement was their own bank on a K2000R,
+not a Roland import through the machine's own importer; the construction is
+identical but the sample roots are not. And whether the firmware clamps the
+value before storing it is unknown — theirs did not.
+
+**This re-specifies rig question 1.** Do not only listen for pitch: listen for
+**silence at the keys furthest from each zone's root**, and read the stored
+`tuning` back. `−9200` with a silent key means the K2000's importer ships the
+same defect; a railed value means the firmware guards what their writer did
+not, and that rail is worth knowing.
+
+**The buffer identity, for the record, is the same memory.** The fill's
+base register is set at `0x16A5B6` — `movew #23696,%d5`, i.e. `a5@(0x5C90)` —
+which is the same global the converter indexes at `0x16A356`, both with
+`mulsw #42`. `mpc2emu` had reasoned the other way (that the nonsensical sum
+implied two different structs) and offered it as a bet rather than a finding;
+the bet loses.
+
+**What the conflict reduces to is write order, and there is a second writer.**
+`a5@(0x5C90)` is *set* at `0x16BC38`, and the region `0x16BCFC`…`0x16BF4E`
+contains eight more `mulsw #42` sites — a whole second body of code indexing
+these records, in the disc-walk/browser area, which this trace had not seen.
+So the value the fill reads at `+10 + 2z` depends on which writer ran last,
+and only one of the two has been traced.
+
+That is a bounded piece of work and it is the next step, but it is **not**
+done, so neither reading is adopted and the value test below stays unrun.
+
+Until that is settled there is no way to know which word the discriminator
+should read, so it is not run. Guessing here would be the third wrong reading
+of this one function in a day.
+
+**Once it is settled, the test needs no rig:**
+if `record_word[10 + 2z]` rises ~100 per key across consecutive keys, the sum
+is constant and the import is pitch-flat; if it is constant, the −100/key ramp
+survives into the keymap. That is a measurement on an S-7xx ISO, and it
+supersedes §6c question 1's framing.
 
 ## 6b. What a second importer's agreement is worth — less than it looks
 
@@ -475,6 +764,287 @@ Two consequences worth keeping:
 [`ROLAND_IMPORT.md`](ROLAND_IMPORT.md) that came from the discs. Three real
 CD-ROMs, fifteen directories, counts matching their own headers — no document
 was involved on either side of that comparison.
+
+## 6b-bis. MEASURED ON THE MACHINE, 2026-09-21
+
+Jan loaded two Gigapack CD 1 drum-machine kits through the K2000R's own Roland
+importer (`DMa:K-Dr.Rhy55 2` → 200, `DMa:K-Rhythm 33` → 300) and the objects
+were read back over SysEx. **Everything below is the instrument's own bytes.**
+
+### The `0x17` question, closed
+
+```
+keymap header (DUMP):  0x0000 0x0017 0x0000 0x0064 0x007f 0x0006 0x0010
+                       sampleId method basePitch cents entriesPerVel entrySize Level[0]
+```
+
+**`method = 0x0017`, `entrySize = 6`**, object size 796 = 28 + 128 × 6. So the
+importer *does* write six-byte entries, as the `base + 6 × index` arithmetic
+said and as `mpc2emu` predicted on the record beforehand. **Where the header
+gets written is still not found in the firmware** — four searches failed — but
+that is now a curiosity, not a blocker.
+
+### The tuning construction, confirmed exactly
+
+Every imported sample came in rooted at **60**, so the roots do not track the
+keys and `mpc2emu`'s void-check does not apply. Program 200's keymap is the
+pure ramp:
+
+```
+entry 24 key 36   tuning +2400   sample 200 root 60   (60−36)×100 = 2400
+entry 25 key 37   tuning +2300   sample 201 root 60              = 2300
+entry 26 key 38   tuning +2200   sample 202 root 60              = 2200
+entry 30 key 42   tuning +1800   sample 204 root 60              = 1800
+entry 34 key 46   tuning +1400   sample 205 root 60              = 1400
+```
+
+Exact on every entry. **Program 300 confirms the other half**: its entries
+deviate from the pure ramp by multiples of 100 (+300, +600, −200, +200, +500)
+— the per-zone `coarse × 100 + fine` term. So
+`tuning = record[+10+2z] + (root − 12 − I) × 100`, both halves visible at once.
+
+### REFUTED by the machine: `lyr[8]` bit 5 is not unconditional
+
+```
+lyr[8] = 0x04    bit 5 CLEAR    bit 7 clear      (both programs)
+cal[7] = 0       no second keymap → mono
+```
+
+§3 said both importers set bit 5 **unconditionally on every layer**. They do
+not. Going back to the ROM after the dump: the `bset #5` at `0x16ADAA` sits
+immediately after `movew %a1@,%a0@(136)`, the **second-keymap** assignment —
+**inside the stereo branch**. The instruction was read without checking which
+branch contained it.
+
+So bit 5 is a stereo marker, which is what `mpc2emu`'s 86.4 % / 0.7 % split
+said from their corpus. Three independent confirmations now: their corpus, the
+ROM's branch structure, and a mono import that leaves it clear.
+
+### Confirmed, and not exercised
+
+* **all eleven segment tags** at the predicted offsets;
+* **`cal[11]` = 200 and 300** — `mpc2emu`'s field name, this project's ROM
+  offset, the machine's bytes;
+* `lyr[5]` = 0 → velocity marks lo 0 / hi 7, full range, right for a kit;
+* the **±7 pan** was *not exercised*: `cal[7] = 0`, no stereo pair, so
+  `0x53 body[2]` and `body[13]` are both 0. Not tested rather than refuted.
+
+### An oddity worth chasing
+
+**Entries 0–8 of both keymaps hold `tuning +4352, vol −44, sample 16582`** —
+an invalid sample id (the importer caps ids at 999, so this is junk rather
+than a mis-pointer), identical across all nine, in the region GLM's fill
+document predicted would be a boundary copy of entry 9. Entry 9 is zeros, so
+it is not that.
+
+**And they are reachable.** The layer's key range is `lyr[3] = 12`,
+`lyr[4] = 108` in both programs, and entry `i` sounds at key `i + 12` — so
+entries 0–8 are keys **12–20**, inside the layer's own span. An imported kit
+has nine playable keys pointing at a sample that does not exist.
+
+`mpc2emu`'s writer will not emit this state: `_build_keymap_entries` ends with
+a two-pass hole fill (forward, then backward for leading holes) so that no
+entry ever names a dead object. **So the K2000's own importer produces a state
+a sibling project deliberately avoids.**
+
+**Tested on the instrument, 2026-09-21, with Jan's authorisation.** A control
+note at key 36 (entry 24, sample 200 — a real object) followed by keys 12…20
+one at a time, each with an ALLTEXT liveness read between:
+
+```
+note 36  CONTROL            alive: 'ProgramMode  Xpose:0ST  <>Channel:9'
+note 12  entry 0  dangling  alive
+…                           alive
+note 20  entry 8  dangling  alive
+```
+
+**No hang, no loss of response, on any of the nine.** The instrument answered
+normally after every note and after the panic.
+
+Two things about the design, both `mpc2emu`'s:
+
+* the liveness poll is the **same family of probe** that was root-caused as
+  the cause of a K2000 lockup during deletes (§9), so had it hung, the cause
+  would have been ambiguous between the dangling entry and the poll. The right
+  design is two passes — notes alone first, notes-plus-poll second. **It did
+  not bite here because nothing failed**, and the poll being present makes the
+  negative *stronger* rather than weaker;
+* the audible result is Jan's to report, not this session's: **no hang is not
+  the same as no defect**, and a wrong sample or a stuck voice would still be
+  a finding.
+
+**The audible result: keys 12–20 silent, key 36 plays.** First from the
+scripted run — one sound across the whole sequence, which the ordering made
+the control — and then **confirmed by Jan playing the keys manually**, which
+is the reading that counts: it depends on neither the channel this session
+guessed, nor the note timing, nor the sequence order. The control at key 36
+maps to sample 200, a real object, and sounds; the nine dangling keys do not.
+
+So the complete answer is the benign one, and every part of it is measured:
+
+```
+control key 36   -> sounds         confirmed twice: scripted and by hand
+keys 12..20      -> silent         confirmed twice; the engine ignores a dead id
+all nine         -> no hang        with the 2-3 s-class poll running against it
+```
+
+**The K2000 ignores a keymap entry pointing at a nonexistent object.** The
+importer's dangling entries are a cosmetic defect, not a hazard — nine dead
+keys at the bottom of every imported kit rather than a crash. `mpc2emu`'s
+hole-fill guard still buys something the K2000 does not: a hole that inherits
+its neighbour's sample plays *something musical* where this plays nothing.
+
+## 6b-ter. BOTH OPEN QUESTIONS ANSWERED, 2026-09-21
+
+Jan imported five more patches, each to its own bank. Every claim below is
+read off the instrument.
+
+### The gate: confirmed on both arms
+
+| Program | material | gate | keymap tuning |
+|---|---|---|---|
+| 200 `DMa:K-Dr.Rhy55 2` | kit | `0` | `+0 … +4352`, many distinct — **the ramp** |
+| 300 `DMa:K-Rhythm 33` | kit | `0` | `+0 … +4352` — the ramp |
+| 400 `TOM:K-Tom 4 st` | kit | `0` | `+0 … +4352` — the ramp |
+| **500 `BA1:Hot-st-Bass`** | **pitched** | `8` | **`+0`, one distinct value, 0 steps of −100** |
+| **600 `BA1:Stereo-Bass`** | **pitched** | `8` | **`+0`, one distinct** |
+| **700 `SYN:StereoSound`** | **pitched** | `8` | **`+0`, one distinct** |
+| **800 `BA1:MC-202`** | **pitched** | `8` | **`−134`, one distinct** |
+
+**The cancellation is withheld on pitched material.** And `BA1:MC-202` is the
+best single data point in the whole investigation: a **constant −134 cents**
+across all 64 entries. Non-zero, so the per-zone **tuning base
+`record[+10 + 2z]`** is demonstrably present; constant, so the per-key
+`(root − 12 − I) × 100` term is demonstrably absent. **The two halves of the
+formula, independently controlled, in one object.**
+
+#### Corrected, and then settled on the disc itself
+
+This first read *"non-zero, so the per-zone `coarse × 100 + fine` term is
+demonstrably present"*. **That was wrong, and the disc says so.** The base has
+three summands, `coarse × 100 + fine + record[+38]`, and a measured total of
+−134 identifies none of them on its own.
+
+So the source record was read — `BA1:MC-202` is on **CD 2** at `0x1E1600`,
+partial index 368 (`(0x1E1600 − (0x1D5600 + 0x800)) / 128`), the only patch of
+that name on either disc:
+
+```
+name: "BA1:MC-202    AA"
+zone 0: 3a 02 08 7f 00 00 00 01 00 7f 00 00 00 7f 7f ff
+        sub[2] gate   = 8     -> pitched, matching the import
+        sub[5] coarse = 0
+        sub[6] fine   = 0
+zones 1-3: sub[0..1] = ffff -> unused
+```
+
+**`coarse × 100 + fine = 0`.** The −134 therefore comes *entirely* from
+`record[+38]`, and the sentence above had attributed it to the one term that
+provably contributes nothing here. `+38` is a real, independent summand
+carrying a non-zero value on real material — not a term that could be dropped
+as always-zero, which is exactly how it got lost downstream (see
+`RESOLUTION_NOTES` §"sixth shape").
+
+Note what this does **not** establish: where `+38` is filled from. It is a
+field of the staging structure the disc walk builds, and −134 (`0xFF7A`
+signed) appears nowhere in this 128-byte record, so it is computed or fetched
+from elsewhere. That is an open item, now with a known worked example to test
+any answer against.
+
+The surviving claim from Program 300 — deviations from the pure ramp in
+multiples of 100 — is consistent with a non-zero `coarse` there, since `fine`
+would contribute the non-multiples. It is not proof of which summand moved,
+and is not read as such.
+
+### The ±7 pan: confirmed
+
+```
+stereo imports (400, 500, 600, 700):  0x53 body[2] high nibble = 7
+                                      0x53 body[13] bits 4-7   = 9   (= −7 signed)
+mono imports   (200, 300, 800):       both 0
+```
+
+**+7 and −7, in the same layer** — which also settles the framing: the pair is
+*within* one layer, not spread across a partner layer, as §3's corrected
+reading said.
+
+### `lyr[8]` bit 5: the stereo marker, both arms measured
+
+```
+stereo: 0x24  bit 5 SET    (400, 500, 600, 700)
+mono:   0x04  bit 5 clear  (200, 300, 800)
+```
+
+Perfect correlation across seven imports. `mpc2emu`'s corpus split, the ROM's
+branch structure, and now both arms on hardware.
+
+### The header does not describe the body — and that is not the machine's bug
+
+Every imported keymap header says `entriesPerVel = 127` — 128 entries — and
+`entrySize = 6`, implying **796 bytes**. The objects are not that size:
+
+```
+km 200/300/400   796 B   OK
+km 401/402/403   668 B   header implies 796
+km 600/601/800   412 B   header implies 796
+km 500/501/700/701  156 B   header implies 796
+```
+
+**Nine of thirteen are short.** Reading entry 127 of a 156-byte keymap runs
+640 bytes past the end of the object.
+
+**This was first written up here as a defect of the K2000's importer. It is
+not, and `mpc2emu` corrected the framing:** a declared count that does not
+describe the object is normal for a format whose **object size is
+authoritative**, and the machine plainly walks its own objects by size. The
+header field declares a *layout*, not an extent. What is wrong is a reader
+trusting the wrong one of the two — and the reader that did was theirs, not
+the instrument.
+
+They found it in `_decode_table`: the entry loop ran `entriesPerVel + 1` with
+no bound against the object, and the `table_size` it was handed was computed
+and never used — so a 156-byte keymap declaring 796 built zones out of the
+*next object's* bytes, silently, because `unpack_from` raises at the end of
+the file and not at the end of an object. Now bounded by
+`min(declared, (object_end − table_addr) // entry_size)`, with a warning that
+names the declared size against the real one. Three tests, two of which fail
+against the unbounded version.
+
+**And the prevalence is the point: zero of their 1156 corpus keymaps do this.**
+No amount of reading saved banks could have found it. It needed the
+instrument, on exactly the path a user takes — import a Roland disc on a
+K2000, save, convert.
+
+It does *not* contradict their corpus finding that `entriesPerVel` is always
+127. It is 127 here too. **The entry count varies anyway**, with no field
+describing it.
+
+## 6c-bis. Named objects for what is still open
+
+The two remaining questions need *material*, not more rig time, and both are
+satisfied by **one 54 K import**:
+
+| Object | Disc | Size | Why |
+|---|---|---|---|
+| **`BA1:Hot-st-Bass`** | **CD 2** | **54 K** | one partial, **two used zones, both gate `8`** — pitched, so the cancellation must be *withheld*; and stereo-named, so the pair should make the K2000 write a second keymap and the ±7 pan |
+| `BA1:Stereo-Bass` | CD 2 | 198 K | same shape, 2 partials × 2 zones — the backup |
+| `SYN:StereoSound` | CD 2 | 108 K | second backup |
+| `BA1:MC-202` | CD 2 | 27 K | minimal **pitched-only** fallback: one zone, gate `8` |
+| `TOM:K-Tom 4 st` | CD 1 | 234 K | stereo **fixed-pitch**, if the two arms ever want separating |
+
+**What `BA1:Hot-st-Bass` predicts**, so the result is falsifiable either way:
+
+* **tuning words roughly constant, not ramping −100/key.** Both its zones
+  carry gate `8`, which skips the root-key term. A ramp here refutes the gate
+  reading measured across 32,000 zones;
+* **`cal[7]` non-zero** — a second keymap — and **±7 in `0x53 body[2]` /
+  `body[13]`** of the two layers, with opposite signs. The mono kits left
+  those at 0, so this is the first chance to exercise them at all.
+
+*Stated as a caveat, not smuggled:* "stereo" in the name plus two used zones is
+**suggestive, not proof**. The two zones could be a velocity split or a plain
+layer pair. `cal[7]` coming back non-zero is what would confirm a stereo
+import, and that is an outcome of the test rather than a precondition for it.
 
 ## 6c. Five questions for one rig session
 

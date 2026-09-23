@@ -5,6 +5,74 @@ SPDX-FileCopyrightText: Copyright (C) 2026  k2kremote contributors
 
 # The Roland keymap fill, decoded (GLM-5.3-Flash, 2026-09-21)
 
+> ## Checked 2026-09-21 — the two load-bearing claims hold, and one of them
+> ## overturns a finding of ours
+>
+> Verified at the cited addresses in the v3.87J ROM:
+>
+> * **The 88-key loop is real.** `0x16AB28`: `addqw #1,%sp@(250)` /
+>   `cmpiw #88,%sp@(250)` / `bltw 0x16A7A4` — and `0x16A7A4` is exactly where
+>   `moveq #9 / addw %sp@(250)` computes the entry index. So `I = 9 + key`
+>   over 0…87, **not** `9 + zone_counter`. `IMPORT_CONVERSION.md` said the
+>   latter and has been corrected; the error had already been relayed to
+>   `mpc2emu` as a resolution of their tuning objection, and that has been
+>   withdrawn.
+> * **The type-134 lookup is real.** `0x16A874`…`0x16A89E`: the record's
+>   sample-reference word goes to `find_object(134, id)`, then `0x10B90A`
+>   for the body, then `moveb %a0@(12)` — `A` is byte 12 of *that object's*
+>   body, not a staged record byte, exactly as claimed.
+>
+> **What is verified versus inferred.** The address arithmetic, the loop
+> bound, the fetch and the byte offset are all confirmed instruction by
+> instruction. Calling type 134 "the Sample" is an interpretation — our
+> vendored enum names it `Soundblock` — and "`A` is the root key" is an
+> inference from the arithmetic's shape, not a reading of the object. Both
+> are for `mpc2emu` to confirm against their Sample-object layout.
+>
+> Unchecked here, and flagged as such rather than endorsed: the boundary-copy
+> claim (entries 0–8 and 96–127) and the `0x16C5B8`/`0x15390C` volume chain.
+> The `cmpiw #127` loop at `0x16AB20` is consistent with the boundary copies,
+> which is corroboration and not confirmation.
+>
+> ### Re-checked 14:45 — two upgrades and one refutation
+>
+> **§5's record map is now CONFIRMED, and it was right where we were wrong.**
+> It lists `+2 + 2z` as the sample id and `+10 + 2z` as the tuning source.
+> `IMPORT_CONVERSION.md` §5 had called `+10 + 2z` "a Kurzweil object id"
+> — an unverified gloss of `src[5]*100 + src[6]`, which is `coarse × 100 +
+> fine`, cents. That gloss then supplied the premise for two further wrong
+> readings here before it was checked. **This document had the field right
+> from the start.**
+>
+> **§2's conditional is confirmed and matters more than it was given credit
+> for.** At `0x16A870`/`0x16A872`: `andw record[+18+2z],#0xFF00` / `bne
+> 0x16A8DA` — if the high byte is non-zero the whole root-key lookup and the
+> `(A − 12 − I) × 100` term are **skipped**. And the gate's source is traced:
+> `0x16A44A` writes `record[+18 + 2z] ← src[2]`, a word from the **Roland
+> partial data**. So the K2000 does **not** cancel key-tracking
+> unconditionally — it is gated on a byte the disc supplies.
+>
+> **§3's musical conclusion is REFUTED by hardware.** It argues the ramp
+> "*flattens* each key to its own sample's pitch rather than silencing high
+> keys, because the keymap's own per-key transposition and the tuning offset
+> then cancel". `mpc2emu` measured the identical construction on a K2000R:
+> applied to pitched material it drove high keys to −72 semitones and they
+> **went silent**. The sum is zero in arithmetic, but reaching it needs the
+> engine to deliver a −92-semitone per-entry tuning and it does not — the
+> cancellation is exact on paper and unreachable on hardware far from the
+> root. Near the root (a fixed-pitch drum map, `root == key`) the construction
+> is correct and appears in real third-party banks.
+>
+> That is the reasoning-that-fits shape once more, and it is instructive that
+> it appears in the document that got everything it read off the code right:
+> **the refuted paragraph is the one that left the disassembly and reasoned
+> about music.**
+>
+> **This document read the code and the code held.** That is now the second
+> external file to correct this project on a point where our own reading had
+> stopped one instruction short — and the first where the correction reversed
+> a conclusion we had already passed to a sibling project.
+
 External session file, offline — no hardware. This completes the
 `IMPORT_CONVERSION.md` §6a zone fill (`0x16A7DC…`) the way the document was
 heading: every entry byte now has a source, the boundaries of the fill are

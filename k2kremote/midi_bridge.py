@@ -845,8 +845,28 @@ class MidiBridge:
         documented contract: if the full wait elapsed, it timed out, and the
         undecodable traffic is reported as the reason.
         """
-        self._drain()
         timeout = timeout or self.timeout
+        for attempt in (0, 1):
+            self._drain()
+            reply = self._ask_once(message, timeout)
+            # A reply of the SAME class as the request is our own packet coming
+            # back, not an answer. It happens on this rig: measured 2026-09-21,
+            # the first solicited read after opening the connection returned
+            # `AllText()` -- the request itself -- and every read after it was
+            # correct. The vendored matcher cannot catch it, because a request
+            # with no declared `_response_classes` accepts *any* SysexMessage,
+            # its own echo included. One retry, then say so plainly rather than
+            # hand a caller its own question as an answer.
+            if type(reply) is not type(message):
+                return reply
+            if attempt:
+                raise TimeoutError(
+                    f"the only reply to {type(message).__name__} was a copy of "
+                    f"the request -- a loopback or a stale packet, not the "
+                    f"device answering")
+        raise AssertionError("unreachable")
+
+    def _ask_once(self, message, timeout):
         started = time.monotonic()
         try:
             return self.client._send_and_receive(message, timeout)
