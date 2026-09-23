@@ -2232,3 +2232,890 @@ where it was written down. Only its scope changed.
 records across five disc families, so a 14-sample kit import was never going
 to contain one. The prediction stands as `[S]`, now with the right constant,
 and testing it needs a deliberate import of a known mode-1 or mode-3 sample.
+
+---
+
+## O6: the AKAI disc read, located
+
+*2026-09-21. `mpc2emu` refuted the claim that `a3@(0x2E + 2·key)` was a disc
+structure — `0x2E + 2·88 = 222` bytes, and no AKAI block is that big. **The
+loose word was mine:** this document said the importer "reads a per-key word
+table **from the source**", and *source* was doing unexamined work. Confirmed
+and superseded below.*
+
+### `a3` is a K2000 scratch buffer, not the disc
+
+```
+0x1639E0:  lea %a5@(14642),%a3        ; a3 = a5 + 0x3932
+```
+
+A global scratch area, with `a3@(2048)`, `a3@(2176)` and `a3@(2400)` taken as
+further pointers — so it is at least 2.4 KB. **The per-key table at
+`a3@(0x2E)` is built by the K2000**, exactly as they argued.
+
+### The disc read — `0x16399C`
+
+```
+0x163980:  d0 = a5 + 0x2132          ; d2 = 0x2132 throughout
+0x163984:  d0 += 2048
+0x16398E:  movew #644,%sp@-          ; LENGTH 644 = 0x284
+0x163992:  pea %a5@(0,%d2:l)         ; BUFFER  a5 + 0x2132
+0x163998:  movew %a0@(612),%sp@-     ; file handle
+0x16399C:  jsr 0x175826              ; <- THE FILE READ
+0x1639AC:  cmpil #644,%d0            ; short read -> error path, bail to 0x164A7A
+```
+
+**The AKAI program file is read 644 bytes at a time into `a5 + 0x2132`.** Note
+this is a *different* region from `a3` — `0x3932 − 0x2132 = 0x1800`, 6 KiB
+apart — which is the structural confirmation of their refutation.
+
+### The 644 bytes decompose, and two independent facts agree
+
+`0x1630C8`, handed the buffer at `0x164132`:
+
+```
+d7 = 0                            ; entry index
+loop:
+  d0 = a5 + 0x2132 + 100 + 4*d7   ; base + 100, stride 4
+  jsr 0x162FF2                    ; extract a value from the entry
+  ... track the minimum, remember its index in d4
+  d7++
+  while d7 < 136
+```
+
+**136 entries × 4 bytes at offset 100 → `100 + 544 = 644`, exactly the read
+length.** The loop bound and the read size were derived independently and
+agree, which is the check a wrong base cannot pass.
+
+**The entries split 8 / 128:**
+
+```
+0x163120:  cmpiw #8,%d4
+           d4 >= 8  ->  emit (d4 - 8), type code 2
+           d4 <  8  ->  emit  d4,      type code 1
+```
+
+So **8 entries of one class followed by 128 of another** — `8 + 128 = 136`.
+
+### Header fields read directly — FOUR, and the offsets are HEX
+
+```
+0x2C  (44)  at 0x163A2A
+0x34  (52)  at 0x163A0A
+0x36  (54)  at 0x163A1A
+0x42  (66)  at 0x1639FC
+```
+
+> **Two corrections, both mine, both caught within the hour of sending the
+> wrong version to `mpc2emu` — who had already matched it against the AKAI
+> format and reported three of three hits.**
+>
+> **1 — the offsets are hexadecimal.** `objdump` prints the indexed form's
+> displacement in **hex without a prefix** while printing the plain
+> `%a5@(n)` form in **decimal**, and this document read one as hex and the
+> other as decimal *in the same paragraph*: `%a3@(2e,%d0:l)` was correctly
+> taken as `0x2E`, `%a5@(42,%d2:l)` was reported as decimal `42`. From the
+> extension words:
+>
+> ```
+> ext 0x2842  ->  0x42 = 66
+> ext 0x2834  ->  0x34 = 52
+> ext 0x2836  ->  0x36 = 54
+> ext 0x282c  ->  0x2C = 44
+> ```
+>
+> Cross-checked against `%a5@(5290)` = `0x14AA`, which really is decimal. The
+> hits reported back were against `0x22`/`0x24`/`0x2A` — what you get by
+> treating hex as decimal and converting — so they need re-running against
+> the real offsets before any identification stands.
+>
+> **2 — there are four fields, not three.** The first enumeration grepped
+> `([0-9]+,%d2:l)`, which matches `42`, `34` and `36` but **cannot match
+> `2c`**, because `2c` contains a letter. **A pattern that cannot express the
+> shape the data takes returned a short clean list that looked complete** —
+> the wrapped-grep failure in a new costume, and the second time today a
+> regex has silently under-reported.
+
+All four go through the high-byte accessors (`0x1630B8` / `0x1630C0`).
+
+### The buffer is NOT overwritten before the scan
+
+`mpc2emu` gave two readings of why the 136 × 4-byte scan matches nothing in
+the AKAI format, and assigned the first here: *is the buffer still file
+content when the scan runs?*
+
+**It is.** Every use of `d2` between the read at `0x1639A2` and the scan at
+`0x164132` is one of the four reads above plus the `pea` at `0x16412E`.
+**Not one store through `d2` anywhere in the builder.**
+
+So the scan reads genuine file bytes, and their reading #2 — that the 8/128
+split is a K2000-side quantity merely sharing the buffer — is unsupported for
+the same reason. That leaves the anomaly intact and harder: **136 four-byte
+entries from offset 100 of a real AKAI program file, split 8 / 128, matching
+nothing in the format.**
+
+### What `0x162FF2` takes from each entry
+
+```
+d0 = entry[0]
+a0 += 2
+d1 = entry[2]
+d0 = (entry[0] << 8) + entry[2]
+d0 <<= 4
+```
+
+— entry bytes `0` and `2` combined, bytes `1` and `3` not used by this path.
+
+### Handover
+
+`mpc2emu` has a mature AKAI reader and a 27-image corpus and offered to
+predict every field the importer takes once the read was located. **It is
+located.** The open question is theirs to answer from the format side: *what
+is a 644-byte AKAI structure of 100 header bytes plus 8 + 128 four-byte
+entries, and what are `+34`, `+36`, `+42`?*
+
+---
+
+# CRITICAL: `0x16368A` is the ENSONIQ builder, not the AKAI one
+
+*2026-09-21. The largest error of the session, and it is this project's.*
+
+`0x1221AA` — the single caller of `0x16368A` — is guarded by
+`cmpiw #3,%a5@(0,%d2:l)`, and **`d2` is loaded `movew #5290,%d2` at
+`0x12210E`. `5290 = 0x14AA` is the disc format code.** The dispatch reads:
+
+```
+0x122114   cmpiw #4   format 4 ROLAND    -> jsr 0x16BBEA
+0x12215E   cmpiw #2   format 2           -> jsr 0x1652FC
+0x12218E   cmpiw #3   format 3 ENSONIQ   -> jsr 0x16368A   <- "the Akai builder"
+0x1221C8   cmpiw #5   format 5 AKAI      -> further on
+```
+
+**Everything this document has called the AKAI arm is the Ensoniq arm:** the
+92-byte staging record, the 88-key table at `a3@(0x2E)`, the 8-zone loop
+(`cmpiw #8,%sp@(528)`), the 88-key fill bound, the 644-byte read at
+`0x16399C`, the 136 × 4-byte scan split 8/128, and the velocity arithmetic at
+`0x164C66`.
+
+The string pool beside the builder says so plainly and was read without being
+heard: **`"This is one file of a multi-disk set."`**, **`"You must load disk
+#1 first."`**, `"Progs  Samps  Cancel"` — EPS multi-disk sets, not AKAI.
+
+### This refutes §3.4, and the method is the lesson
+
+§3.4 concluded **`[C-neg]`: the K2000 has no Ensoniq program converter.** It
+has one, at `0x16368A`, and this document has been describing it all day.
+
+The argument was a reference set: *26 references to `a5@(0x14AA)`, 25 in the
+file/disk layer, the one in the converter region tests format 5.* Every count
+was correct. **The flaw is that a dispatch lives in the CALLER.** I asked
+whether the format code was tested *inside* the region `0x163000`–`0x16C000`,
+when by construction the test sits outside it and calls in — `0x12218E` is in
+the file layer and was counted there, as one of the 25, and read as evidence
+*against* what it actually proves.
+
+> **A region-scoped search for a dispatch looks in the one place a dispatch is
+> never found.** The enumeration was exhaustive and the partition was wrong.
+
+It is the answer-set question again: *what could this evidence have come out
+as?* Under that method a converter reached by an external dispatch is
+indistinguishable from no converter at all — the result was fixed before the
+search ran.
+
+### What survives
+
+The Roland work is untouched — different builder (`0x16BBEA`), different path,
+and every Roland finding was verified against disc bytes or device output.
+
+`(lo << 3) | (7 − hi)` also survives, but means something different: it is the
+**K2000's own `lyr[5]` encoding**, which `mpc2emu` derived from a panel diff
+and which the *Ensoniq* importer computes. The agreement was real; the source
+format attributed to it was not.
+
+### What is now unknown
+
+Where the **AKAI** builder is (format 5 dispatches at `0x1221C8`), and
+everything the AKAI arm was thought to contain. `O6` does not shrink — it
+returns to empty, and the work done under its name belongs to a different
+format.
+
+---
+
+## The 136 × 4 scan, solved: it is an EPS instrument header
+
+*Resolved by `mpc2emu` against 120 real EPS instrument headers from an Ensoniq
+CD-ROM, decomposed exactly as the firmware does.*
+
+```
+pool 1, indices 0..7      never exceeds 8;   43 of 120 USE ALL 8
+pool 2, indices 8..135    never exceeds 128; maximum observed IS 128
+bytes 1 and 3 of entries  zero on 16175 of 16320  (99.1%)
+```
+
+**Both bounds are reached, not merely respected** — they are capacities, not
+coincidences. So the `8 / 128` split read out of `0x163120` is the format's
+own structure, and the `cmpiw #8` is testing a real boundary.
+
+### It accounts for a detail recorded here without explanation
+
+This document noted that `0x162FF2` builds `(entry[0] << 8) + entry[2]` and
+that **bytes 1 and 3 are untouched** — correctly, and with no account of why.
+
+**The EPS stores 16-bit quantities zero-padded to 32 bits**, the same encoding
+its instrument names use (16-bit characters with zero high bytes). The
+firmware is not skipping bytes; it is reading the format as written. That is a
+fact only the disc could supply, and it converts an unexplained observation
+into a confirmation.
+
+### What stays `[S]`
+
+The **128 is confirmed as a capacity, not as a wavesample count.** `eosed`
+went looking for a wavesample bound in the EOS ROM, found `#128` three times,
+**checked what each one bounded before sending it**, and found a 128-word
+lookup table instead — right number, wrong object. So *"8 layers + 128
+wavesamples"* has its first half at `[C]` three ways and its second half as a
+structural inference: EOS treats an EPS instrument as two byte-indexed object
+kinds with strides 224 and 288, which is the shape the `(index, type 1 or 2)`
+emission takes.
+
+*Worth noting what `eosed` did there is the answer-set discipline applied
+before publication rather than after* — the number matched, and they checked
+the object anyway.
+
+---
+
+## Two leads from `~/temp/KIMIK3_FIRMWARE_RE.md`, verified
+
+*Both checked in the image rather than absorbed. One is richer than stated;
+one needs a correction.*
+
+### The 87-bound is the OUTER half of a nested loop — and it builds keymap entries
+
+KIMIK3 flagged `cmpiw #87,%sp@(526)` at `0x1645B6` as "a second key bound,
+one iteration fewer", unread. **It is not a variant of the 88-key fill.** It
+is the outer bound of a nested pair:
+
+```
+0x1645AA:  addqw #1,%a3@
+0x1645AC:  cmpiw #127,%a3@
+0x1645B0:  bles 0x16453E          ; INNER: a3@ = 0..127   -> 128 iterations
+0x1645B2:  addqw #1,%sp@(526)
+0x1645B6:  cmpiw #87,%sp@(526)
+0x1645BC:  bltw 0x16436E          ; OUTER: sp@(526) = 0..86 -> 87 iterations
+```
+
+**And the inner body writes at a 6-byte stride.** At `0x16459C`:
+`d0 = d7; d0 += d0; d0 += d7; d0 += d0` = **`6·d7`**, then
+`moveb %sp@(503),%a4@(0,%d0:l)` and `moveb %sp@(502),%a4@(1,%d0:l)`.
+
+**128 entries × 6 bytes = 768**, and a `method 0x17` keymap is
+`28 + 128×6 = 796`. So this loop is **building the keymap entry array**, not
+filling keys — which is why its bound is 87 rather than 88 and why the same
+stack slot carries a different meaning here. Anyone matching the 88-key fill
+should know this loop exists *and* that it is a different operation.
+
+*This is exactly the trap the `9 + zone_counter` retraction was about,*
+avoided this time because the bound was read in context rather than collected
+by grep.
+
+### The AKAI vtable — verified, with one correction
+
+Verified: `0x122200: moveal %a5@(4740),%a0` / `0x122204: jsr %a0@` is an
+indirect call, and the slot is installed with **two variants** —
+`0x17562E` at six sites (`0x11266A`, `0x1126F2`, `0x1129A4`, `0x112C5C`,
+`0x1155FA`, `0x1156CC`) and `0x185F04` at two (`0x115758`, `0x1157B2`) —
+the same two-variant installer pattern as the sample-transfer slot. A second
+indirect site exists at `0x1213FA`.
+
+**The correction: `0x17562E` is the open-by-name routine**, not a loader or a
+builder. It is what `0x16BC2A` calls to open `"ROLAND.S"`, and what the
+Ensoniq builder calls at `0x163880`. So `a5@(4740)` is the **generic
+file-open slot**, media-variant selected — not an entry point to an AKAI
+converter.
+
+So the accurate form is narrower than *"the AKAI builder is reached through
+the generic loader, and the vtable slot is the entry"*: **the format-0/5 path
+opens its files through a vtable slot, and the code after the open is also
+indirect** (`jsr %a0@` again at `0x122290` and `0x1222D6`). Where the AKAI
+*conversion* happens is still unlocated.
+
+**KIMIK3's method point stands and is the valuable part**, independent of
+which slot is which:
+
+> *"A dispatch lives in the caller" has a second half: for AKAI the dispatch
+> is a function pointer in the master frame, so no `jsr`-reference search can
+> find it either.*
+
+That is correct and it matters. The Roland and Ensoniq builders were both
+found by exactly the call-graph method that cannot work here — `0x16BBEA` and
+`0x16368A` each have one direct `jsr`. **A method that found two of three
+arms will report the third as absent**, which is the same shape as §3.4's
+region-scoped search, one level up.
+
+---
+
+## The 796 / 816-820-824 discrepancy is the DUMP-versus-file frame
+
+*`mpc2emu` qualified "a `method 0x17` keymap is `28 + 768 = 796`": across 2709
+keymap objects in 333 `.KRZ` files, real objects measure **816, 820 or 824**,
+and **nothing in a real file is 796 bytes.** Their reason for raising a
+28-versus-48 difference they would not normally chase is exact: 796 is the
+kind of number that ends up in a `grep`, finds nothing, and gets read as the
+reading being wrong.*
+
+**Both numbers are right, in different frames — and this document already
+carries the conversion.**
+
+The 796 is measured, not computed: the SysEx dumps of the Roland-imported
+keymaps from banks 200–800 are **796, 668, 412 and 156 bytes**, and the
+full-size ones are exactly 796.
+
+```
+SysEx DUMP payload   796   = 28 header + 128 x 6
+.KRZ file object     816 / 820 / 824   = 768 + 48 / 52 / 56
+```
+
+> ### WITHDRAWN — the reconciliation below was wrong, and this document
+> ### contained its refutation
+>
+> This section claimed the two sizes reconcile through §2's
+> `DUMP offset = file offset + 24`, giving `file = dump + 24 = 820`, the
+> middle of the three-way split. **`mpc2emu` declined to bank it and was
+> right.**
+>
+> Their argument was directional: if fields sit 24 bytes *later* in the dump,
+> the dump carries a prefix the file lacks, so the **dump** should be the
+> larger object — the opposite of what the reconciliation needs.
+>
+> **§1's own table settles it against me:**
+>
+> ```
+> 1-layer program     DUMP 272 bytes      file 250 bytes
+> ```
+>
+> **The DUMP object is 22 bytes LARGER than the file object.** For keymaps,
+> `mpc2emu` measures the file object larger — 816/820/824 against a 796-byte
+> dump. **The two relations run in opposite directions**, so whatever links
+> 796 and 820, *it is not the §2 constant.*
+>
+> And the `+24` is not even the size difference in the case §2 documents: the
+> offsets shift by 24 while the sizes differ by 22.
+>
+> **This is the false-reconciliation shape, mine, for the second time in one
+> evening.** Five hours ago I invented a definitional story that made two
+> `+20` counts agree and it was fabricated. This one is arithmetically exact —
+> `796 + 24 = 820` — which makes it *more* attractive and no better founded.
+> "The same 24 that appears elsewhere" is a claim about **identity**, not
+> arithmetic.
+>
+> **What stands:** the measurements. Dumps are 796/668/412/156; file objects
+> are 816/820/824. **What is withdrawn:** any account of why. Recorded as
+> open rather than resolved.
+
+*What the exchange did produce, and it is the durable part:* `mpc2emu` raised
+the discrepancy not by finding an error but by **asking what a future reader's
+grep for `796` would return** — nothing, read as the analysis being wrong.
+That is the only prospective entry in this project's failure catalogue:
+everything else was found after a claim had travelled. **Simulate the reader,
+not the claim.**
+
+**For anyone matching sizes:** use **796** against a SysEx dump and
+**816/820/824** against a `.KRZ` file, and expect `28 + 128×6` to describe
+only the former.
+
+---
+
+## O6's new search axis: the device-type byte
+
+*The only lead on the AKAI importer that survives the format-5 retraction.*
+
+The AKAI path is selected by a **byte at `+5` of a device descriptor**, not by
+the disc format code:
+
+```
+values seen        0, 1, 4
+value 1            -> AKAI partition handling (0x12A6D6)
+dispatch sites     0x1287F4 (cmpib #1) / 0x1288C4 (cmpib #4)
+                   0x129938 (three-way: 1, 4, 0)
+written at         0x128D36   moveb %sp@(47),%a0@(5)   -- a caller argument
+                   0x15F9BC   moveb %sp@(7),%a0@(5)
+also read at       0x15F8BE
+```
+
+`0x128D36` sits in a descriptor constructor — `a0@(0) = *a2`, `a0@(2) =
+sp@(44)`, `a0@(5) = sp@(47)`, `a0@(4) = sp@(49)` — so the value arrives from
+**that function's caller**, which is the next step and is not taken here.
+
+**Why this axis is worth more than an address:** it is a *different question*
+from the one that failed. Every previous search asked *"where is the format
+code tested"*; this asks *"what does the medium dispatch switch on"*, and the
+AKAI arm is on the second. The `ak_*` filesystem driver at
+`0x177572`–`0x1779E0` is the other anchor, and the two should meet — a driver
+handling AKAI media is presumably installed *because* this byte reads 1.
+
+### The chain traced, and where it stops
+
+```
+a5@(0x15A0)  word, source NOT FOUND
+   non-zero  ->  moveb #1,%a5@(5634)   at 0x1284CA      <- the AKAI value
+   zero      ->  clrb   %a5@(5634)     at 0x1284B0
+                 (gate: tstw %a5@(0x1E,%d0:w), d0 = 0x1582, at 0x1284AA)
+
+a5@(0x1602)  = 5634, the device type
+   read at 0x121C3A (d3 = 0x1602) and pushed to the descriptor constructor
+   -- note the FORMAT CODE is pushed separately in the same call,
+      d5 = 0x14AA at 0x121C26, so the two are independent arguments
+
+   stored as byte +5 at 0x128D36  (moveb %sp@(47),%a0@(5))
+   dispatched at 0x129938:  1 -> AKAI partition (0x12A6D6)
+                            4 -> 0x12995C
+                            0 -> 0x129968
+```
+
+**`a5@(0x15A0)` is also compared against 280** at `0x125114` and `0x1284FC`.
+
+**What sets it is NOT known, and one near-miss is worth recording.** The write
+at `0x1247B0` — `movew %d7,%a5@(1E,%d0:w)` — *looks* like the answer and is
+not: `d0` there is **`0x14C4`** (set at `0x1247AC`), so it writes `a5@(0x14E2)`,
+a different variable. **The `(1e,%d0:w)` text is identical at both sites while
+the base register differs**, so grepping the disassembly string collects
+unrelated variables into one bucket. Caught only by reading `d0` at each site.
+
+*That is the pattern-matching trap for the third time today* — after the
+decimal/hex displacement and the `[0-9]+` regex that could not match `2c`.
+Each time a textual pattern stood in for a semantic one and returned a clean,
+wrong set.
+
+**Still not known:** what writes `a5@(0x15A0)`, and what device types 0 and 4
+are.
+
+---
+
+# The AKAI import, read back from the machine (2026-09-21, ~23:30)
+
+*Jan imported `SOPRANO SAX2` from an AKAI S3000 CD (ZuluSCSI `CD5-`) at the
+panel; this session did the SysEx read-back only. Raw at
+`~/temp/akai_sopranosax2_readback.json`. Ground truth and pre-registered
+predictions: `~/temp/O6_SOPRANOSAX2_PREDICTION.md`.*
+
+**The AKAI arm reached hardware for the first time.** All six programs, six
+keymaps and 19 samples imported to bank 200, names intact.
+
+## Truncation CONFIRMED on device output
+
+**`samplePeriod = 22675` on all 19 samples.** `1e9 / 44100 = 22675.7369`, so
+**rounding gives 22676 and truncation gives 22675 — the device wrote the
+truncated value.**
+
+This closes a question the instruction stream had answered alone. This
+morning's Roland imports could not test it: every one was rate code 0, one of
+the three rates where round and truncate agree. These are **rate code 1**,
+which discriminates. `0x18352C` being a restoring division with the remainder
+discarded is now confirmed by what the machine emitted.
+
+## `flags` — the inverted `0x80` confirmed by contrast
+
+```
+Roland kit imports   flags 0xB0    bit 0x80 SET    -> one-shot
+AKAI sax imports     flags 0x30    bit 0x80 CLEAR  -> looped
+```
+
+Same field, two imports, differing in exactly that bit, and matching the
+material both times — Roland percussion is one-shot, the AKAI sax multisample
+is looped. **Confirmed by contrast rather than by assertion**, which is
+stronger than either import alone.
+
+All 19 carry real loop positions (`loopStart − sampleStart` 7425…11107,
+`sampleEnd − loopStart` 35…294), so **the importer preserves AKAI loops.**
+
+## Root note comes from the AKAI header, not the name
+
+`SOP.SAX D 5` (id 218) reads **root 87** (`D#6`). Its *name* says `D 5` (86).
+The pre-registered prediction was 87 and it holds: **the K2000 reads the AKAI
+sample header.** A name-derived importer would have written 86, and every
+other zone's tuning would then have had to be re-read.
+
+## The keymap is truncated, exactly as the Roland ones were
+
+```
+KEYMAP 200: method 0x17  entriesPerVel=127  entrySize=6  bytes=412  readable=64
+14 distinct zones across 64 entries, covering keys 12..75
+```
+
+`412 = 28 + 64 × 6`. The header declares 127 entries (796 bytes); the object
+is 412 and `DIRBANK` agrees, so this is the object size and not a short read.
+**Samples 213–218 (`F 4`…`D 5`, roots 77–87) exist as objects but lie beyond
+the keymap's extent.**
+
+**Not concluded: that the top six zones were dropped.** Either the import
+truncated, or a full keymap is stored in a form a flat 6-byte walk does not
+reach past 412 bytes. `mpc2emu`'s corpus holds 2709 keymaps at exactly 128
+entries — *if none is 412 bytes, the first reading is decided.*
+
+## Fine tune enters `maxPitch` negated — a pattern, not a law
+
+With `1200·log2(48000/44100) = 147`:
+
+```
+id 214  SOP.SAX G#4   maxPitch-100root 215   -147 = +68   (ground truth -68)
+id 218  SOP.SAX D 5                    121   -147 = -26   (ground truth +28)
+```
+
+**Id 214 fits exactly under a sign inversion; id 218 is 2 cents off it.**
+Recorded as an observed pattern for `mpc2emu` to check against their own
+ground truth, *not* as a decoded field.
+
+## The AKAI program import writes ONE byte
+
+*Read Program 199 first, before touching anything imported — `mpc2emu`'s
+instruction, and the reason the rest of this is readable. It is a free
+negative control over the whole parameter set and worthless after the imports
+are examined.*
+
+```
+199 vs 200 .. 199 vs 205 :  1 byte differs, offset 189
+200 vs 201 .. 200 vs 205 :  1 byte differs, offset 189, values 200..205
+```
+
+**Offset 189 is `CAL[12]`** — layer 0 at DUMP 48, the `0x40` segment spanning
+176–207, so `189 − 177 = 12` — the low byte of the **keymap id**
+(`CAL[11:13]`).
+
+> **Every imported program is Program 199 verbatim with the keymap pointer
+> patched.** Not "the filter values disagree with the source" — byte-identical
+> to the template.
+
+### P6 — no filter data survives
+
+```
+              199    200..205
+HOB0[0]        62      62      filter type NONE
+HOB0[1]         0       0      cutoff
+HOB0[5]         0       0      Src1 source
+HOB0[6]         0       0      Src1 depth
+HOB1[0]        16      16      RES
+HOB1[1]         0       0      resonance
+CAL[29]         1       1      algorithm
+```
+
+The AKAI side carries filter 81 / 91 / 52 across the three program variants.
+All arrive as Program 199's `NONE`. **There is no AKAI cutoff curve to
+recover — the importer carries none of it.**
+
+### P7 — ENV2 is not routed
+
+`HOB0[5] = 0` on all six including the two whose AKAI sources have a filter
+envelope. The registered discriminator was *121 on the SLO DRK pair only, or
+121 on all six for unconditional routing*. **It is 0 on all six.**
+
+### P8 — the negative control, in its strongest form
+
+`SOPRANO SAX2` and `SOP SAX2 DLA` differ **only** in the keymap id. The 13
+bytes that differ on the AKAI side reach nothing.
+
+### The second keymap slot is empty
+
+`CAL[7:9] = 0` on all six, and every program is **274 bytes = one layer**. So
+samples 213–218 are not in another keymap or another layer: **the top six
+zones are genuinely outside the imported keymap's extent.**
+
+*And the corpus test this project proposed would have pointed the wrong way.*
+412 bytes is the single most common keymap size in `mpc2emu`'s corpus — but at
+`entrySize 3` (`28 + 128×3 = 412`), an **exact numeric coincidence** with
+`28 + 64×6`. Size alone cannot separate the readings. **The key ranges did:**
+`36..56` matches AKAI keygroup 0 exactly, where a 2:1 stride error would have
+rendered it `24..34`.
+
+### The fine-tune "sign inversion" was my rounding
+
+`1200·log2(48000/44100)` is **146.7069**, not 147. With the real constant,
+`maxPitch = round(100·root + 1200·log2(48000/rate) − fine_tune)` is **exact on
+all three probed samples**.
+
+**And there is no inversion to explain.** `maxPitch` is the pitch at which the
+sample, transposed *up*, hits the 48 kHz ceiling — so a sample carrying a −68
+cent correction can be transposed 68 cents *higher* first. The minus is forced
+by what the field means. **I took an artefact of my own rounded constant for a
+structural fact about the format.**
+
+## The keymap truncation has a mechanism
+
+*`mpc2emu`'s, from a clipped zone this session reported without noticing was
+clipped: `75..75 sample 212` where the AKAI keygroup is keys `75..76`. A zone
+cut mid-range at the object's last entry is not what "the importer skipped the
+top zones" looks like — it is what running out of table looks like.*
+
+```
+AKAI program spans keys 36..96       -> 61 keys
+61 entries x 6 bytes                 -> 366 bytes needed
+object entry area = 412 - 28         -> 384 bytes (the next allocation up)
+384 / 6                              -> 64 entries
+entries written at index key - 12    -> the program needs indices 24..84
+indices 0..63 exist                  -> keys 12..75 present, 76..96 GONE
+```
+
+**The allocation is sized from the key SPAN; the entries are written from the
+keymap BASE.** 61 entries were allocated and 85 index slots were needed,
+because the lowest key is 36 and the table starts at 12. **The program loses
+exactly `lo_key − 12 = 24` entries off the top** — here six and a half
+keygroups of nineteen, 34 % of the instrument, silently.
+
+### The eight level words: one table, so the reading is finished
+
+The last alternative was that 384 bytes might be divided among several tables.
+Resolved from keymap 200:
+
+```
+Level[j] = 16, 14, 12, 10, 8, 6, 4, 2   at body +12, +14 ... +26
+table_addr[j] = body + 12 + 2j + Level[j]  ->  body+28 for all eight
+```
+
+The ladder cancels the `+2j` exactly. **All eight velocity levels point at one
+table of 64 entries.**
+
+### maxPitch: 17 of 19 exact, two off by +2
+
+`mpc2emu` supplied predictions for all 19 from
+`round(100·root + 146.7069 − fine)`. Diffed against the device:
+
+```
+205  SOP.SAX F 3   predicted 6663   observed 6665   +2
+218  SOP.SAX D 5   predicted 8819   observed 8821   +2
+   the other 17                                    EXACT
+```
+
+**Both misses are the same sign and magnitude**, consistent with those two
+samples carrying fine tunes of −18 and +26 rather than −16 and +28. Whether
+that is a ground-truth transcription or something the importer does is not
+determined here.
+
+> **`D 5` had been recorded as one of three exact confirmations.** The
+> arithmetic behind that was `8700 + 121 = 8819`; it is 8821. The observation
+> never changed. **17 of 19 with two live exceptions is a stronger result than
+> 19 of 19 reached by adjusting two fine tunes to fit**, so the two are left
+> standing.
+
+## The AKAI arm needs no rule suspension
+
+`mpc2emu` flagged a conflict to raise with Jan: this project's standing rule is
+*matching the device is the definition of correct for anything it cannot check
+by ear*, and on this arm matching the device means discarding the filter, the
+envelopes, the LFO and the velocity handling their converter already carries.
+
+**There is no conflict.** `FIRMWARE_IMPORT_ROUTINES.md` scopes the rule in its
+own opening section:
+
+> *"There is no Ensoniq EPS/ASR and no Roland S-7xx here. So for those two
+> formats the second job is the only one on the table... **For AKAI the first
+> job applies and this project deliberately keeps its own hardware-measured
+> laws where they compete with the firmware's tables.**"*
+
+The rule is *match the device where the source instrument is absent*. For AKAI
+it is not absent — an **S3000XL is on the bench**, which is why the carve-out
+was written on the day the document was.
+
+**And the one-byte finding is the strongest confirmation the rule has ever
+had.** "Convert better than the firmware where you can measure the source" was
+argued in the abstract this morning. Tonight the firmware turns out to discard
+everything and write a single byte. A converter matching *that* would be
+worthless — and the document already knew why it must not.
+
+*Writing an explicit suspension would be the harmful move:* it reads as **the
+rule was inconvenient here**, and weakens it on the two arms where it really
+is the specification. The narrower and truer statement is that **the K2000's
+AKAI import sets one byte, so on this arm there is no device behaviour worth
+matching**, and the existing carve-out governs.
+
+## Two more imports: the span mechanism refuted, the base half confirmed
+
+*Jan imported `ACCORDION 1` to 300ff and `CYMBALS 4` to 400ff. `mpc2emu`
+pre-registered both outcomes with a four-way fork table. Raw at
+`~/temp/akai_accordion_cymbals_readback.json`.*
+
+```
+                predicted              observed
+ACCORDION 1     668 B, nothing lost    540 B, top keygroup CLIPPED 90..96 (truth 90..115)
+CYMBAL MAP 4    156 B, all seven lost  668 B, ALL SEVEN INTACT
+```
+
+**Both wrong, in opposite directions** — an outcome the fork table did not
+list. CYMBALS has the **smallest** key span (14) and received the **largest**
+allocation.
+
+### The allocation does not track the key span
+
+```
+volume          samples   object   area        blocks   entries
+SOPRANO SAX2      19       412      384      3 x 128       64
+ACCORDION 1       13       540      512      4 x 128       85
+CYMBAL MAP 4       7       668      640      5 x 128      106
+```
+
+Area is `k × 128`, and **`k` rises as the sample count falls — one block per
+six samples**, fitting all three points with no residual. Keygroup counts are
+19 / 7 / 7 and spans are 61 / 92 / 14, so neither is the variable.
+
+**Recorded as a three-point fit, not a mechanism.** Three collinear points
+admit many curves. What is solid is the negative: **the allocation is not
+sized from the key span.**
+
+> ### And the sample-count fit is refuted too — by data already in hand
+>
+> `mpc2emu` pointed out that **load order is collinear with sample count**
+> across those three points: loads 1, 2, 3 gave 3, 4, 5 blocks while sample
+> counts fell 19, 13, 7. Two hypotheses, one data set, neither supported over
+> the other — and this project proposed the sample-count one without asking
+> what else moved monotonically.
+>
+> **Both are dead, and the refutation was already on disk.** Each import
+> produced **eight** keymaps, not one:
+>
+> ```
+> BANK 3 (one import, 13 samples in the bank)
+>   540  540  540  796  668  668  668  668
+> BANK 4 (one import, 7 samples in the bank)
+>   668  412  412  412  412  412  412  412
+> ```
+>
+> **Load order cannot produce a non-monotonic sequence inside a single
+> import** — 540, 540, 540, **796**, 668 jumps up and comes back down. And
+> **all eight bank-3 keymaps were built from the same 13 samples** and got
+> three different sizes, so the bank's sample count is not the variable
+> either.
+>
+> **The variable is per-program, and none of the obvious candidates
+> survives:**
+>
+> * not keygroup count — `ACCORDION 1` and `CYMBAL MAP 4` both have 7 and got
+>   540 and 668;
+> * not span — `CYMBAL MAP 4` spans 14 keys and got more than `ACCORDION 1`'s
+>   92;
+> * not lowest key — `SOPRANO SAX2` and `CYMBAL MAP 4` both start at 36 and
+>   got 64 and 106 entries;
+> * not per-program sample count monotonically — 1 sample gives 64 entries,
+>   7 gives 106, 19 gives 64.
+>
+> **`DBL.REED ACC -2` received the full 796.** So full allocations do occur,
+> and truncation is not a property of the importer as such.
+>
+> **No replacement hypothesis is offered.** One was offered an hour ago from
+> three collinear points and lasted until eight more were looked at. The state
+> is: **16 measured allocations, three hypotheses refuted, no candidate.**
+>
+> *The proposed decisive re-import is unnecessary* — it would have tested a
+> hypothesis already dead, and the data to kill it was collected before the
+> hypothesis existed.
+
+### The "entries from base" half survives
+
+Both new keymaps write from key 12, and every zone lands exactly on ground
+truth — `24..56, 57..61, 62..67, 68..75, 76..81, 82..89` on ACCORDION, all
+seven of `36..37 … 48..49` on CYMBALS. **Truncation is real** (ACCORDION's
+seventh keygroup clipped at 96 against a true 115) but follows from the
+allocation, not the span.
+
+### The one-byte law generalises — and is a two-byte field
+
+```
+Program 300 vs 199:  offsets 188,189 -> CAL[11]=1, CAL[12]=44   -> 300
+Program 400 vs 199:  offsets 188,189 -> CAL[11]=1, CAL[12]=144  -> 400
+```
+
+The bank-200 programs differed in **one** byte only because their ids are
+below 256 and the high byte matched 199's zero. **The law is Program 199
+verbatim with the 16-bit keymap id at `CAL[11:13]`.** Confirmed across three
+volumes, 7 and 19 keygroups, melodic and drum — and a drum map is where an
+importer would most plausibly write more. It does not.
+
+### A methodological warning worth more than the result
+
+**A 900-byte request returned 796 bytes for both objects, while `DIRBANK`
+reports 540 and 668.** Reading past an object returns padding to the
+*declared* extent, and it is indistinguishable from a full 128-entry keymap.
+
+Trusting the read length instead of the `DIRBANK` size would have produced
+"both keymaps are complete, there is no truncation". **The original 412-byte
+read was correct only because the request happened to equal the object size.**
+
+> **Size every object read from `DIRBANK`, never from a generous request.**
+
+That is `mpc2emu`'s `_decode_table` over-read arriving from the wire instead
+of from a header — the same failure, a different carrier.
+
+## The complete AKAI program law, and a correction refuted
+
+*`mpc2emu` reported that `CAL[7:9]` **is** populated on the `DBL.REED`
+programs, correcting this project's "the second keymap slot is empty". Since
+that overturned an assertion made here, it was verified rather than accepted —
+all six bank-3 programs read.*
+
+```
+prog  bytes  layers  CAL[7:9]  CAL[11:13]
+ 300    272     1        0        300
+ 301    272     1        0        301
+ 302    496     2        0        302
+ 303    496     2        0        304
+ 304    272     1        0        306
+ 305    272     1        0        307
+```
+
+**`CAL[7:9] = 0` on all six.** The correction is refuted: the second keymap
+slot is unused on this arm.
+
+**The `-1`/`-2` keymap pairs are two LAYERS.** Programs 302 and 303 are
+`496 = 48 + 224 × 2`, each layer carrying its own `CAL[11:13]` — 302's layers
+point at keymaps 302 and 303, 303's at 304 and 305. Their zone reading was
+right (14 zones over 7 keygroups); the importer expresses it as **a second
+layer**, not a second slot.
+
+### The law, complete
+
+```
+1-layer programs  differ from Program 199 at  [188, 189]
+2-layer programs  differ from Program 199 at  [2, 188, 189, 272]
+
+   188,189  layer 1's keymap id
+   2        the layer count
+   272      the start of the appended second layer
+
+program 302 layer 1 vs layer 2       1 byte differs
+program 302 layer 2 vs 199 layer 1   2 bytes differ, at layer offsets 140,141
+```
+
+**Layer 2 is Program 199's layer 1 with its own keymap id written.**
+
+> **Clone Program 199, set the layer count, append a copy of Program 199's
+> layer 1 per extra layer, and write each layer's 16-bit keymap id at
+> `CAL[11:13]`. Nothing else.**
+
+**This is exactly the template mechanism §2 read out of the ROM** —
+`memcpy(new_body, program199_body, 0x110)`, then per extra layer grow by
+`0xE0` and `memcpy(new_body + 48 + 224·k, program199_body + 48, 224)`.
+**Confirmed on device output, byte for byte.**
+
+### Allocation: the content class is closed
+
+`mpc2emu` parsed both volumes' programs and found two structurally identical
+cases:
+
+```
+program        kgs  lo   hi  span  zones  samples   allocated
+ACCORDION 1A    8   21  115   95     8       8         540
+DBL.REED #3     8   24  115   92     8       8         668
+```
+
+**Same keygroup count, zone count, sample count and top key; 128 bytes apart
+inside one import — and the wider span got less table.** That closes
+content-based allocation as a *class*, not one more member. Their seven
+CYMBALS singles make the same point: each needs entries to index 115, each got
+64.
+
+**No allocator is named.** *"Whatever free block the heap handed it"* fits
+everything and predicts nothing.
+
+### The consequence for anyone comparing against a device import
+
+> **A bank saved from a K2000 AKAI import is not a trustworthy reference.**
+> The loss is not predictable from the source and varies between structurally
+> identical programs in the same run. Check the zone count before reading
+> anything into a difference, and treat the device side as the lossy one.

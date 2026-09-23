@@ -49,7 +49,47 @@ return "not mine" — and then scores a signature, differently per medium:
 `FF "CDRM001ID"` at offset 30, so all three SCSI tests hit — `0xFF` at 30,
 `I` at 38, `D` at 39.
 
-**Format 5 is the AKAI path** — identified 2026-09-21. It takes a drive
+> ## RETRACTED — "format 5 is the AKAI path" was never verified
+>
+> **The AKAI partition code is not gated on the format code at all.**
+> `0x12A6D6`, the function holding the partition-letter decode and the
+> *"Akai partition not found."* string, has one caller — `0x129952` — and
+> it is selected by a **medium/device type byte**, not by `a5@(0x14AA)`:
+>
+> ```
+> 0x129938:  moveb %a0@(5),%d0        ; a4@(5) -- NOT the format code
+> 0x12993C:  cmpib #1,%d0
+> 0x129940:  beqs 0x129950  ->  bsrw 0x12A6D6      (AKAI partition)
+> 0x129942:  cmpib #4,%d0   ->  0x12995C
+> 0x129948:  tstb  %d0      ->  0x129968
+> ```
+>
+> There is **no `%a5@(5290)` test anywhere in `0x129xxx` or in
+> `0x12A600`–`0x12A7xx`.** The claim rested on nothing but the AKAI strings
+> and the format-5 tests both living in the `0x12Axxx` region.
+>
+> **That is a region argument** — the exact failure this project filed a
+> standing check against hours earlier (*"an anchor that is a region is not an
+> anchor"*), committed again in the same session, **by the session that wrote
+> the rule.**
+>
+> **And it propagated.** The label went to `mpc2emu` in a dispatch table, was
+> passed on unchecked, and an external analysis then traced the `0x1221C8`
+> branch faithfully and inherited the mislabel — building an "AKAI" account of
+> code that sniffs `PRAM`/`SRAM`/`SROM`, **Kurzweil's own magics**, as inline
+> `cmpil` immediates at `0x1223AC`/`0x1223B6`/`0x1223C0`. Every `.KRZ` file
+> begins with `PRAM`; no AKAI file begins with any of the three.
+>
+> **What format 5 actually is: unidentified.** The evidence now points at
+> native or DOS media — the `0x1221C8` branch leads to the Kurzweil magic
+> sniff, and `0x168B98`, the single converter-region format-5 test, gates
+> directory listing that filters on `'.'` (dot extensions). Neither is AKAI.
+>
+> **The only hard AKAI anchor in the ROM remains the `ak_*` filesystem
+> driver**, `0x177572`–`0x1779E0`, 23 named functions. Where AKAI *conversion*
+> happens is open, and may not hang off a format code at all.
+
+~~**Format 5 is the AKAI path** — identified 2026-09-21.~~ It takes a drive
 number, probes the device (`0x1866F0`) and never looks at a sector, which is
 why it looked like a device probe rather than a signature test: **an AKAI
 S1000/S3000 hard disk is selected by partition letter, not by a magic
@@ -71,6 +111,51 @@ writes only `0`, `1`, `3`, `4` and `5` into the format code — `movew #1` at
 `#4` at `0x11CB4C`, `#5` at `0x11CB98`, `clrw` elsewhere. **Nothing anywhere
 writes 2**, although two sites test for it. Format 2 remains unassigned by
 this path.
+
+### The firmware names its own drivers, and the Roland chain is closed
+
+The filesystem layer carries its function names as strings, used by the error
+reporter (`pea <name>` / `jsr 0x16EC42`, the same routine that prints
+*"Akai partition not found."*). The `pea` sites cluster by driver:
+
+```
+AKAI   23 sites   0x177572 .. 0x1779E0    ak_firstblock, ak_init_inode,
+                                          ak_ino2dos, ak_read_obj, ...
+EPS    19 sites   0x178382 .. 0x178952    eps_firstblock, eps_init_inode,
+                                          eps_ino2dos, eps_read_obj, ...
+DOS     1 site    0x174512                pc_free_all
+S770    -                                 s770_dskinit exists at 0x1918BD
+                                          but is never pea'd
+```
+
+**These are the filesystem drivers, not the program builders** — inode, block
+and directory operations. The AKAI *builder* remains untraced, past
+`0x1221C8`.
+
+**And the Roland chain is now closed end to end.** The format dispatch at
+`0x12210E`…`0x1221C8` (on `a5@(0x14AA)`, the format code) sends format 4 to
+`0x16BBEA`, and `0x16BBEA` immediately does:
+
+```
+0x16BC24:  pea 0x190CDF          ; "ROLAND.S"
+0x16BC2A:  jsr 0x17562E          ; the open-by-name
+```
+
+— the pseudo-file this document identifies in §3 as how the K2000 asks for the
+raw Roland volume. So **format 4 → `0x16BBEA` → `ROLAND.S` → the
+`0x169`–`0x16B` module** traced throughout.
+
+*Why this check was run:* `mpc2emu`, having just caught this project
+mis-attributing an entire importer, flagged that the progress string
+*"Loading sample %s, %ldK bytes saved"* occurs **three times** — once per
+importer — and asked whether the Roland loader had been anchored on it. **It
+had not**; that string appears nowhere in these documents. But the underlying
+question was the right one to ask after the Ensoniq mix-up, and the answer is
+that the Roland work is anchored three independent ways: **disc bytes** (area
+bases on five disc families, loop invariant on 20018 records), **device
+output** (`maxPitch` and `samplePeriod` from a real K2000 import), and now
+**the dispatch** reaching `ROLAND.S`. None of the three is a region
+assumption.
 
 ### The AKAI dispatch is by file type, not by disc format
 

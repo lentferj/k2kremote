@@ -8211,6 +8211,18 @@ forms         IMPLEMENTATION. Both can only agree or not; neither can
 a constant -> borrowed from a format document: check WHOSE OUTPUT that
               document describes. It was correct where written and had
               no reason to say it did not cover your case
+an anchor ->  a REGION is not an anchor. Tie a claim to bytes, device
+              output or a dispatch -- "it is in this address range" is
+              an assumption wearing the clothes of evidence
+an offset ->  constant is not a SIZE constant. Offsets and sizes are
+constant      different quantities; establishing one establishes nothing
+              about the other
+an exact  ->  hit on ONE member of a set, with the rest unaccounted
+hit           for, is one datum dressed as a confirmation. Ask what the
+              explanation says about the members it did not hit
+a failed  ->  before concluding it, check the variable you searched on
+search        is the one the code BRANCHES on. Checkable before the
+              search, not after
 ```
 
 **Five of these are worth more than the rest, and they are the five that
@@ -9044,6 +9056,134 @@ varies bit 6 (`needsLoad`), which a writer never does, having no reason to
 emit a sample that is already resident. **A two-state field in a writer's
 document was a three-or-more-state field in the machine**, and nothing but
 device output could have shown it.
+
+### An anchor that is a region is not an anchor (2026-09-21)
+
+The diagnosis of the day's largest error, and it is actionable where "we were
+careless" would not be.
+
+This project attributed an entire importer to the wrong format — `0x16368A`
+was documented all day as the AKAI program builder and is the **Ensoniq** one.
+A whole body of correct tracing hung off it: a 92-byte staging record, an
+88-key table, an 8-zone loop, a 644-byte disc read, a 136 × 4 scan.
+
+**The Roland work, traced in the same session by the same methods, was
+unaffected.** The difference is what each claim was tied to:
+
+```
+AKAI attribution   "0x16368A is in the AKAI part of the ROM"
+                   -> a REGION. Nothing outside the code says so.
+
+Roland claims      area bases matching five disc families
+                   maxPitch and samplePeriod matching device output
+                   the format-4 dispatch reaching "ROLAND.S"
+                   -> three anchors, none of them a region
+```
+
+> **A region is not an anchor.** "It is in this address range" is an
+> assumption wearing the clothes of evidence: it feels like a located fact and
+> it is a partition someone drew.
+
+The test is whether anything **outside the code** would change if the claim
+were false. Disc bytes would. Device output would. A dispatch to a named file
+would. A range would not — it stays exactly as true whichever format the code
+serves, which is why it can be wrong for a whole day without friction.
+
+*And it explains the asymmetry that made the error survive:* every Roland
+finding had been checked against something external because the disc was
+available and checking was easy. The AKAI arm had no disc, so there was
+nothing external to check against — **and the absence of a possible check was
+never recorded as a weakness in the claim.** Where a claim cannot be anchored,
+say so at the claim.
+
+### The selecting variable was never the one being searched on (2026-09-21)
+
+`mpc2emu`'s, and it **subsumes** the two earlier search failures rather than
+joining them.
+
+Hunting the K2000's AKAI importer produced three successive conclusions, each
+correct about its own method and each wrong:
+
+```
+1  "no Ensoniq converter exists"   -> searched the CALLEE region for a
+                                      dispatch that lives in the CALLER
+2  "the AKAI builder is past
+    0x1221C8"                      -> the call is INDIRECT, so no
+                                      jsr-reference search finds it
+3  both of the above               -> THE AKAI PATH IS NOT SELECTED BY THE
+                                      FORMAT CODE AT ALL
+```
+
+The third controls. `0x12A6D6` — partition-letter decode, *"Akai partition not
+found."* — has one caller and is gated on a **device/medium type byte**:
+
+```
+0x129938:  moveb %a0@(5),%d0      ; NOT a5@(0x14AA)
+0x12993C:  cmpib #1,%d0  ->  AKAI partition
+```
+
+**No amount of searching on the format code could ever have worked**, however
+the search was scoped and whatever call form it followed. Fixing the scope
+(failure 1) or following indirect calls (failure 2) would both still have
+returned nothing — **and each fix would have made the negative look better
+founded.**
+
+> **Before concluding that a search failed, check that the variable you
+> searched on is the one the code branches on.**
+
+*Why it is the one to reach for:* it is **checkable before the search** rather
+than diagnosed after. The other two are only visible once a negative has gone
+wrong; this one is a question you can ask while writing the query — *what does
+the code actually switch on?* — and it costs one look at the branch.
+
+*And it explains the shape of the whole hunt:* two of three importers **were**
+found by searching the format code, because two of three genuinely are
+dispatched on it. **A method that works twice and fails silently once reports
+the third as absent, and the two successes are what make the silence
+trustworthy.**
+
+### An exact hit on one member of a set (2026-09-21)
+
+**Genuinely new, and the most dangerous reconciliation shape found all day.**
+
+Two sessions measured keymap object sizes in different frames: SysEx dumps at
+**796** bytes, `.KRZ` file objects at **816, 820 or 824**. This project
+offered a reconciliation through a documented `+24` constant:
+`796 + 24 = 820` — **the exact middle of the three-way split.**
+
+It was wrong. But note what made it persuasive and what nobody remarked on:
+
+> **`820` was hit exactly. `816` and `824` were not accounted for at all.**
+
+An explanation that lands precisely on one member of a set, and says nothing
+whatever about the others, is **one datum wearing the clothes of a
+confirmation**. The precision of the single hit does all the persuading; the
+two silent misses are the actual information and they were invisible to both
+sessions.
+
+*The check:* **ask what the explanation says about the members it did not
+hit.** Here the answer was "nothing", which should have ended it in one
+sentence.
+
+**And it is more dangerous than outright fabrication.** Five hours earlier
+this project invented a definitional story to reconcile two `+20` counts —
+that one **had to be believed.** This one **had only to be not-checked**
+(`mpc2emu`'s formulation, and it is the sharper half). *Exactness does the
+persuading, so the threshold for acceptance drops to zero.* Nobody has to be
+convinced of an equation that is simply true.
+
+**The substantive error underneath**, stated in the form that survives:
+`DUMP offset = file offset + 24` is an **offset** constant. It was applied to
+**sizes**. In the very case it documents, a 1-layer program is 272 bytes in
+DUMP and 250 in file — the offsets shift by 24 while the sizes differ by 22,
+*and in the opposite direction*.
+
+> **An offset constant is not a size constant.** Offsets and sizes are
+> different quantities, and establishing a relation for one establishes
+> nothing about the other.
+
+Filed in those terms rather than as a sign error, because a sign error would
+imply the quantity was right.
 
 ### A correct number whose role changed (2026-09-21)
 
