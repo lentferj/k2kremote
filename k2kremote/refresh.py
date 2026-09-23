@@ -98,6 +98,8 @@ from attrs import define, field
 
 from k2000.definitions import Button
 
+from k2kremote.k2kmessages import ScreenState, classify_screen
+
 # RE'd timing (see module docstring / mpc2emu k2000r_midi_comms.md).
 # Seconds to wait after a press before reading the redrawn LCD.
 #
@@ -171,33 +173,18 @@ _CHEAP_ORIGINS = (_SETTLE_ORIGIN, _HEARTBEAT_ORIGIN)
 # re-freeze navigation. Destructive commits on the K2000 confirm with Yes/No.
 # "Deleting ..." is the object rewrite actually happening — the exact state §9
 # says a poll can lock the unit up. Seen live 2026-08-16. The confirm-prompt
-# markers below normally get us paused *before* this appears, but a delete
-# started at the front panel never shows us a confirm we recognise, so catch the
-# operation itself too.
-_DESTRUCTIVE_MARKERS = ("are you sure", "deleting")
+# markers normally get us paused *before* this appears, but a delete started at
+# the front panel never shows us a confirm we recognise, so the operation has to
+# be caught in its own right.
+#
+# The text markers themselves now live in `k2kmessages.STATE_MARKERS`, sourced
+# from the v3.87J message pool rather than from whatever was on screen when
+# something last broke. That move added two rewrites this list never had —
+# "Initializing all memory" (the RAM wipe) and "Clearing data", both of which
+# used to read as merely BUSY and so kept the heartbeat running straight through
+# the operation §9 warns about. The structural signal below is ours and stays
+# here: it is about the soft-key row's *shape*, not about any wording.
 _CONFIRM_SOFT_PAIR = {"yes", "no"}
-
-# Screens the K2000 puts up while it is *doing* something — disk I/O, mostly.
-# Distinct from a destructive confirm: nothing is being rewritten, the device is
-# simply busy and slow to answer, and it will finish on its own.
-#
-# Reported live 2026-08-16: a load started at the front panel shows "Opening
-# file" / "Reading file", and none of it reaches the heavy-op guard in app.py,
-# which only fires when *we* press a soft key whose label matches. So we carried
-# on polling a busy device, the reads timed out, and the mirror announced a
-# disconnection it then recovered from. Harmless but wrong, and inconsistent
-# with every other disk operation.
-#
-# Substring match, lower-cased. Kept deliberately short: the v1 destructive gate
-# failed live because its markers were *guessed* (see TODO / RESOLUTION_NOTES
-# §9), so only wording actually seen on the hardware belongs here.
-# Reported live 2026-08-16 during a long disk load. "Opening file" / "Reading
-# file" were the first two seen; "please wait" is the one that actually mattered,
-# and is the most general of them. ("Deleting ..." is NOT here — it is a rewrite,
-# and belongs in _DESTRUCTIVE_MARKERS above.)
-_BUSY_MARKERS = ("opening file", "reading file", "please wait", "loading",
-                 "writing", "saving", "formatting", "verifying", "scanning")
-
 
 def is_busy_screen(text_rows) -> bool:
     """True when the LCD says the K2000 is mid-operation (disk I/O).
@@ -207,9 +194,20 @@ def is_busy_screen(text_rows) -> bool:
     expensive pixel plane and stops calling a timeout a disconnection, then picks
     up by itself once the screen moves on. No manual resume, because nothing here
     is dangerous, it is just busy.
+
+    Reported live 2026-08-16: a load started at the front panel shows "Opening
+    file" / "Reading file", and none of it reaches the heavy-op guard in app.py,
+    which only fires when *we* press a soft key whose label matches. So we
+    carried on polling a busy device, the reads timed out, and the mirror
+    announced a disconnection it then recovered from.
+
+    An **error** screen is deliberately not busy. The hand-collected list this
+    used to carry had "writing" and "reading file" on it, and those substrings
+    land mostly on failures in the ROM — `Failed writing to disk`, `Problem
+    reading file %s` — so a device sitting idle on an error dialog was being
+    treated as one in difficulty. `k2kmessages` separates the two.
     """
-    joined = " ".join(text_rows).lower()
-    return any(marker in joined for marker in _BUSY_MARKERS)
+    return classify_screen(text_rows) is ScreenState.BUSY
 
 
 def _is_confirm_dialog(text_rows) -> bool:
@@ -230,8 +228,7 @@ def is_destructive_screen(text_rows) -> bool:
     mirror stays live for navigation. Conservative by design: a false positive only
     freezes the mirror until Ctrl+r; a false negative risks a hardware lockup.
     """
-    joined = " ".join(text_rows).lower()
-    if any(marker in joined for marker in _DESTRUCTIVE_MARKERS):
+    if classify_screen(text_rows) is ScreenState.DESTRUCTIVE:
         return True
     return _is_confirm_dialog(text_rows)
 

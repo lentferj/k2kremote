@@ -9362,3 +9362,63 @@ to "leave a trace" for a short listing and left none; `SaveRefused`'s
 docstring promised "the panel was left where it was found" for failures that
 left a modal dialog open on the instrument. A comment that says what the code
 should do is a finding waiting to be written up by somebody else.
+
+## 86. The screen-state markers were guesses; the ROM had the list (2026-09-23)
+
+**Status.** Done — `k2kremote/k2kmessages.py` `STATE_MARKERS` / `classify_screen()`,
+`refresh.py` delegating to them, 4 new tests in `tests/test_k2kmessages.py`
+and 2 in `tests/test_refresh.py`.
+
+`refresh.py` gates polling on what the LCD says: `is_busy_screen()` means
+"expect slow answers, stop buying the pixel plane", `is_destructive_screen()`
+means "stop polling entirely, a read here can hang the CPU" (§9). Both matched
+lower-cased substrings from two hand-written tuples, each entry added the day
+some screen caught us out. The comment beside them said as much: *"only wording
+actually seen on the hardware belongs here"* — an honest rule that produced an
+anecdotal list, because what gets seen is whatever happened to break.
+
+Matching those markers against the v3.87J message pool (extract it with
+`k2kmessages.extract()`; the pool is not in the repo) found three things.
+
+**`"scanning"` matches nothing.** No string in the firmware contains it. It had
+been guessed, and could never have fired.
+
+**`"writing"` and `"reading file"` are mostly failure text.** In the pool
+`"writing"` hits 12 strings, of which `Writing...` and `Retrying Write...` are
+progress and the rest are `Failed writing to disk`, `Problem writing file %s,
+error %d`, `Failed writing FAT block`… `"reading file"` hits 9, of which 2 are
+progress. So an error dialog — an *idle* screen, on which the device answers
+perfectly well — was being classified BUSY, which suppressed the pixel plane
+and delayed reporting a real disconnection. That is the whole reason there are
+now three states and not two: `ScreenState.ERROR` exists so that failures stop
+being read as difficulty.
+
+**`Initializing all memory. Please wait...` was classified BUSY.** This is the
+RAM wipe *in progress* — precisely the object rewrite §9 says a poll can hang
+the unit in. It contains `"please wait"`, so the busy list claimed it first,
+and BUSY only stops the expensive read; the heartbeat kept running straight
+through. `Clearing data...` had the same shape and no marker at all. Both are
+DESTRUCTIVE now, along with `hard reset` and `delete all ram`, whose warnings
+the ROM spells out separately from `Are you sure?`.
+
+Ordering carries the safety property, so a test asserts it rather than trusting
+the source order: every DESTRUCTIVE marker precedes every ERROR marker, which
+precedes every BUSY one. First match wins, and the bias runs the sanctioned way
+— over-reporting DESTRUCTIVE costs a Ctrl+r, under-reporting it costs hardware.
+
+**Method note.** The direction that worked is the one §85's sibling note
+records for the catalogue generally: the screen is a poor source and a good
+check. Nothing here was learned by watching the LCD — it was learned by asking
+the firmware what it is *able* to print, then reading our own list back against
+that. `test_every_state_marker_occurs_in_the_rom_message_pool` keeps it that
+way; a marker nobody can point to in the image does not ship again.
+
+**Licensing.** These markers are the only ROM-derived text k2kremote ships, and
+they were already shipping — `refresh.py` has carried `"are you sure"` and
+`"please wait"` since the mirror existed, because it is unsafe without them.
+The line the project draws is law-versus-blob, not displayed-versus-not:
+`k2kromtables.py` ships a formula and seven exceptions, never the 9,601-entry
+table, and the ~7,500-string pool has no formula, so it stays out. A few dozen
+short functional phrases needed for interoperability are a different object
+from a dump of the pool, and each of them is verifiable on the LCD in front of
+you. README's third-party table records the distinction.

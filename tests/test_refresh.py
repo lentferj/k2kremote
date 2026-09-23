@@ -1077,3 +1077,34 @@ def test_stop_waits_for_the_read_in_flight_and_then_says_nothing():
     # The very first read was still in flight, so its frame is the one the
     # shutdown gate has to swallow: any frame at all here is that frame.
     assert frames == [], "a frame was delivered after shutdown began"
+
+
+def test_an_error_dialog_no_longer_reads_as_a_busy_device():
+    """Regression: the markers moved to `k2kmessages`, and gained a category.
+
+    A failure screen is idle -- the K2000 answers normally while it shows one
+    -- so the mirror should stay fully live. The old BUSY list said otherwise,
+    because "writing" and "reading file" matched `Failed writing to disk` and
+    `Problem reading file %s` just as readily as the progress text.
+    """
+    from k2kremote.refresh import is_busy_screen, is_destructive_screen
+
+    for line in ("Failed writing to disk", "Problem reading file BOOT.MAC",
+                 "Not enough memory to save."):
+        screen = [line] + [""] * 7
+        assert not is_busy_screen(screen), line
+        assert not is_destructive_screen(screen), line
+
+
+def test_a_ram_wipe_now_pauses_polling_instead_of_only_slowing_it():
+    """`Initializing all memory` used to match only "please wait" -> BUSY.
+
+    BUSY stops the pixel read but keeps the heartbeat going, and a heartbeat
+    during an object rewrite is the documented way to hang the unit (§9).
+    """
+    from k2kremote.refresh import is_busy_screen, is_destructive_screen
+
+    screen = ["Initializing all memory. Please wait...", "", "It will take a "
+              "while...", "", "", "", "", ""]
+    assert is_destructive_screen(screen)
+    assert not is_busy_screen(screen)
