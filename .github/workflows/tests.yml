@@ -51,9 +51,19 @@ jobs:
             python-version: "3.13"
 
     steps:
-      - uses: actions/checkout@v4
+      # v4/v5 run on Node 20, deprecated 2025-09-19 and since force-run on
+      # Node 24, which annotates every job. Node 24 landed in checkout@v5 and
+      # setup-python@v6; v7 is current and buys the longer runway.
+      #
+      # Both of v7's behavioural changes were checked against how this
+      # workflow calls them, not assumed: checkout@v7 blocks fork checkout for
+      # `pull_request_target` and `workflow_run`, and this workflow triggers on
+      # push/pull_request/workflow_dispatch only; setup-python@v6 reads
+      # `.python-version` more eagerly, and this repo has no such file (and
+      # passes python-version explicitly regardless).
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
