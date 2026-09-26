@@ -214,17 +214,37 @@ def read_filter_fields(bridge) -> dict:
     }
 
 
-def leave_editor(bridge) -> bool:
-    """Exit, answering any save prompt with No. True if we reached Program Mode."""
-    bridge.press_button(Button.Exit); time.sleep(0.9)
-    r = rows(bridge)
-    if "before exiting?" in " ".join(r):
-        i = soft_index(r[7], "No")
-        if i is None:
-            return False
-        bridge.press_button(SOFT[i]); time.sleep(1.0)
+def leave_editor(bridge, tries: int = 5) -> bool:
+    """Exit, answering any save prompt with No. True if we reached Program Mode.
+
+    **Polls for the prompt instead of sampling once.** The single 0.9 s read this
+    used to do is a race: 2026-09-26 the prompt had not yet appeared at 0.9 s, so
+    this saw the editor page, found no "before exiting?", returned False -- and
+    left the machine parked on an unanswered save dialog. A peer session then
+    captured audio from the live edit buffer and got three readings that looked
+    like data. **A cleanup helper that gives up quietly is worse than one that
+    raises**, because the caller is usually in a `finally` and not looking.
+
+    Answering No is a discard: panel edits live only in the editor, so nothing
+    reaches the object. Never answer Yes here -- that would write.
+    """
+    bridge.press_button(Button.Exit)
+    for _ in range(tries):
+        time.sleep(0.9)
         r = rows(bridge)
-    return "ProgramMode" in r[0]
+        if "ProgramMode" in r[0]:
+            return True
+        if "before exiting?" in " ".join(r):
+            i = soft_index(r[7], "No")
+            if i is None:
+                return False
+            bridge.press_button(SOFT[i])
+            for _ in range(tries):
+                time.sleep(0.9)
+                if "ProgramMode" in rows(bridge)[0]:
+                    return True
+            return False
+    return False
 
 
 def algorithm_of(bridge):
