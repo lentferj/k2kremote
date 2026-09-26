@@ -14,6 +14,7 @@ RESOLUTION_NOTES §4.
 import sys, time, threading; sys.path.insert(0, ".")
 import numpy as np
 from probes.hw import connect
+from probes.jack_ports import connect_capture
 
 CAPTURE = ("system:capture_17", "system:capture_18")
 def record(seconds, out):
@@ -25,8 +26,9 @@ def record(seconds, out):
         for i,p in enumerate(ins): chunks[i].append(p.get_array().copy())
     sr=c.samplerate; c.activate()
     for s,d in zip(CAPTURE, ins):
-        try: c.connect(s,d)
-        except Exception: pass
+        connect_capture(c, s, d)   # resolves, connects, reads back: a
+                                   # swallowed failure here records silence
+                                   # and then measures it
     time.sleep(seconds); c.deactivate(); c.close()
     L=np.concatenate(chunks[0]) if chunks[0] else np.zeros(1)
     out['sr']=sr; out['L']=L

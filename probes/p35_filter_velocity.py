@@ -64,6 +64,7 @@ import wave
 import numpy as np
 
 from probes.hw import connect
+from probes.jack_ports import connect_capture
 
 CHANNEL = 8                     # panel showed Channel:9
 NOTE = 60
@@ -104,7 +105,7 @@ class Recorder:
     def __enter__(self):
         self.client.activate()
         for port, src in zip(self.ins, self.ports):
-            self.client.connect(src, port)
+            connect_capture(self.client, src, port)
         return self
 
     def __exit__(self, *exc):

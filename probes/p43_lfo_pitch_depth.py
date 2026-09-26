@@ -25,6 +25,7 @@ import numpy as np
 import rtmidi
 
 from probes.hw import connect
+from probes.jack_ports import connect_capture
 from probes.p36_filter_fields import (
     rows, soft_index, SOFT, current_field, select_program, leave_editor,
 )
@@ -72,7 +73,7 @@ class Recorder:
     def __enter__(self):
         self.client.activate()
         for port, src in zip(self.ins, self.ports):
-            self.client.connect(src, port)
+            connect_capture(self.client, src, port)
         return self
 
     def __exit__(self, *exc):
