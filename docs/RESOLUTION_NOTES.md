@@ -9918,8 +9918,12 @@ have been grounds to doubt the measurement; showing nothing moving, it is not.
 **The propagation is closed, not provisional.** The structure belongs to
 212/213's routed LFO, so the ladder taken on ROM #199 — chosen originally
 *because* nothing was routed there — inherited none of it. Keymap 163 is
-exonerated and the docstring's "mono ROM sine" is defensible: 21 identical
-references to one sample named `Sine Wave`.
+exonerated, but only half of the docstring's "mono ROM sine" survives. The
+**mono** half is right and is what matters — 21 identical references to one
+sample, one layer, one series, so everything shares one pan. The **sine** half is
+measured false: `mpc2emu` captured it and the 2nd harmonic sits within 1 dB of
+the fundamental, with the 3rd at −9 dB. That was asserted in the docstring, never
+measured, and survived there while being used to defend a constant.
 
 **Which link is weaker: I got this backwards and `mpc2emu` corrected it.** I
 told them that if a fresh capture disagreed with the ledger, my exclusions were
@@ -9953,3 +9957,142 @@ by equal-product variation, and the functional confirmation of PITCH byte 213.
 fourth (ENVCTL Rel KeyTrk/VelTrk) was **declined on prevalence** — 3.1 / 1.0 /
 0.4 / 0.4 / 1.29 / 0.074 % of keygroups and one true zero over 69,062 — which
 is a decision, not an omission.
+
+## 91. Three transposes, and one of them is invisible to SysEx (2026-09-26)
+
+**Status.** Settled on the K2000R. The ProgramMode header's `Xpose` is
+battery-backed global state with **no object representation and no SysEx read
+path** — the LCD is the only way to read it.
+
+There are three distinct settings on this machine that transpose, and they are
+easy to conflate because two are spelled `Xpose`:
+
+| where | scope | read path |
+|---|---|---|
+| **ProgramMode header** `Xpose` | global | **LCD only** |
+| **MasterMode page 1** `Transpose` | global | LCD (and presumably a master dump) |
+| **EditProg → KEYMAP** `Xpose` | per layer | in the Program object |
+
+They are independent. With the header reading `Xpose:12ST`, Master's
+`Transpose` read `0ST` and program 212's KEYMAP `Xpose` read `0ST`.
+
+**Where the header's one is not.** `Octav−` moves it in 12-semitone steps and:
+
+* program 212 was **byte-identical** across the press — whole-object DUMP before
+  and after, no offset changed;
+* `Setup 1` (56 bytes) was unchanged across the same press;
+* `Setup 0` and `MacroTable 0` do not answer a DUMP at all.
+
+**Where it is: battery-backed global RAM, and it IS carried by a master file.**
+Jan power-cycled the instrument, ran **Master → Delete → Everything**, and
+reloaded the bank from CD5, touching nothing else. Afterwards the header still
+read `Xpose:12ST  Channel:9`, confirmed against a capture taken before
+(`~/temp/k2k_prereboot_state_20260926.json`). So it survives a power cycle *and*
+a full RAM object clear.
+
+**It is still not a Program, Setup or Macro object — but "no object
+representation" was too strong, and loading a master file refuted it.** Jan then
+loaded his stored `MASTER01.KRZ`, and the header went **`Xpose:12ST` →
+`Xpose:0ST`** while every Master page 1 line, all three programs' SHA-1s,
+`Setup 1` and the whole inventory stayed identical. So a master file carries
+this field, which means it lives in the master table: an object that
+`Delete → Everything` does not clear (it clears user objects), rather than
+no object at all. One observation cannot separate "the file's stored value was
+applied" from "the load resets the field", but either way a disk load reaches
+it and a program dump does not.
+
+**And it refutes the premise the 12ST rested on: Jan's stored default is 0ST.**
+The 12ST entered this session as a belief — relayed as "Jan says 12ST is the
+default" — on which I acted, having *first* concluded from my own soft-key
+arithmetic that the 12 was my stray `Octav+` press. Both were right about
+different things: the press is what **moved** it, and `MASTER01.KRZ` shows the
+saved value is **0ST**, so restoring 12ST did not restore a default at all.
+`mpc2emu` had separately inferred that +12 compensates a −12 somewhere in the
+chain, from sent key 60 sounding 130 Hz; if Jan's own saved default is 0ST, that
+−12 belongs to **their MIDI path** rather than to anything the instrument is
+compensating for.
+
+**Why this matters beyond curiosity.** A pitch measurement's reference can be
+shifted a full octave by a setting that appears in **no object dump**. That is
+exactly what happened during the LFO2 work: `mpc2emu` measured every sounding
+key an octave below nominal for hours, and the cause was this field — moved, as
+it turned out, by my own stray `Octav+` press (§90). **Anything measuring pitch
+on this rig must read the LCD header, not the objects.** **The cold-boot hazard is NOT closed, and saying it was rested on the
+unproven leg.** "Because it is stored it cannot differ across a power event"
+assumes the battery-backed branch — and under the surviving alternative (not
+stored, cold default 12ST) a power event silently moves a machine left at 0ST to
+12ST, a 1200-cent reference change invisible to every dump. It stays open until
+the 7ST cycle runs. (`mpc2emu`'s catch; the practical conclusion was resting on
+the half of the experiment that did not resolve.) The master-load result
+sharpens it rather than settling it: `Xpose` moved when a file touching nothing
+else was loaded, so the field does respond to operations that leave no other
+trace.
+
+**A free and unusually strong check on a restore.** The CD5 reload put the
+original bank back, and programs 212, 213 and 217 matched the pre-restart
+capture on their **whole-object SHA-1s**, not merely on the six bytes being
+tracked. So the restoration at the end of §90's setup work was byte-perfect
+across every byte, verified against an independent copy rather than against my
+own record of what I had changed.
+
+### The −12 never existed: it was a sub-octave read as the fundamental
+
+An octave error ran through this whole thread — `mpc2emu` measured every sounding
+key ~1200 cents below nominal, "consistent to 2 cents across five keys, and
+reproducible", and we spent effort locating it: their MIDI path (they verified
+`mididings_k2000r` and `hw_measure` apply no transposition), the machine, Jan's
+`Xpose`, and Soundblock 163's rootkey 70. It was none of them.
+
+**Their own published peak list contains the true fundamental.** Checking their
+ROM program 1 table against nominal equal temperament:
+
+```
+ key  nominal   peaks reported          nominal present?
+  60    261.6   (130, 131, 261)         261        <- yes
+  67    392.0   (196, 197, 194)         -
+  72    523.3   (261, 263, 260)         -
+  79    784.0   (391, 781, 783)         781, 783   <- yes
+  84   1046.5   (523, 1044, 521)        1044       <- yes
+```
+
+Every value reported as `f0` was the **half**-nominal (130/196/261/391/523), and
+at three of five keys the correct fundamental was in the same list. **The −12
+does not exist.**
+
+**But the mechanism was not argmax selection, and a fresh capture refuted that.**
+`mpc2emu` re-took ROM program 1 at the same five keys: the nominal fundamental is
+the loudest peak at every one, within ±6 cents, and there is **no sub-octave
+component at all — none, down to −45 dB.** So there was nothing there to pick.
+
+A **uniform factor of exactly two across five keys, consistent to ~2 cents**, is
+**period doubling** — the autocorrelation family's signature failure, locking to
+the second ACF peak. Partial mis-selection is erratic by nature: it lands on the
+2nd harmonic at one key and the 3rd at another, and does not hold 0.5000 five
+times. My reading was the right conclusion from the wrong mechanism, and the
+peaks I pointed at as the picked sub-octave were the reported values themselves,
+not a real component alongside the fundamental.
+
+**And the lesson `mpc2emu` drew from its provenance is the one to keep: when a
+broken instrument is discarded, the numbers it already emitted are not discarded
+with it.** Their notes recorded that two ACF estimators had been run on exactly
+this material and "contributed nothing" — written in good faith the same day the
+estimators were abandoned. One of them had contributed the −12, which then
+travelled for a day, through this project, and came within a message of being
+filed as a defect in their MIDI path. **Abandoning a tool does not retract its
+outputs; those have to be hunted individually.**
+
+**Two more things worth taking from how long it survived.** It was consistent to 2
+cents across five keys and exactly 1200 cents, which is what made it read as a
+real constant offset rather than an artefact: **a wrong number that is precise
+and lands on a musical interval is harder to doubt than a noisy one.** And it
+would have passed the filed prediction "any two peaks at a fixed cents
+separation", because a fundamental and its sub-octave are exactly that — a
+prediction that distinguishes sidebands (fixed Hz) from harmonics does not
+distinguish a harmonic series from a sub-octave.
+
+**One prediction filed and NOT tested, recorded rather than quietly counted.**
+Before the restart I predicted `Soundblock 200 LF2TONE -> GONE`, on the grounds
+that K2000 sample RAM is volatile. The inventory came back 1 → 1 — but because
+the CD5 reload restored the sample, not because it never left. The procedure
+Jan ran (clear, then reload) cannot test that leg, so the volatility claim
+remains as it was.
