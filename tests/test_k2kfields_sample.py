@@ -92,3 +92,81 @@ def test_a_period_no_table_rate_produces_decodes_to_none():
     which is not a rate the K2000's import path can write."""
     out = describe_field(ObjectType.Soundblock, 40, bytes.fromhex("0000A2E8"))
     assert out == "0000a2e8 (Sample Rate: unmapped for this byte)"
+
+
+# --- fields measured on the K2000R, 2026-09-25/26 --------------------------
+#
+# Each assertion below is a point actually read off the instrument: the panel
+# display on one side, a DUMP of the byte on the other, taken in the same
+# instant with the editor holding the object. They are not derived from the
+# law -- the law was fitted to them.
+
+
+def test_keytrk_ladder_reproduces_the_measured_points():
+    """The three regions, at the boundaries and either side of them.
+
+    A straight line through (1, 5) and (43, 100) hits both of those and is
+    wrong at every point between, which is why this pins the interior.
+    """
+    from k2kremote.k2kfields import describe_field
+    from k2000.definitions import ObjectType
+
+    measured = {                      # byte -> displayed ct/key
+        0: 0, 1: 5, 3: 15, 8: 40,     # region 1: 5*|b|
+        9: 42, 13: 50, 23: 70, 33: 90,  # region 2: 40+2*(|b|-8)
+        34: 91, 43: 100, 45: 102,     # region 3: 90+(|b|-33)
+        255: -5, 249: -35, 213: -100, 211: -102,   # two's complement
+    }
+    for byte, ct in measured.items():
+        out = describe_field(ObjectType.Program, 196, bytes([byte]))
+        assert f"{ct} ct/key" in out, f"byte {byte}: {out}"
+
+
+def test_both_keytrk_fields_share_one_ladder():
+    """KEYMAP KeyTrk (180) landed on the ladder fitted to PITCH KeyTrk (196).
+
+    Two fields agreeing is what makes the region boundaries real rather than
+    an artefact of one page, so it is asserted rather than assumed.
+    """
+    from k2kremote.k2kfields import describe_field
+    from k2000.definitions import ObjectType
+
+    for byte in (0, 3, 13, 23, 33, 43, 249, 255):
+        a = describe_field(ObjectType.Program, 196, bytes([byte])).split(":")[-1]
+        b = describe_field(ObjectType.Program, 180, bytes([byte])).split(":")[-1]
+        assert a == b, f"byte {byte}: PITCH {a!r} vs KEYMAP {b!r}"
+
+
+def test_keymap_keytrk_default_is_the_normal_tracking_byte():
+    """Byte 43 is the KEYMAP page's default and reads 100 ct/key -- the same
+    byte that means +100 (doubling) on the PITCH page, because PITCH adds to
+    KEYMAP. Same byte, same unit, different musical meaning per offset."""
+    from k2kremote.k2kfields import describe_field
+    from k2000.definitions import ObjectType
+
+    assert "100 ct/key" in describe_field(ObjectType.Program, 180, b"\x2b")
+    assert "100 ct/key" in describe_field(ObjectType.Program, 196, b"\x2b")
+    assert "0 ct/key" in describe_field(ObjectType.Program, 180, b"\x00")
+
+
+def test_wet_dry_byte_is_the_percentage_and_rails_at_100():
+    from k2kremote.k2kfields import describe_field
+    from k2000.definitions import ObjectType
+
+    for byte, pct in ((12, 12), (37, 37), (73, 73), (0, 0), (100, 100)):
+        assert f"{pct}%" in describe_field(ObjectType.Program, 43, bytes([byte]))
+    # Above the driven rail the decoder declines rather than inventing a
+    # reading. describe_field still names the field -- saying "there is a
+    # Wet/Dry here and I cannot read this byte" is more useful than silence,
+    # and it is what distinguishes an unmapped value from an absent field.
+    assert "unmapped" in describe_field(ObjectType.Program, 43, bytes([101]))
+
+
+def test_res_depth_is_labelled_as_the_display_not_the_law():
+    """F2 RES is under a standing decision to be measured acoustically. The
+    decoder must not quietly present the panel's dB as the conversion."""
+    from k2kremote.k2kfields import describe_field
+    from k2000.definitions import ObjectType
+
+    out = describe_field(ObjectType.Program, 231, bytes([24]))
+    assert "+12.0 dB" in out and "displayed" in out

@@ -56,11 +56,16 @@ class FakeK2000Bridge:
         self._data = {906: {215: b"\x28", 199: bytes([79]), 261: bytes([36]),
                             242: bytes([37]),
                             209: bytes([50]), 210: bytes([24]),
-                            91: bytes([46])},
+                            91: bytes([46]),
+                            # RESOLUTION_NOTES §90, measured 2026-09-25/26
+                            196: bytes([43]), 180: bytes([43]),
+                            43: bytes([73]), 231: bytes([24])},
                       907: {215: b"\x05", 199: bytes([50]), 261: bytes([0]),
                             242: bytes([256 - 32]),
                             209: bytes([50]), 210: bytes([100]),
-                            91: bytes([186])}}
+                            91: bytes([186]),
+                            196: bytes([213]), 180: bytes([0]),
+                            43: bytes([100]), 231: bytes([236])}}
         # every canned program must answer every known offset: if only 906
         # is checked, adding a field leaves 907 raising KeyError, which
         # device_op swallows into a "read failed" status and the test then
@@ -156,10 +161,12 @@ async def test_patch_writes_through_patch_object_bytes():
         assert await _wait_for(pilot, lambda: len(bridge.patches) == 1)
         obj_type, idno, offset, data = bridge.patches[0]
         # rows are sorted by offset ascending (_fields_loaded); cursor_row 0
-        # is the LOWEST registered Program offset, which is 91 (LFO1 MnRate)
-        # since §70 added it -- it was 199 before.
+        # is the LOWEST registered Program offset. That has moved twice now --
+        # 199, then 91 (LFO1 MnRate) at §70, now 43 (FX Wet/Dry) at §90 --
+        # so if this fails after a registry addition, check whether the new
+        # field simply sorts first before hunting a bug.
         assert (obj_type, idno, offset, data) == (ObjectType.Program, 906,
-                                                   91, bytes.fromhex("50"))
+                                                   43, bytes.fromhex("50"))
         assert await _wait_for(pilot, lambda: len(app.screen_stack) == 1)
 
 

@@ -328,7 +328,80 @@ def _keymap_entry_layout(raw: bytes) -> Optional[str]:
 
 #: Only offsets independently confirmed by DUMP-diffing two panel-driven
 #: states go here -- see the module docstring for why this list is short.
+def _keytrk_ct_per_key(raw: bytes) -> Optional[str]:
+    """PITCH / KEYMAP KeyTrk: one three-region ladder shared by both fields.
+
+    Measured 2026-09-25 over 89 points -- a full wheel sweep in both
+    directions, reading the display and DUMPing the byte at every step -- and
+    then confirmed independently on the KEYMAP page's own KeyTrk, which lands
+    on the same ladder. The boundaries at 8 and 33 are where a two-point fit
+    goes wrong: a line through (1, 5) and (43, 100) reproduces both endpoints
+    and is wrong everywhere between. See RESOLUTION_NOTES §90.
+    """
+    b = raw[0]
+    s = b - 256 if b > 127 else b
+    n = abs(s)
+    if n <= 8:
+        ct = 5 * n
+    elif n <= 33:
+        ct = 40 + 2 * (n - 8)
+    else:
+        ct = 90 + (n - 33)
+    return f"{-ct if s < 0 else ct} ct/key"
+
+
+def _res_depth_db(raw: bytes) -> Optional[str]:
+    """F2 RES Depth as the PANEL displays it -- 0.5 dB per unit, linear.
+
+    **This is the display's law, not an acoustic measurement.** F2 RES is
+    under a standing decision to be measured acoustically before anything
+    writes it, after three prior catches on a plausible reading of a displayed
+    unit. Shown here because a browser should say what the machine says; do
+    not derive a conversion from it.
+    """
+    b = raw[0]
+    s = b - 256 if b > 127 else b
+    return f"{s * 0.5:+.1f} dB (displayed)"
+
+
+def _percent_0_100(raw: bytes) -> Optional[str]:
+    """A plain 0..100 percentage; the byte IS the number. Rails driven."""
+    b = raw[0]
+    return f"{b}%" if 0 <= b <= 100 else None
+
+
 KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
+    (ObjectType.Program, 196): Field(
+        name="PITCH KeyTrk", size=1, unit=None,
+        notes="RESOLUTION_NOTES §90; three-region ladder, 89 points. A "
+              "DEVIATION added to the KEYMAP page's KeyTrk, so 0 = normal "
+              "1:1 and byte 43 (+100) is DOUBLE tracking, not fixed pitch. "
+              "Fixed pitch here is byte 213 (-100) and occurs once in 16,649 "
+              "corpus layers -- the KEYMAP page is how it is normally done.",
+        decode=_keytrk_ct_per_key,
+    ),
+    (ObjectType.Program, 180): Field(
+        name="KEYMAP KeyTrk", size=1, unit=None,
+        notes="RESOLUTION_NOTES §90; same ladder as offset 196. Default is "
+              "byte 43 = 100 ct/key (normal). Byte 0 = 0 ct/key = fixed "
+              "pitch, and that is where drum programs sit: 9.7x enriched "
+              "over non-drums across 4,280 corpus programs.",
+        decode=_keytrk_ct_per_key,
+    ),
+    (ObjectType.Program, 43): Field(
+        name="FX Wet/Dry Mix Adjust", size=1, unit=None,
+        notes="RESOLUTION_NOTES §90; the byte IS the percentage, rails 0 and "
+              "100 both driven. EffectPreset sits at offset 42.",
+        decode=_percent_0_100,
+    ),
+    (ObjectType.Program, 231): Field(
+        name="F2 RES Depth", size=1, unit=None,
+        notes="RESOLUTION_NOTES §90; offset confirmed three ways (corpus, "
+              "generic empty block, and with 2P LOPASS loaded). The 0.5 dB "
+              "per unit is the DISPLAY's law and is deliberately not treated "
+              "as the acoustic one -- see the decoder's docstring.",
+        decode=_res_depth_db,
+    ),
     (ObjectType.Program, 215): Field(
         name="ENV2->FilFreq Depth", size=1, unit="cents",
         notes="RESOLUTION_NOTES §30/§70; ROM table 0x1F9604, signed, "

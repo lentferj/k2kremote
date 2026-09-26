@@ -9619,3 +9619,337 @@ the one the experiment needs. Those are separate questions and only the second
 is answered by a negative control taken through the whole apparatus — the real
 rig, the real capture path, the real analysis — rather than through the
 analysis alone.
+
+## 90. Five program fields measured for mpc2emu's parameter matrix (2026-09-25/26)
+
+**Status.** Done for the panel-side half. Offsets and byte laws below are
+driven on the K2000R; the three acoustic items named at the end are `mpc2emu`'s
+and are not ours to claim. Registry entries and tests in
+`k2kremote/k2kfields.py` / `tests/test_k2kfields_sample.py`.
+
+| offset | field | law |
+|---|---|---|
+| 196 | PITCH KeyTrk | three-region ladder, below |
+| 180 | KEYMAP KeyTrk | **the same ladder** |
+| 43 | FX Wet/Dry Mix Adjust | the byte *is* the percentage, rails 0..100 |
+| 231 | F2 RES Depth | 0.5 dB/unit **as displayed** — see the caveat |
+
+### The KeyTrk ladder, and why it needed 89 points
+
+```
+|byte| 0      ->   0 ct/key
+|byte| 1..8   ->   5 * |byte|
+|byte| 9..33  ->  40 + 2*(|byte| - 8)
+|byte| 34+    ->  90 + (|byte| - 33)        signed two's complement
+```
+
+Fitted over a full wheel sweep in both directions — display and DUMP read at
+every step — not a spot check. **A straight line through (1, 5) and (43, 100)
+reproduces both endpoints and is wrong everywhere between.** The two-point fit
+would have been checkable against exactly the two values anyone would think to
+check.
+
+`KEYMAP KeyTrk` at offset 180 landed on the same ladder independently. That is
+what makes the boundaries at 8 and 33 a property of the encoding rather than of
+one page.
+
+### PITCH KeyTrk is a deviation, which refuted the obvious reading
+
+`mpc2emu` predicted byte 43 = "0 ct/key", reasoning that 0 could not be the
+exceptional case at 98.78% of 16,649 layers. The first half is right and the
+second does not follow. The manual:
+
+> "This is why you can set the KeyTrk parameter on the PITCH page to 0ct/key,
+> and the K2vx will still increase in pitch by 100 cents/key... It's because
+> the KeyTrk parameter on the KEYMAP page is already set at 100 cents/key."
+
+Total tracking = KEYMAP + PITCH. So byte 0 = normal (consistent with 98.78%),
+and **byte 43 = +100 = doubled tracking**. Their check of the 150 layers at 43
+found 4 drum-named out of 150 — the rest wind-instrument emulations and mono
+synth leads, where two semitones per key is a playing technique.
+
+Fixed pitch on the PITCH page needs byte 213 (−100), which occurs **once** in
+16,649 layers. It is normally done on the KEYMAP page instead: offset 180 = 0
+is **9.7× enriched** in drum programs across 4,280 distinct programs.
+
+**Byte 43 means 100 ct/key at both offsets and means different things.** It is
+the default on the KEYMAP page and a doubling on the PITCH page. A shared
+decoder is correct; a shared *interpretation* is not.
+
+### The F2 RES caveat, which is the point of that entry
+
+`231` is confirmed three ways — the corpus distribution, the generic empty
+block on a program whose F2 is `NONE`, and the block with `2P LOPASS` actually
+loaded. The **offset** is settled.
+
+The **0.5 dB per unit is the display's claim and is deliberately not treated as
+the law.** F2 RES is under a standing decision to be measured acoustically,
+after this project was caught three times by a plausible reading of a displayed
+unit. The decoder says "(displayed)" in its output and a test asserts that it
+does. What the figure buys is a two-point check instead of a characterisation.
+
+**And its character differs from the KeyTrk fields: it is plain linear, no
+regions.** After the 89-point ladder it was tempting to treat "K2000 display
+units are piecewise in three regions" as a property of the instrument. It is a
+property of those two fields. Same shape as §37 — a rule generalised from the
+one place it was measured.
+
+### PANNER KeyTrk, and a pivot that is documented but not measured
+
+Offset 244 and 0.2 %/key are now driven rather than inferred. **It is still
+not in the registry, and an existing test is why.** `k2kfields` had already
+declined to decode 244 with the reasoning "one measured value plus a zero
+baseline -- a slope with nothing tested in between", and what this run added
+was one more click. Registering it anyway was the two-point fit this very note
+warns about for the KeyTrk ladder, committed within an hour of writing that
+warning, and `test_panner_neighbours_are_deliberately_not_decoded` caught it.
+The entry was removed.
+
+**How wrong it could be, quantified on the field next door.** §PANMOD's own
+measurement typed −9.0 %/key and read byte −45, so the panner evidence is
+bytes 1 and 45 plus zero. PITCH KeyTrk has measured points at those same two
+bytes *and* a known interior, so fit the line the panner evidence licenses and
+compare:
+
+```
+line through byte 1 (5 ct) and byte 45 (102 ct)  ->  2.2045 ct/unit
+ byte    line     truth    error
+    8    20.4       40    -48.9%
+   13    31.5       50    -37.1%
+   23    53.5       70    -23.6%
+   33    75.5       90    -16.1%
+```
+
+Both endpoints exact, up to **49% wrong between them** — and the ladder's
+breakpoints at 8 and 33 sit squarely inside the span the panner evidence
+brackets. So the slope is not merely under-evidenced; it is under-evidenced in
+the exact region, and by the exact mechanism, that the neighbouring field on
+the same page is known to break in.
+
+`mpc2emu` flagged back that their `±16 %/key` rail is 80 × 0.2 — the same two
+points multiplied out, presented as an independent range check. A ~40-point
+interior sweep would settle both. It is panel-only and needs no audio.
+
+The pivot is **not** measured either. The manual states it generally, in the section introducing
+key tracking as one of the six common DSP control parameters:
+
+> "Middle C is the zero point. Regardless of the key tracking value, there is
+> no effect on Middle C."
+
+Pitch is given there as *an example* of the general mechanism, so this is not a
+pitch-specific rule. C4 = MIDI 60 on this instrument is separately established
+(§the CUTCAL readings). **Treat C4 as a falsifiable prediction**: the manual
+and the measured rails have diverged before (§37).
+
+**`KStart` can move the hinge** — range C-1..C9, and "at a KStart value of C 3,
+the key tracking value would be multiplied by 0 for C 3 and all notes below".
+So any key-tracking slope lands on a different pivot if KStart is non-default.
+Its byte is not located; nobody has needed it yet.
+
+### The ladder is the ENGINE's law, not only the display's (confirmed 2026-09-26)
+
+§90 was written from 89 panel points, which establishes what the LCD prints and
+says nothing on its own about what the DSP does — the distinction Jan's standing
+F2 RES decision exists to force, and which this note applied to F2 RES while
+walking straight past it on the field next door.
+
+`mpc2emu` then measured it. Program 212 (PITCH KeyTrk = byte 213) against 213
+(byte 0), ROM keymap 163, layer widened to internal 24..96, sent keys 36..108:
+
+```
+internal key      48      60      72      84      96
+CONTROL  f0     70.0   140.0   271.4   535.7  1064.3    -> +98 ct/key
+TEST     f0    201.4   201.4   201.4   201.4   201.4    ->   0 ct/key
+```
+
+**And the result is stronger than that table shows.** The TEST leg has the same
+two-series structure, and *every component sits at the identical frequency on
+every key* — 201 Hz at 0 dB, 343 Hz at −1 dB, 210 Hz at −1 dB, 209 Hz at −1 dB,
+unchanged across all five keys. Five keys spanning 48 semitones with **the whole
+spectrum frozen**: same frequencies, same relative levels. No partial-picking
+can fake that, so the conclusion does not depend on the pitch estimator at all.
+
+Exact cancellation requires PITCH −100 to meet KEYMAP +100, so the engine and
+the display agree on this field and the ladder is a law about the machine. It
+remains an open question for F2 RES.
+
+**A wrong hypothesis of mine, and why it was seductive.** From a single-key
+capture (−504 cents at internal 72) I proposed that the engine used the *raw
+byte* as ct/key — byte 213 is signed −43, and −43 × 12 keys predicts −516, a
+12-cent miss inside the measurement's own precision. It is refuted: −43 would
+leave 2736 cents of drift across the swept keys and there is none.
+
+The error was fitting a slope to **a difference of two unknown functions
+evaluated at one point**. (flat − tracking) at one key is a number that means
+nothing by itself, and at internal 72 it lands near what a −43 slope predicts by
+coincidence. This is the §"exact hit on one member of a set" shape, and the rule
+did not fire because the hit was *nearly* exact rather than exact — which read
+as better evidence instead of worse. A near-miss inside the error bars is the
+most dangerous version of a single-point fit, not the safest.
+
+**Resolved: the +98 is root-relative, and the field's law is clean.** The
+control's end-to-end 98.26 ct/key looked like a 2% scale error. Refitting with
+parabolic interpolation put the bottom octave at **1199.5 cents** and the
+shortfall entirely *above* internal 60. Reading `Soundblock 163 'Sine Wave'`
+gives **rootkey = 70** — so below the sample root the reading is exact, above it
+everything flattens. **`KEYMAP KeyTrk = 100 ct/key` is not refuted**, and that
+part holds whatever the flattening turns out to be: the clean octave sits at low
+transposition, where nothing is in doubt.
+
+**The flattening was the measuring instrument, and the checks have run.** It was
+never a property of the K2000. `mpc2emu` raised this against their own result
+before either of us treated it as a finding, and then settled it by looking at
+the **spectrum** instead of at a number derived from one:
+
+```
+CONTROL  internal 48   70 Hz + 84 Hz        internal 72   271 + 346
+         internal 60  140 Hz + 169 Hz       internal 84   536 + 699
+                                            internal 96  1064 + 1071 + 1413
+```
+
+**Every key carries two partial series within 0–1 dB of each other**, each
+roughly doubling per octave, separated by a *growing* interval — 316, 326, 425,
+457 cents. The FFT argmax picks whichever is momentarily louder, which is why
+0.70 s and 0.30 s windows disagreed by four semitones at internal 72.
+
+So all four constraints dissolve. The root-relative onset, the halving
+increments and the −96-cent asymptote are the argmax hopping between two series
+whose separation grows with key. The artefact does not merely *permit* a
+root-relative appearance — it **manufactures** one, because the divergence is
+progressive. And the −96 ≈ one semitone that looked either deeply meaningful or
+like pattern-matching on a round number was the latter.
+
+**An up-pitch ceiling was excluded by arithmetic anyway**, before any of this. A
+playback-rate ceiling means every key above some point plays the *same* pitch,
+so cumulative error grows without bound against a rising request; these
+increments converged on a bounded deficit, and a bounded deficit is not a
+ceiling in any degree — the pitch keeps tracking, it just tracks low.
+(`mpc2emu`'s sharpening; this note originally said only that the shape argued
+against it.)
+
+**What the two series are is not known and is not guessed here.** Candidates, at
+one dump each if anyone ever needs them: program 213 carrying more than one
+layer with the keymap change applied to only one, or Soundblock 163 not being a
+pure sine. Neither affects the result below.
+
+The practical consequence stands regardless of mechanism: **absolute KeyTrk
+values written far above a sample's root will not land where the display says**,
+and a cancellation test cannot see it, because cancellation is the one
+experiment blind to an error the two fields share.
+
+**Also withdrawn: my keymap header reading.** I reported keymap 217 as
+`entriesPerVel = 127` and flagged that 127 × 6 = 762 would not fit its 668
+bytes. Keymap 163 is **156 bytes** with the same `[8:10] = 127` and
+`entrySize = 6`, which settles it — `[0:2]` is the keymap's own id, and
+`[8:10] = 127` cannot be an entry count in a 156-byte object. Most likely a
+key-range high. The arithmetic that would not close was my decode, not the
+object, so `IMPORT_CONVERSION.md`'s keymap header layout is not in doubt.
+
+### A test is blind to whatever it holds constant (2026-09-26)
+
+Three instances turned up in one session, by three different mechanisms, and
+the form is worth more than any of them:
+
+* **A cancellation test cannot see an error the two fields share.** PITCH
+  KeyTrk −100 meeting KEYMAP +100 proves the two use one law; it says nothing
+  about whether that law is 100 ct/key or 98.
+* **Two FFT window lengths agreeing on a slope do not exclude a bias common to
+  both.** `mpc2emu` stated this and then nearly leaned on it anyway. What
+  settled the flattening was looking at the *spectrum* rather than at a number
+  derived from one.
+* **Linearity is blind to a constant scale factor.** `KRZ_LFO_PAN_DEPTH_SCALE`
+  was validated as linear to ±0.003 over a 10× range. If the stimulus's two
+  partial series pan differently, the dilution factor is set by their level
+  ratio and is *constant across depths* — so it would preserve linearity exactly
+  while rescaling the constant. (That dilution now looks unlikely: see the
+  withdrawal below. The blindness is real regardless of whether this instance
+  was.)
+
+**General form: a test is blind to whatever it holds constant.** The comfort a
+clean result gives is proportional to what varied in it, not to how clean it
+looks.
+
+**Escalation withdrawn: keymap 163 is not the source.** I argued the pan
+constant needed re-measuring because its stimulus was two partial series. That
+conflated two things `mpc2emu` then separated: the structure was observed on
+programs **212/213**, while the ladder was taken on **ROM #199** — they share
+only the keymap. Decoding keymap 163's 156 bytes settles it. Method `0x17`
+entries are 6 bytes (tuning i16 · volAdj i8 · sampleID i16 · subSample u8), and
+after a 28-byte header its 128 bytes hold **21 entries, all identical**:
+`tuning +0, volAdj +0, sampleID 163, sub 1`. Twenty-one copies of one
+reference — functionally a single sample across the range, no second root and no
+per-entry tuning.
+
+That excludes it by construction. **A growing separation in cents needs two
+sources transposing at different rates.** One sample's partials hold a fixed
+ratio however far it is transposed, so they keep a *constant* cents separation;
+so does a loop artefact, whose sideband spacing scales with the transposition.
+Layering is excluded too — every editor page read on 212/213/216/217 showed
+`<>Layer:1/1`. And the rig is excluded by `mpc2emu`'s ROM program 1 capture:
+19/13/9 cents apart low down, exact octaves higher, i.e. ordinary harmonics.
+
+**Closed: the two series are a carrier and its vibrato sidebands, and the cause
+was my own choice of programs.** Keymap, sample, loop, layering and rig were all
+correctly excluded; what remained was not "the analysis" but something simpler.
+`mpc2emu` found the close pairs sit a **fixed 5 Hz apart** (270/275, 1065/1070)
+— fixed in *Hz*, which is modulation, not anything fixed in cents — with the
+same frequencies recurring and their relative levels swapping over ~0.2 s.
+
+**Programs 212 and 213 carry LFO → pitch.** They are the bank's *shape*-test
+programs; 213's name on the LCD is `L2 SHAPE B5`. I had written the confound out
+myself in the first message of the setup — "200–213 carry LFO→pitch to make the
+rate and shape audible; 217 is the bank's only program with nothing routed" —
+chose 217 for exactly that reason, and then, when the second setup needed two
+legs, picked **212 and 213** because they were the ones already superseded by
+earlier measurements. I optimised for not disturbing other work and dropped my
+own confound analysis in the process.
+
+**Better choices existed and were in front of me.** 214/215/216 carry LFO →
+*pan*, which does not touch pitch at all, and either would have served as the
+second leg. The criterion should have been "confound-free", not "already
+finished with".
+
+**#1 is unaffected, and it could have gone the other way.** LFO → pitch adds a
+modulation in cents that is identical at every key, so it cannot manufacture
+key-invariance. The TEST leg had *every* component frozen across 48 semitones,
+carrier and sidebands alike. Had the TEST leg shown tracking, the vibrato would
+have been grounds to doubt the measurement; showing nothing moving, it is not.
+
+**The propagation is closed, not provisional.** The structure belongs to
+212/213's routed LFO, so the ladder taken on ROM #199 — chosen originally
+*because* nothing was routed there — inherited none of it. Keymap 163 is
+exonerated and the docstring's "mono ROM sine" is defensible: 21 identical
+references to one sample named `Sine Wave`.
+
+**Which link is weaker: I got this backwards and `mpc2emu` corrected it.** I
+told them that if a fresh capture disagreed with the ledger, my exclusions were
+the first thing to doubt. They are not. My five exclusions rest on **decoded
+bytes** — 21 identical keymap entries all naming Soundblock 163 with tuning 0,
+`Layer:1/1` on every program involved — which is reading the instrument's own
+state. The sideband diagnosis rests on peak positions in sub-window FFTs, from
+the same method that had already produced a four-semitone error at internal 72
+and an entire coherent false picture (root-relative onset, halving increments,
+an asymptote near one semitone). **The analysis is the first thing to doubt, not
+the byte reads.** Worth recording because ranking one's own evidence *below*
+what it deserves misdirects the next reader exactly as badly as overrating it.
+
+**One charge survives, and it was never about partials.** Searching `~/temp`
+finds only two `k2k*pan*` capture sets — the pre-fix one (0.16–0.27 dB, before
+the output wires were spread) and a wander-dominated one (0.40 Hz stronger than
+the driven rate in five of six) — and no file anywhere records the docstring's
+ladder. The captures behind it no longer exist, so the per-band check that would
+settle the dilution cannot be run by anyone. Its docstring also calls the
+stimulus a "mono ROM sine", which keymap 163 is not. Linearity established on
+data we no longer have, a scale never separable from a partial-panning factor,
+and a false description of the stimulus: that wants re-measuring, not
+annotating. A fresh six-point sweep with the wires spread and per-band analysis
+from the start settles both at one capture set.
+
+### Not ours
+
+Three items remain and they are acoustic: the panner pivot, the F2 RES dB law
+by equal-product variation, and the functional confirmation of PITCH byte 213.
+`mpc2emu` has the validated capture apparatus and they are queued there. A
+fourth (ENVCTL Rel KeyTrk/VelTrk) was **declined on prevalence** — 3.1 / 1.0 /
+0.4 / 0.4 / 1.29 / 0.074 % of keygroups and one true zero over 69,062 — which
+is a decision, not an omission.

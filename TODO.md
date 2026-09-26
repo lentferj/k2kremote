@@ -168,6 +168,37 @@ as having been known. Full sweep and the method note in RESOLUTION_NOTES §37.
 mpc2emu's `[-128, 127]` clamp on the per-sample field is correct and needs no
 change.
 
+## Make "is anything routed to pitch?" a query, not a judgement call
+
+**Status:** open, design below. **Blocked on:** nothing; no hardware needed.
+
+RESOLUTION_NOTES §90 records a confound I wrote down and then walked into: I
+had established that a measurement bank's programs 200-213 carried LFO->pitch
+and that only 217 was unrouted, chose 217 for that reason, and then — when a
+second setup needed two legs — picked 212 and 213 because they were the ones
+already superseded by earlier work. The selection criterion I actually applied
+was "finished with", not "confound-free".
+
+`mpc2emu`'s framing is the useful one and matches the only check that fired all
+day: **a rule can be not-reached-for, so the check belongs somewhere it cannot
+be skipped.** Their suggestion, adopted here: if a program's modulation routing
+were machine-readable, "pick a leg for a pitch measurement" becomes a query
+that excludes pitch-routed programs rather than something to remember.
+
+Concretely, the pieces are mostly present:
+
+* the PITCH page's `Src1` / `Depth` offsets are not yet in `k2kfields`
+  (§90 mapped the F2 block's `Src1 = 230` / `Depth = 231` and the generic DSP
+  layout, so the same edit-buffer walk finds PITCH's pair in one pass);
+* with those, a `routes_to_pitch(program_bytes) -> bool` belongs beside them,
+  and `k2kmon` could flag it while browsing;
+* the same shape generalises to "routed to pan", "routed to filter", which is
+  what makes it worth doing once rather than per-measurement.
+
+Not urgent — nothing is blocked on it — but it is the cheapest available answer
+to a class of error this project has now made twice, and it costs one editor
+walk plus a decoder.
+
 ## `k2kmon learn` — the one inspector mode not verified on hardware
 
 **Status:** implemented; `watch`, `ask`, `read`, `compare` and `types` were all
