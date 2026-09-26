@@ -399,7 +399,10 @@ KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
         notes="RESOLUTION_NOTES §90; offset confirmed three ways (corpus, "
               "generic empty block, and with 2P LOPASS loaded). The 0.5 dB "
               "per unit is the DISPLAY's law and is deliberately not treated "
-              "as the acoustic one -- see the decoder's docstring.",
+              "as the acoustic one -- see the decoder's docstring. §93: the "
+              "acoustic measurement was DECLINED on prevalence, not deferred "
+              "-- 34 voices in one E4B bank of 131 are the whole demand, and "
+              "Adjust (offset 226) is what resonant material actually uses.",
         decode=_res_depth_db,
     ),
     (ObjectType.Program, 215): Field(

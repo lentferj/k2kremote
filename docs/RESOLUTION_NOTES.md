@@ -10466,3 +10466,71 @@ gives the duration, or a deliberate long power-off is run, the memory note is
 narrowed rather than reversed.** The control that *was* needed is already
 answered: Jan confirmed the K2000 has no soft restart, so there is no warm-reboot
 branch to rule out.
+
+## 93. F2 RES `Depth`: the law stays unmeasured, and prevalence is why (2026-09-26)
+
+**Status.** Closed as **declined**, not as resolved. The `0.5 dB per unit`
+reading of offset 231 stays what it already is in the shipped decoder — **the
+display's law, explicitly labelled as such** — and no acoustic measurement is
+being spent to promote it. This was the last open cell of `mpc2emu`'s parameter
+matrix, and it was deliberately parked until a prevalence number existed so it
+would compete against their other open cells on evidence rather than on being
+the one most recently discussed.
+
+**The number that decided it, and the population it is drawn from.** `mpc2emu`
+ran the scans (§KRZF2RESDEPTH on their side). **I have not re-run them** — their
+scan scripts live in `tests/re_banks/`, which is gitignored there, so what is
+reproducible is the method recorded in their note rather than a file. Method:
+`krz_parser._read_objects` + `walk_program`, tag `0x51`, `[0] == 16` marks a RES
+block, then bytes `[5]` and `[6]`.
+
+**The deciding population is E4B, not KRZ** — and that is the part worth keeping.
+`lfo1_to_filter_q` / `lfo2_to_filter_q` are set by `e4b_parser` alone and emitted
+by `e4b_writer` alone, so **E4B→KRZ is the only route that could ever need the
+Depth law.** Ranking a *writer's* priority on the KRZ corpus would have been the
+wrong population, which `mpc2emu` caught in themselves before publishing it:
+
+```
+141 .e4b files, 131 parsed, 32 558 voices
+  control: lfo1_to_filter_cents non-zero    2 444 voices
+  lfo1_to_filter_q non-zero                    34 voices
+  lfo2_to_filter_q non-zero                     0 voices
+  distinct banks containing any              1 of 131
+```
+
+The 10 unparsed files fail identically as `Not an IFF FORM file` — not E4B banks
+at all, so the denominator is audited rather than assumed.
+
+**The KRZ side agrees and its concentration is worse than its headline:**
+
+```
+201 .KRZ, 4 280 programs, 16 649 layers   (control: F4(0x53) = 16 649)
+  F2 block is RES type            90 layers  (0.5%)
+    Adjust non-zero               90         <- law already measured
+  Src1 routed AND Depth non-zero  68 layers  (0.41%)
+                                  43 programs (1.00%)
+                                  10 files of 201
+```
+
+**36 of the 68 layers are in one bank**, so the layer count overstates the spread
+about twofold; no program carries more than three. `mpc2emu` counted distinct
+programs and files *after* the layer number came back looking better than it was
+— the same correction this project had to make on `GM ROM Kit 1`, arriving on
+their side.
+
+**Why it is not close.** 34 voices in a single bank of 131 is the entire demand;
+half the field (`lfo2_to_filter_q`) is dead across 32 558 voices; **`Adjust` at
+offset 226 is already measured** (dB×2) and is what resonant material actually
+uses — 90 of 90 RES layers set it; and nothing shipped emits F2 RES `Depth`, so
+no output is wrong today.
+
+**What would reopen it:** a non-E4B source starting to carry resonance
+modulation, or Jan specifically wanting E4B→KRZ faithful on that one bank.
+
+**What this closes on our side: nothing needs changing.** The decoder at
+`k2kfields.py` offset 231 already returns `"+X.X dB (displayed)"` and its
+docstring already says the quiet part — *"This is the display's law, not an
+acoustic measurement… do not derive a conversion from it"* — so the shipped
+confidence already matches the evidence. A declined measurement is only safe if
+the code was never claiming the measurement had happened, and here it was not.
+Parked at the same status as the `§KRZRESKEYTRK` idea.
