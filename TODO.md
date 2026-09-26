@@ -21,6 +21,82 @@ verification was done on Jan's K2000R on **2026-06-19** (probe scripts in
 
 ---
 
+## STAGED FOR 2026-09-27 — read this section first
+
+Handed over at 01:50 on 2026-09-27, rig free, `origin/main` at `ce631b3`.
+
+### 1. ⚠ PERISHABLE — tonight's power-off IS the sample-RAM experiment
+
+**Status:** staged, and the evidence is destroyed by the first thing anyone
+normally does in the morning.
+
+§92 leaves exactly one thing open: whether Soundblock 200 survived the
+2026-09-26 power cycle because sample RAM is non-volatile, or because a **brief**
+off-period let DRAM hold its charge. The discriminator is a *long* power-off, and
+Jan is powering the machine down overnight — **so the experiment runs itself, for
+free, if nobody disturbs it.**
+
+**Before touching anything on the K2000 tomorrow, in this order:**
+
+1. read the inventory (`DIRBANK`, Programs / Keymaps / Soundblocks);
+2. read Master page 1 and note `Samples:NNNNNK` (it was `65019K` either side of
+   the short cycle — a wipe should move it);
+3. sound **program 217** and report amplitude, not an f0: pre-roll vs note. `217`
+   is verified to key off RAM Soundblock 200 (`EditKeyMap → Sample:200*LF2TONE-C 4`)
+   and has no modulation to confound the read.
+
+**Do NOT, before those three:** reload CD5, run `Master → Delete → Everything`,
+or load a master file. **This morning's clear-then-reload order is precisely what
+destroyed this evidence the first time**, and §91 records that as a prediction
+filed and never tested.
+
+**Outcomes.** LF2TONE present *and* sounding -> the recorded claim "K2000 sample
+RAM always clears on power-off" is **wrong** and gets reversed, not narrowed.
+Absent or silent -> it clears over a long off-period but not a brief one, which
+is the narrowed form already written, now with evidence for both halves.
+
+Caveat to state either way: it is one power event, and the interesting outcome
+(survival) is the one that would need repeating before it goes in as a property
+of the hardware.
+
+### 2. Leg A of the panner `KeyTrk` pivot — `mpc2emu`'s, spec in hand
+
+**Status:** open, not started. Blocked on nothing; it was dropped at 01:50
+rather than half-built.
+
+Build on a **free ID**, not over anything in 200-217, so the LFO2 bank stays
+intact. Set `Adjust` centred, `Src1`/`Src2`/`Depth`/`VelTrk` all zero so
+`KeyTrk` is demonstrably the only thing moving the pan, and **both wire bytes**
+(`seg 0x52[2] = 0x70`, `seg 0x52[14] = 0x90`). The wires are not optional: a
+panner doubles its wire and is silent with both outputs centred, and that failure
+looks exactly like "KeyTrk does nothing" — `mpc2emu`'s §K2PANWIRES, an evening
+already paid for.
+
+Legs: **A** `KeyTrk=0` (control — every key centred; if A is not flat, stop),
+**B** `+10`, **C** `-10`. **The pivot is where B and C cross**, which is immune
+to any static offset in the program, the wires or the capture chain. `mpc2emu`
+plays 24/36/48/60/72/84/96 per leg and reports L/R balance. Confirm the setup on
+the panel and tell them the ID before they capture.
+
+Two ALG-page facts learned the hard way (§92): the cursor lands on the **DSP
+function box**, not `Algorithm` (`CursorUp` once), and **an algorithm nudge is not
+reversible** — 1 → 31 (it wraps) → 1 restores the number but leaves the function
+slot changed.
+
+### 3. CI for `ce631b3` — GREEN, nothing to do
+
+Run `36280498463`: **success**, all seven matrix jobs
+(ubuntu 3.11/3.12/3.13, macos 3.11/3.13, windows 3.11/3.13). Listed only so
+nobody goes looking for an unverified push.
+
+### 4. Offered, never taken up — decide or drop
+
+* SHA-pin the CI actions (currently floating tags).
+* A line beside `CLAUDE.md:35` on `--system-site-packages` hiding undeclared
+  dependencies — it also hides `.venv/` from the default `grep` (§92).
+* Three commercial preset names already public in `origin/main`
+  (`Moog Bass` ×2, `Proteus 12String`) — reword or leave.
+
 ## Physical-panel mirroring — RESOLVED
 
 **Status:** **verified on hardware 2026-08-15** with a human at the panel.
