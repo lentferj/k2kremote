@@ -9578,3 +9578,44 @@ are invisible to it, so wheel order and byte value diverge after `+Fall Saw`
 with nothing on screen to say so. Only writing the byte and reading the label
 back exposes the gaps. **Enumerating a field from the panel tells you the valid
 set; it does not tell you the encoding.**
+
+## 89. A validated estimator can still be the wrong estimator (2026-09-25)
+
+**Status.** Method note, from the LFO2 run. No code change here; the lesson is
+about how this project validates, and CLAUDE.md mandates synthetic testing, so
+it applies to everything in `tests/`.
+
+I re-validated `mpc2emu`'s `pan_swing_db` before endorsing it — synthetic
+stereo at 0/6/20/30 dB peak-to-peak, errors 0.00/0.02/0.08/0.13 dB against the
+arcsine-percentile expectation of 1.975·A. Correct, and it caught a real fault
+in my own first attempt (a 2.5 dB shortfall at 20 dB that turned out to be my
+test signal clipping, not their code).
+
+The function was then **demoted anyway**. Its negative control — a program with
+nothing routed — reported **2.20 dB of "pan swing"**. Narrowband analysis at
+the known modulation rate showed the control's strongest component sitting at
+**0.400 Hz, not 3.400**: the rig has genuine slow stereo image wander, and a
+broadband percentile statistic reads that as pan depth. The replacement
+measures coherently at the expected frequency and reports the peak's frequency
+alongside its amplitude, so a caller can see whether the effect is where it was
+meant to be.
+
+**Why the validation could not have caught it.** Every test signal I built
+contained *only* the thing being measured. A synthetic sweep with no confound
+in it cannot detect an estimator's sensitivity to that confound — it measures
+whether the statistic recovers a known answer, never whether the statistic
+answers the right question. Both of us validated honestly and neither
+validation had a null component in the signal.
+
+**What the negative control did that the validation could not.** It was the
+only input whose correct answer was *known to be nothing*. It is the same
+device as §37's driven rail and the depth gate that caught a confident
+"39.003 Hz" off an unmodulated tone: a measurement is only trustworthy once
+something that should read zero does.
+
+**Rule.** Validating an estimator against clean synthetic input establishes
+that it computes what it claims. It says nothing about whether that quantity is
+the one the experiment needs. Those are separate questions and only the second
+is answered by a negative control taken through the whole apparatus — the real
+rig, the real capture path, the real analysis — rather than through the
+analysis alone.
