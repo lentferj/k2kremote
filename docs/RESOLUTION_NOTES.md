@@ -9469,3 +9469,112 @@ table, and the ~7,500-string pool has no formula, so it stays out. A few dozen
 short functional phrases needed for interoperability are a different object
 from a dump of the pool, and each of them is verifiable on the LCD in front of
 you. README's third-party table records the distinction.
+
+## 87. A DUMP of an object the editor holds returns the edit buffer (2026-09-25)
+
+**Status.** Measured on the K2000R during the LFO2 bank run. Not yet guarded in
+code — see the note at the end for why that is harder than it looks.
+
+Reading a Program object over SysEx while **that object is open in the front
+panel's editor** does not return the stored object. It returns whatever the
+edit buffer currently holds, including edits the user has not saved and may be
+about to discard.
+
+Seen directly. Program 213's `Shape` byte (program offset 102) is stored as 2.
+With the editor open on 213 and the panel's Shape field wheeled to an arbitrary
+position, `read_object_whole(Program, 213)[102]` returned **21**. After
+answering the `Save L2 SHAPE B5 before exiting?` prompt with **No** — which
+discards — the same read returned **2**. Nothing had been written at any point:
+
+```
+editor open, wheel moved   -> DUMP offset 102 = 21   (edit buffer)
+answer the prompt with No  -> DUMP offset 102 = 2    (stored object)
+```
+
+**Why this is worth a section of its own.** It is the same shape as §84's
+silent over-read: a read that succeeds, returns plausible data, and answers a
+different question than the one asked. There is no error, no flag in the reply,
+and no way to tell 21-because-stored from 21-because-someone-is-turning-a-wheel.
+A measurement built on it is wrong in a way that reproduces perfectly for as
+long as the editor stays open.
+
+**Two related behaviours, both discovered the same way.**
+
+* **A LOAD to an editor-held object is refused**, with
+  `DNAK ObjectCurrentlyBeingEdited`. Writes fail loudly. Only reads are silent.
+  That asymmetry is the trap: the dangerous direction is the quiet one.
+* **A bare `Exit` does not leave the editor.** It raises `Save <name> before
+  exiting?` and waits on a `Rename Cancel Yes No` soft row. A script that
+  presses `Exit` and carries on has not left the editor, is still holding the
+  object, and will have its next LOAD refused and its next DUMP answered from
+  the buffer. `probes/p36_filter_fields.py:leave_editor()` already handles this
+  correctly — it finds `No` **by label** via `soft_index` rather than by
+  position — and every script in this run that hand-rolled `press_button(Exit)`
+  got it wrong. Use the helper.
+
+**Our exposure.** `k2kmon read` / `compare` / `patch` (`monitor.py:482,558`)
+all read objects with no knowledge of panel state, and `patch` reads *before*
+writing to show a diff. That before-image is from the edit buffer if the user
+happens to be in the editor on that object — though the write that follows
+would then be refused, so `patch` fails safe by accident rather than by design.
+
+**Why there is no guard yet.** There is no known way to ask the K2000 "is this
+object open in an editor". The DNAK proves the device *knows*, but it only says
+so when refused a write, and provoking a refusal to make a read safe means
+writing. The honest options are to document it (done here) or to have callers
+that care read twice with a panel-state check in between, which is not obviously
+better than telling the operator to leave the editor first. **Do not add a
+speculative guard**: the failure is silent, so a guard that is wrong would be
+silent too.
+
+## 88. The LFO Shape enum is positional, and the gaps are the finding (2026-09-25)
+
+**Status.** Measured on the K2000R, 2026-09-25, from the LFO2 measurement bank
+at programs 200-217. Program object offset **102** = LFO2 Shape, offset **101**
+= LFO2 Phase (found by diffing two programs that differed only in which byte
+carried the value — see below).
+
+```
+ 0  None        5  Triangle     11..19  "Not Found"
+ 1  Sine        6  +Triangle    20  3 Step    28  7 Step    34  10 Step
+ 2  +Sine       7  Rise Saw     21  +3 Step   29  +7 Step   35  +10 Step
+ 3  Square      8  +Rise Saw    22  4 Step    30  8 Step    38  12 Step
+ 4  +Square     9  Fall Saw     24  5 Step    31  +8 Step   39  +12 Step
+                10  +Fall Saw   26  6 Step    32..33, 36..37, 40+ "Not Found"
+```
+
+**The step shapes are positional:** `byte = 14 + 2 * step_count`, with the `+`
+variant at `byte + 1`. The holes at 32/33 and 36/37 are exactly where **9-Step
+and 11-Step would sit**. The instrument has no such shapes and the encoding
+leaves their slots empty rather than packing the list.
+
+That is the whole point of the note. A sequential reading of the enum — walk
+the labels in order, assign 0,1,2,… — reproduces the first eleven values
+correctly and then silently diverges, because the region where it breaks is the
+region a corpus rarely exercises. `mpc2emu` was about to ship exactly that, as
+"the old table +1", which is right through `+Fall Saw` and puts `8 Step` at 21,
+where the machine reads `+3 Step`.
+
+**Two methods that could have disagreed, and did not.** `mpc2emu`'s corpus
+histogram over 32,583 LFO segments reported **27 distinct values reaching 39**
+and could not say what they meant. This sweep gives 11 valid values at 0..10
+plus 16 step shapes — **27, topping out at 39**, with no residue. Before the
+encoding was known, a maximum of 39 was equally consistent with corrupt data;
+afterwards it is the top of the enum. Neither result derives from the other.
+
+**The label set was cross-checked against the ROM** independently of the panel:
+the shape table at `0x1A17C6`…`0x1A1D46` holds `Rise Saw`, `+Rise Saw`,
+`Fall Saw`, `+Fall Saw`, `3 Step` … `+12 Step` as contiguous records on a
+76-byte stride. **The ROM table is contiguous where the byte values are not**,
+so the enum index is not a direct index into it. There is an indirection here
+that has not been traced; do not assume one. `Not Found` is the K2000's own
+string (`0x18EAC0`, `0x18EB60`, `0x18ED8E`, `0x190E81`, `0x190E8E`), not a
+paraphrase, and an out-of-range byte displays it rather than being clamped.
+
+**Method.** The wheel sweep came first and was misleading: spinning the Shape
+field enumerates 26 shapes in a **cycle** (it wraps, so there is no rail to
+anchor on), and it shows only the valid labels — the nine "Not Found" values
+are invisible to it, so wheel order and byte value diverge after `+Fall Saw`
+with nothing on screen to say so. Only writing the byte and reading the label
+back exposes the gaps. **Enumerating a field from the panel tells you the valid
+set; it does not tell you the encoding.**
