@@ -9962,14 +9962,17 @@ is a decision, not an omission.
 
 **Status.** Settled on the K2000R. The ProgramMode header's `Xpose` is
 battery-backed global state with **no object representation and no SysEx read
-path** — the LCD is the only way to read it.
+path** — the LCD is the only way to read it. **§92 identifies the field: it is
+`MIDI mode → XMIT → Transpos`, and it is transmit-side, so it cannot reach notes
+arriving at MIDI In.** Read §92 before acting on anything below about what this
+field can affect.
 
 There are three distinct settings on this machine that transpose, and they are
 easy to conflate because two are spelled `Xpose`:
 
 | where | scope | read path |
 |---|---|---|
-| **ProgramMode header** `Xpose` | global | **LCD only** |
+| **ProgramMode header** `Xpose` = `MIDI:XMIT Transpos` (§92) | global | **LCD only**, on either page |
 | **MasterMode page 1** `Transpose` | global | LCD (and presumably a master dump) |
 | **EditProg → KEYMAP** `Xpose` | per layer | in the Program object |
 
@@ -10012,21 +10015,29 @@ chain, from sent key 60 sounding 130 Hz; if Jan's own saved default is 0ST, that
 −12 belongs to **their MIDI path** rather than to anything the instrument is
 compensating for.
 
-**Why this matters beyond curiosity.** A pitch measurement's reference can be
-shifted a full octave by a setting that appears in **no object dump**. That is
-exactly what happened during the LFO2 work: `mpc2emu` measured every sounding
-key an octave below nominal for hours, and the cause was this field — moved, as
-it turned out, by my own stray `Octav+` press (§90). **Anything measuring pitch
-on this rig must read the LCD header, not the objects.** **The cold-boot hazard is NOT closed, and saying it was rested on the
-unproven leg.** "Because it is stored it cannot differ across a power event"
-assumes the battery-backed branch — and under the surviving alternative (not
-stored, cold default 12ST) a power event silently moves a machine left at 0ST to
-12ST, a 1200-cent reference change invisible to every dump. It stays open until
-the 7ST cycle runs. (`mpc2emu`'s catch; the practical conclusion was resting on
-the half of the experiment that did not resolve.) The master-load result
-sharpens it rather than settling it: `Xpose` moved when a file touching nothing
-else was loaded, so the field does respond to operations that leave no other
-trace.
+**Why this matters beyond curiosity — and NOT for the reason first written
+here.** The sentence this paragraph originally carried was *"`mpc2emu` measured
+every sounding key an octave below nominal for hours, and the cause was this
+field"*. **That is wrong twice over**, and both refutations are recorded below or
+in §92: the −12 never existed (it was period doubling in an ACF estimator, see
+the subsection at the end of this note), and the field **cannot affect notes
+arriving at MIDI In at all** (§92 — measured, not argued). What survives is the
+narrower and still useful point: **a global setting that appears in no object
+dump can differ between two sessions, and only an LCD read will tell you.** That
+is a reason to bracket a measurement with a header read, not a diagnosis of
+anything that happened during the LFO2 work.
+
+**The cold-boot hazard is CLOSED, on both legs — see §92.** The paragraph here
+used to say it was open until the 7ST cycle ran. The cycle ran (2026-09-26): a
+machine left at `7ST` came up at `7ST`, which refutes the surviving alternative
+(not stored, cold default 12ST) and confirms the battery-backed branch that the
+earlier reasoning had merely assumed. Independently, the field is transmit-side
+with `LocalKbdCh:None`, so it could not have shifted a received-note reference
+even if it had moved. (`mpc2emu`'s catch that the conclusion rested on the
+unresolved half was correct and worth keeping: the fix was to run the
+experiment, not to argue the assumption.) The master-load result stands as
+written — `Xpose` moved when a file touching nothing else was loaded, so the
+field does respond to operations that leave no other trace.
 
 **A free and unusually strong check on a restore.** The CD5 reload put the
 original bank back, and programs 212, 213 and 217 matched the pre-restart
@@ -10096,3 +10107,362 @@ that K2000 sample RAM is volatile. The inventory came back 1 → 1 — but becau
 the CD5 reload restored the sample, not because it never left. The procedure
 Jan ran (clear, then reload) cannot test that leg, so the volatility claim
 remains as it was.
+
+## 92. The header `Xpose` is `MIDI:XMIT Transpos`, and it is transmit-side (2026-09-26)
+
+**Status.** Settled on the K2000R (v3.87J). Three things that §91 left open or
+got wrong are now measured: the field's identity, whether it survives a power
+cycle, and whether it can affect a pitch measurement at all. One leg is still
+open — see *What is still open* at the end.
+
+### It is the MIDI XMIT page's `Transpos`
+
+The lead came from the manual — Program mode soft buttons: *"Changing the
+transposition with the soft buttons will also change the corresponding setting
+on the MIDI XMIT page."* That was labelled **[S]**, manual-sourced, and the
+manual is a K2vx-family document against our 3.87J, so it was checked rather
+than adopted.
+
+The first check was **uninformative and it is worth recording why**: header
+`Xpose:0ST` and `XMIT Transpos:0ST` agreed, and **a comparison of two things
+held at the same value carries no information about whether they are coupled.**
+Moving one and reading the other does:
+
+```
+header  0ST  --Octav+ soft key-----> header 12ST    XMIT Transpos  0ST -> 12ST
+header 12ST  --both Octav keys-----> header  0ST    XMIT Transpos 12ST ->  0ST
+header  0ST  --XMIT page, wheel +7-> header  7ST    XMIT Transpos  0ST ->  7ST
+```
+
+So **[S] → measured**. §91's "no SysEx read path" stands; "the LCD is the only
+way to read it" stands; but the field has a *second* LCD home, and a name.
+
+**The third leg carries weight beyond bookkeeping: 7 is representable, so the
+field stores semitones, not an octave count.** That was a live alternative —
+every mechanism we had ever seen move it moved it by exactly 12 — and under it
+the 7ST cycle below would have returned 0 or 12 for a reason having nothing to do
+with persistence, and we would have mis-read the result as a refutation.
+
+### The globals, read off `MIDI mode → RECV`
+
+```
+MIDIMode:RECEIVE
+BasicChannel:8         SysEx ID  :0
+MIDI Mode   :Multi     SCSI ID   :6
+AllNotesOff :Normal    BendSmooth:On
+ProgChgType :Extended  LocalKbdCh:None
+VelocityMap :1 Linear  BankSelect:Ctl 32
+PressureMap :1 Linear  PowerMode :User
+```
+
+`SysEx ID:0` independently confirms the device-id-0 finding. `PowerMode:User` is
+the mode the manual says retains user settings across power-up. **`LocalKbdCh:
+None`** is the one that matters: the manual's caveat list says that with it
+unmatched, only Program Change Type, Program Change and Buttons operate as
+programmed, Transpose being one of the *remaining* ones. Predicted consequence —
+the transposition is applied on the **transmit** side and cannot reach notes
+arriving at MIDI In.
+
+### Measured: it does not touch received notes
+
+`mpc2emu` captured ROM program 1 at `Xpose:7ST`:
+
+```
+f0 at 7ST          260.7 Hz
+  vs 261.63 (no effect)     -6.2 cents
+  vs 392.00 (applied)     -706.2 cents
+same program+note at 0ST, same session, 20 min earlier:  260.7 Hz  (+0.0 cents)
+```
+
+The control is the strong part: same rig, same session, same gain staging, same
+analysis, **only `Xpose` differs**. ROM program 1 was chosen deliberately so the
+comparison is against a same-day measurement rather than against a nominal.
+
+### Measured: 7ST survives a power cycle
+
+Jan power-cycled at the switch (**and confirmed the K2000 has no soft restart —
+power off/on is the only kind there is**, so there is no warm-reboot branch to
+rule out). Bracketed either side, nothing reloaded in between:
+
+```
+                      pre                        post
+header                Xpose:7ST  Channel:9       Xpose:7ST  Channel:9
+XMIT   Transpos       7ST                        7ST
+RECV   LocalKbdCh     None                       None
+RECV   PowerMode      User                       User
+Master page 1         identical, line for line
+prog 212 / 213 / 217  b66fb04d / db7dea9e / 74512bcf   all byte-identical
+```
+
+`~/temp/k2k_pre7st_state_20260926.json` and `..._post7st_...json`.
+
+**7 came back as 7**, so the field is genuinely retained and stores semitones —
+confirmed a second time from the far side of the cycle. §91's surviving
+alternative (not stored, cold default 12ST) is refuted. **Both legs of the
+cold-boot hazard are closed**: it cannot move a received-note reference, and it
+does not move across a power event.
+
+**What still stands operationally.** Keep the LCD header bracket on any pitch
+measurement. It costs one 131 ms read, and it is the only thing that would catch
+`LocalKbdCh` being changed — by a person, or by a bank load, which is exactly how
+a stray 12ST arrived in the first place (§91). The field also has to be displayed
+correctly by k2kremote regardless of what it can affect.
+
+### Two method notes, both about tests that cannot answer the question asked
+
+**A blind digit entry would have confirmed the hypothesis through a broken
+instrument.** The XMIT page's cursor was sitting on **`Channel`**, not
+`Transpos`. Typing `7 ENTER` — the obvious way to set the value — would have set
+the MIDI transmit channel to 7 and left the transposition at 0. The audio would
+then have come back at 261.6 Hz, which reads as *"7ST set, no pitch shift, field
+confirmed harmless"*: **the right answer with no evidence under it, and
+unfalsifiable afterwards because the capture looks identical either way.** The
+cursor was instead located by the nudge-and-restore method (wheel one click, see
+which row moved, wheel back) from the LFO cursor mapping, and the reverse-video
+mask is no help here — it is empty on a parameter page, because the parameter
+cursor lives in the graphics plane and the mask marks only the name-edit
+underscore.
+
+**The inventory read cannot test sample-RAM volatility, and it was presented as
+if it could.** §91 records a prediction filed and untested — `Soundblock 200
+LF2TONE -> GONE` across a power event — which this cycle was supposed to settle
+by reading the inventory before any reload. It came back `Soundblock 1 → 1,
+[200, 'LF2TONE']` still listed. **That does not distinguish the branches.** An
+inventory entry is object-database metadata in battery-backed RAM; the sample
+data is in volatile sample RAM, so *object listed, data gone* is a live
+possibility — and it is precisely the failure mode our own note already
+describes ("a Program existing and being selectable is not evidence it will make
+sound"). Reading the object's bytes does not rescue it either: only id and name
+were captured pre-cycle, so there is no baseline to diff. **The test has to be
+audio.** All 18 resident programs at 200–217 key off Soundblock 200, so any of
+them is a probe; `217 NO MOD CTRL` is the cleanest, having no modulation to
+confound an amplitude read. The right report is *signal present/absent*, not an
+f0 — an estimator that returns a pitch for silence is a hazard already paid for
+once this week (§91).
+
+### Three more names for the same field, and one that is a trap
+
+The `EditKeyMap` page displays this field as **`MasterXpose`**, and it read `7ST`
+at the same moment `MasterMode page 1 → Transpose` read **`0ST`**. So:
+
+| label | page | which field |
+|---|---|---|
+| `Xpose` | ProgramMode header | **the global transpose** |
+| `Transpos` | `MIDI → XMIT` | **the global transpose** |
+| `MasterXpose` | `EditKeyMap` | **the global transpose** |
+| `Transpose` | `MasterMode` page 1 | a *different* setting |
+
+**The one called "Master" is not the master-table one.** Anybody writing a KRZ
+keymap importer meets `MasterXpose` in the keymap editor and reaches for the
+master table. (Checked against `mpc2emu`: nothing there reads or writes
+`MasterXpose` or `master_xpose`, so no live bug — recorded because the next
+keymap writer is where it would land.)
+
+### A bank load does not touch it; a master file does
+
+Jan reloaded the bank from CD5 afterwards and the field **stayed at `7ST`**, with
+every program SHA-1, both MIDI pages, Master page 1 and the whole inventory
+identical to the pre-cycle capture (`~/temp/k2k_postreload_state_20260926.json`).
+Second observation of the same thing — this morning's reload left it at `12ST`.
+So the contrast with §91's `MASTER01.KRZ` result is clean: **a bank load leaves
+the field alone, a master-file load reaches it.** That is what makes it a
+master-table field rather than merely a global.
+
+### Sample RAM: the recorded claim is contradicted
+
+**Soundblock 200's sample data survived the power cycle, and it survived intact.**
+Three independent channels:
+
+* **`mpc2emu`'s amplitude read** on program 217, post-cycle, pre-reload:
+  pre-roll peak −82.4 dBFS, note peak −33.4 dBFS, **lift +53.8 dB**.
+* **The spectrum**: dominant partial **219.7 Hz** (−2.4 cents from A3, inside one
+  FFT bin), next partial **−54.9 dB** — essentially a pure sine — sustain flat at
+  −40 dBFS for 2.2 s with no dropouts. Degraded DRAM gives dropouts, harmonic
+  garbage or a wrong waveform. This is a textbook test tone.
+* **Master page 1 `Samples:65019K`, identical pre- and post-cycle.** A wipe would
+  have freed LF2TONE's allocation and moved that figure. Captured before either
+  session knew it mattered, which is what makes it worth leading with.
+
+**`mpc2emu` raised the reading that had to be excluded first, and it was the one
+neither of us had: program 217 might not depend on Soundblock 200 at all.** ROM
+soundblocks do not appear in the RAM inventory, so `Soundblock 1 → 1` cannot rule
+out a ROM waveform, and a program sounding a ROM sample would produce exactly the
+same amplitude result while saying nothing about sample RAM. Read end to end:
+
+```
+ProgramMode, 217 selected    KeyMap Info: *NO MOD CTRL
+EditProg:KEYMAP              KeyMap:217*NO MOD CTRL
+EditKeyMap                   Sample:200*LF2TONE-C 4      <- RAM soundblock, "*" marks RAM
+```
+
+**And the 220 Hz is derived, not looked up.** Unity playback was verified link by
+link before concluding anything from the frequency — `EditProg:PITCH` entirely
+zeroed (`Coarse 0ST`, `Fine 0ct`, `FineHz 0.00Hz`, `KeyTrk 0ct/key`, both Srcs
+`OFF`), keymap `Xpose:0ST` / `KeyTrk:100ct/key` / `VelTrk:0ct`, sample
+`Coarse 0ST` / `Fine 0ct`. So note 60 on a sample rooted `C 4` plays at its
+recorded rate, and the measured 219.7 Hz **is the sample's own content**. The
+`-C 4` in the name field is a root-key assignment, not a pitch claim: a 220 Hz
+tone rooted at C4 sounds A3 when played at C4, which is what was measured. No
+discrepancy to reconcile.
+
+**That capture is also a second control on the transpose finding, and a better
+one than the first.** It was taken at `Xpose:7ST`; had the transposition reached
+the received note, 7 semitones above 220 Hz is **329.6 Hz**. Measured: 219.7. So
+the transmit-side result stands on two legs, on two programs — ROM program 1 with
+a same-day `0ST` comparison, and a **RAM** program with a unity-playback
+derivation. It came free from a capture requested for something else.
+
+**And the 220 Hz is a match against a written specification, not a measurement
+floating free.** `mpc2emu` generated this sample —
+`tests/re_banks/gen_krz_lfo2_re.py`, commit `72cdcb3`:
+
+```python
+RATE = 44100 ; NOTE = 60
+data, n = _tone(220.0)
+sd = SampleData(name='LF2TONE', ..., root_note=NOTE,
+                loop_type=LoopType.FORWARD, loop_start=0, loop_end=n-1)
+```
+
+A 220.0 Hz sine at 44.1 kHz, rooted at note 60, looped over its whole length.
+Measured post-cycle: **219.7 Hz, −2.4 cents, inside one FFT bin**, second partial
+54.9 dB down. **The flat 2.2 s sustain is the forward loop** — designed
+behaviour, which both of us had been treating as circumstantial evidence of
+integrity when it is actually the spec. So the audio channel is a **bit-level
+match against a specification we can read**, not merely "a clean tone consistent
+with survival".
+
+⚠ **I first reported the opposite — "`LF2TONE` appears nowhere in either tree" —
+and that negative was an artefact of the search tool. This is worth more than the
+finding it nearly spoiled.** In this environment `grep` is a **shell function**
+wrapping `ugrep -G --ignore-files --hidden -I …`. `--ignore-files` honours
+`.gitignore`, so **ignored paths are skipped silently, with exit 0 and no
+warning**. `mpc2emu/.gitignore:21` is `tests/` — which is exactly where that
+project's CLAUDE.md says the RE bank generators live. So the one directory that
+mattered was the one directory the tool could not see, and the negative came back
+clean and confident.
+
+Verified, and it is worse than one missing file. **`CLAUDE.md` is gitignored in
+both repos**, so a project's own conventions file is invisible to the default
+search:
+
+```
+$ grep -rln "Only one session drives" .      # wrapper
+(nothing, exit 0)
+$ command grep -rln "Only one session drives" .
+./CLAUDE.md
+```
+
+**`command grep` bypasses the function.**
+
+**There is one tool defect here and four method defects.** The method ones came
+out of `mpc2emu` and me auditing our own negatives, each catching the other:
+
+**Tool:** `ugrep --ignore-files` → use `command grep`.
+
+**Method — every one of them a claim outrunning its method:**
+
+1. **scope narrower than the claim** — searched `docs/`, said "the repo";
+2. **a spot-check presented as an enumeration** — confirmed guesses, missed
+   everything not guessed;
+3. **lossy post-processing of a correct enumeration** — the source was right and
+   the pipeline lied;
+4. **an undisclosed filter over a correct enumeration** — relevance judged
+   silently.
+
+3 and 4 are worth separating: 3 is a transformation applied **by accident**, 4 a
+**deliberate judgement** applied without saying so. **Accident and judgement fail
+identically once undisclosed.** `command grep` fixes none of the four.
+
+**The part to keep is about the detector: none of the four is visible from inside
+its own result.** Every one was caught by a result **colliding with something the
+reader already knew** — `docs/` appearing as ignored, a `config.toml` that could
+not exist, eleven scripts one of us could name. That is not a check anybody can
+run; it fires only when you happen to hold the contradicting fact.
+
+**Which argues for cheap disclosure over careful checking.** Saying *"I searched
+X"* costs one clause and makes the gap visible to someone who **does** hold the
+fact you are missing. Checking harder does not, because the check is drawn from
+the same picture the error came from — the same point as a guard inheriting the
+incident it was written for.
+
+(2) needs no broken tool. Theirs was a search of `docs/*.md` reported as "that
+number is in neither tree" — the conclusion happened to hold when re-run at full
+scope, but it had not been established when it was stated. **A true conclusion
+reached without the evidence for it.**
+
+⚠ **I committed (3) in the very paragraph where I recorded (1), and (4) in the
+paragraph where I recorded (3).** The first version said "in k2kremote no source
+directory is ignored … so the exposure here is `CLAUDE.md` and `config.toml`" —
+`git check-ignore` on six directory names **I chose**, stated as a property of
+the repo. `config.toml` is in `.gitignore` but **does not exist**, and `.claude/`
+is a real blind spot I **omitted**. Then, enumerating properly with
+`git status --ignored`, I silently dropped everything that looked derived or
+vendored and published the remainder as "the content blind spots" — **an
+undisclosed filter over a correct enumeration, which is (4).** One of the things
+I filtered out is a genuine blind spot with a demonstrable cost:
+
+```
+$ grep -rl 'class DataTable' --include=*.py .            # wrapper
+0 files
+$ command grep -rl 'class DataTable' --include=*.py .
+./.venv/lib/python3.11/site-packages/textual/widgets/_data_table.py
+```
+
+**`.venv/` is gitignored, so a search for a dependency's own implementation
+returns a clean zero.** For this project that means Textual's widget source is
+unsearchable by default, and the venv is `--system-site-packages`, so which
+libraries are inside it and which are on the system changes the answer too.
+
+`mpc2emu` hit (4) harder and caught it the same way — by contradiction with
+something already known. Their first enumeration piped git's output through a
+`sed` that collapsed paths to their top directory, printing `docs/`, `models/`,
+`parsers/` and `writers/` as ignored when only their `__pycache__` is. And their
+spot-check missed **eleven root-level scripts**, including `rebuild_all.py` and
+`test_pipeline.py`. Same method, same hour, both of us.
+
+Exposure by repo, enumerated and **not** filtered:
+
+| repo | invisible to the default search |
+|---|---|
+| **k2kremote** | `CLAUDE.md`, `.claude/`, `probes/*.png`, `.venv/`, and the caches (`.pytest_cache/`, `.ruff_cache/`, `__pycache__/`, `*.egg-info/`) — every source dir tracked |
+| **mpc2emu** | `CLAUDE.md`, `tests/` (generators, `hw_measure.py`, fixtures), `tools/` (`parameter_matrix.py`), `.claude/`, `demo_sources/`, `mpc2emu_test_matrix.ods`, and eleven root-level scripts — only `docs/` and the package survive |
+
+`mpc2emu`'s `tools/` is the worst shape of the set: it generates
+`docs/PARAMETER_MATRIX.md`, which **is** tracked, so a reader finds the output,
+searches for what produced it, and gets a clean nothing. That has already cost
+one cross-project false negative. **Fixed there by a header in the tracked
+output** saying the generator is **untracked** — the file already named its
+generator twice and had never said that, which is the part that matters: a reader
+who searches and gets zero then doubts the header rather than the tool. It does
+not fix the search, it fixes the confusion that follows one. Jan's tracking
+decision stays open.
+
+**And the blind spot is a function of what a project vendors, not only of its
+`.gitignore`.** `mpc2emu` is stdlib-only with no venv, so it has no
+site-packages to hide and the `.venv` hazard does not reach it at all. The two
+repos are worse than each other in opposite dimensions: mpc2emu loses its own
+tooling, k2kremote loses its dependencies' source — and ours is the less stable,
+because `--system-site-packages` means *which* libraries are hidden depends on
+where each package happened to land.
+
+### What is still open
+
+**Whether the survival was nonvolatility or charge retention, which turns on one
+number nobody has yet: how long the power was actually off.** Sample RAM is DRAM,
+and DRAM without refresh holds its contents for a non-trivial interval at room
+temperature, so "a few seconds" is genuinely ambiguous:
+
+* **off for a minute or more** → retention is out, and the recorded claim
+  *"K2000 sample RAM always clears on power-off"* is simply **wrong**;
+* **off for a few seconds** → retention stays possible, and the claim should be
+  **narrowed** — clears over a long power-off, does not over a brief one — rather
+  than reversed.
+
+`mpc2emu`'s argument for the first is that perfect survival of a whole buffer —
+second partial 55 dB down, no dropouts across 2.2 s — is a coincidence retention
+has to explain and nonvolatility does not; retention is rarely all-or-nothing
+across a buffer. That is a good argument and it is still an argument. **Until Jan
+gives the duration, or a deliberate long power-off is run, the memory note is
+narrowed rather than reversed.** The control that *was* needed is already
+answered: Jan confirmed the K2000 has no soft restart, so there is no warm-reboot
+branch to rule out.
