@@ -196,7 +196,7 @@ def _parse(line: str) -> Optional[Item]:
 
 
 def counts(bridge) -> tuple:
-    """`(index, total)` from the browser header, or `(None, None)`.
+    r"""`(index, total)` from the browser header, or `(None, None)`.
 
     The header reads `Dir:\   Sel:0/25   Index:  25`, so the instrument itself
     reports how many entries there are and which one is selected — no need to
@@ -438,7 +438,7 @@ def root(bridge) -> str:
 
 
 def disk_page_path(bridge) -> str:
-    """The Disk page's own `Path = \...` line — where a save or load will land.
+    r"""The Disk page's own `Path = \...` line — where a save or load will land.
 
     Distinct from `current_path()`, which reads a BROWSER's `Dir:` header and is
     subject to the same-field truncation this module works around elsewhere.

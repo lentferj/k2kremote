@@ -846,7 +846,7 @@ All installed automatically by `pip install -e .`:
 The repo ships a no-AI quality gate. Install the pinned dev tools once:
 
 ```bash
-pip install -e ".[dev]"          # or: pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 ```
 
 Then run everything with one command — each check runs in sequence and stops at
@@ -858,7 +858,7 @@ make check
 
 | target | what it runs |
 |---|---|
-| `make lint` | `ruff check` — linting (`E`, `F`, `I`, `B`, `S`, `SIM`, `UP`, `C4`, `PL`, `RUF`, `C901`) |
+| `make lint` | `ruff check` — linting (`E`, `F`, `I`, `B`, `S`, `SIM`, `UP`, `C4`, `PL`, `RUF`, `C901`, `W`) |
 | `make format` | `ruff format` — applies formatting |
 | `make typecheck` | `mypy k2kremote k2kmaced` |
 | `make test` | `pytest` with a `term-missing` coverage report |

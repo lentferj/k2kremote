@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Dev/quality tools, pinned exactly (the repo has no lockfile, so these pins
-# plus requirements-dev.txt are the lock). Install with `pip install -e ".[dev]"`.
+# Dev/quality tools, pinned exactly (the repo has no lockfile; these exact pins
+# are the lock). Install with `pip install -e ".[dev]"`.
 dev = [
     "pytest==9.1.0",
     "pytest-asyncio==1.4.0",
@@ -76,7 +76,7 @@ line-length = 100
 extend-exclude = ["k2000", "probes", "docs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "S", "SIM", "UP", "C4", "PL", "RUF", "C901"]
+select = ["E", "F", "I", "B", "S", "SIM", "UP", "C4", "PL", "RUF", "C901", "W"]
 # No global ignores: every currently-failing rule is baselined per file below, so
 # new files are held to the full rule set (including E501, PLC0415, PLR2004 and
 # the RUF00x ambiguous-Unicode checks).
@@ -142,14 +142,10 @@ max-complexity = 10
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = [
-    "--cov=k2kremote",
-    "--cov=k2kmaced",
-    "--cov-report=term-missing",
-]
-
-# Coverage is reported, not enforced yet: no `fail_under`, so a coverage drop is
-# visible in the output without turning the build red.
+# Coverage flags live in the Makefile's `test` target, not in addopts: addopts
+# would otherwise leak into every bare `pytest` invocation, including the
+# existing multi-OS CI matrix job. `show_missing` below still gives the
+# term-missing report. No `fail_under`: a coverage drop is visible, not fatal.
 [tool.coverage.run]
 source = ["k2kremote", "k2kmaced"]
 

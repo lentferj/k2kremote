@@ -8,9 +8,12 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.10
     hooks:
+      # Check-only: hooks must never rewrite files. Rewriting also misfires when
+      # pre-commit stashes an uncommitted pyproject.toml, leaving ruff on its
+      # defaults. Apply changes explicitly with `make format`.
       - id: ruff
-        args: [--fix]
       - id: ruff-format
+        args: [--check]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.4.0

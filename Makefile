@@ -31,7 +31,7 @@ typecheck:  ## Type-check the shipped packages with mypy
 	$(MYPY) k2kremote k2kmaced
 
 test:  ## Run the test suite with coverage
-	$(PYTEST)
+	$(PYTEST) --cov=k2kremote --cov=k2kmaced
 
 audit:  ## Vulnerability, dead-code, dependency and secret scans
 	$(PIP_AUDIT) . --progress-spinner off
