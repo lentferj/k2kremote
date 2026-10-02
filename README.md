@@ -841,6 +841,46 @@ All installed automatically by `pip install -e .`:
 
 ---
 
+## Development checks
+
+The repo ships a no-AI quality gate. Install the pinned dev tools once:
+
+```bash
+pip install -e ".[dev]"          # or: pip install -r requirements-dev.txt
+```
+
+Then run everything with one command — each check runs in sequence and stops at
+the first failure:
+
+```bash
+make check
+```
+
+| target | what it runs |
+|---|---|
+| `make lint` | `ruff check` — linting (`E`, `F`, `I`, `B`, `S`, `SIM`, `UP`, `C4`, `PL`, `RUF`, `C901`) |
+| `make format` | `ruff format` — applies formatting |
+| `make typecheck` | `mypy k2kremote k2kmaced` |
+| `make test` | `pytest` with a `term-missing` coverage report |
+| `make audit` | `pip-audit`, `vulture`, `deptry`, `detect-secrets` |
+| `make check` | all of the above, with formatting in check-only mode |
+
+Scope: the shipped packages (`k2kremote/`, `k2kmaced/`) and `tests/`. The
+vendored `k2000/` library (third-party, MIT) and the dev-only `probes/` and
+`docs/*.py` scripts are excluded.
+
+Git hooks are installed with `pre-commit install` and run ruff (lint + format),
+mypy, and detect-secrets on changed files. There are no shell scripts in the
+repo, so no shellcheck/shfmt hooks.
+
+**Existing debt is baselined, not fixed.** Current lint and type findings are
+suppressed per file/module in `pyproject.toml`
+(`[tool.ruff.lint.per-file-ignores]`, `[[tool.mypy.overrides]]`) and in
+`.secrets.baseline`, so new code is held to the full rule set while the current
+tree passes. Remove a file or module from those lists as it is cleaned up.
+
+---
+
 ## License and Third-Party Sources
 
 Released under the **GNU General Public License v2.0 or later

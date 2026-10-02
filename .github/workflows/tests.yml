@@ -141,3 +141,30 @@ jobs:
             echo "::error::unexpected exit status $status"
             exit 1
           fi
+
+  # The quality gate, exactly what a contributor runs locally: ruff lint +
+  # format, mypy, pytest with coverage, and the pip-audit/vulture/deptry/
+  # detect-secrets scans. One environment, one command — separate from the
+  # pytest matrix above because it is not a matrix. See "Development checks" in
+  # README.md.
+  checks:
+    runs-on: ubuntu-latest
+    name: make check
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install ALSA headers (needed for any python-rtmidi source build)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,image]"
+
+      - name: make check
+        run: make check

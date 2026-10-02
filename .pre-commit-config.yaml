@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: Copyright (C) 2026  k2kremote contributors
+#
+# Fast, file-scoped hooks mirroring `make check`. The repo contains no shell
+# scripts (no *.sh and no bash/sh shebangs), so shellcheck and shfmt hooks are
+# intentionally absent; see the "Development checks" section of README.md.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.4.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+        files: ^(k2kremote|k2kmaced)/.*\.py$
+        # mypy's isolated hook env has no project dependencies. `attrs` must be
+        # present because it rewrites class signatures at runtime; the other
+        # runtime imports are covered by `ignore_missing_imports`.
+        additional_dependencies: [attrs==26.1.0]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]

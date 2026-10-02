@@ -19,12 +19,29 @@ dependencies = [
     "numpy>=1.24",
     "attrs>=23",
     "pillow>=9",            # used by the vendored k2000 SysEx/image library
+    # Imported directly by k2kremote.app and k2kmaced.app; declaring it keeps
+    # deptry happy and pins a dependency we actually use rather than inheriting
+    # whatever textual happens to pull in.
+    "rich>=13",
     # The psobot/k2000 SysEx protocol library is VENDORED in-tree (see ./k2000,
     # MIT-licensed) so there is no separate manual/git install step.
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-asyncio>=0.23"]
+# Dev/quality tools, pinned exactly (the repo has no lockfile, so these pins
+# plus requirements-dev.txt are the lock). Install with `pip install -e ".[dev]"`.
+dev = [
+    "pytest==9.1.0",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.10",
+    "mypy==2.4.0",
+    "pip-audit==2.10.1",
+    "vulture==2.16",
+    "deptry==0.25.1",
+    "detect-secrets==1.5.0",
+    "pre-commit==4.6.2",
+]
 # Pixel-perfect "image" render mode (kitty/sixel/iTerm2; falls back to blocks):
 image = ["textual-image>=0.6"]
 
@@ -47,6 +64,172 @@ packages = ["k2kremote", "k2000", "k2kmaced"]
 [tool.setuptools.package-data]
 k2000 = ["LICENSE"]
 
+# ---------------------------------------------------------------------------
+# Quality tools (see the "Development checks" section of README.md)
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+# Vendored third-party code (k2000/, MIT) and dev-only RE/screenshot scripts are
+# out of scope; the shipped packages and the tests are what the gate covers.
+extend-exclude = ["k2000", "probes", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "S", "SIM", "UP", "C4", "PL", "RUF", "C901"]
+ignore = [
+    "E501",    # line length is the formatter's job; comments/strings are exempt
+    "PLC0415", # deliberate lazy imports: optional/heavy deps load only on use
+    "PLR2004", # protocol/RE magic numbers are meaningful, not accidental
+    "RUF001",  # ambiguous unicode: the braille/LCD renderer uses glyphs on purpose
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# Existing debt is baselined per file so that `ruff check` passes on the current
+# tree while still flagging new rules/files. Generated from a one-off run; see
+# the "Development checks" section of README.md.
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "B007",
+    "B904",
+    "B905",
+    "C400",
+    "C401",
+    "E401",
+    "E402",
+    "E741",
+    "F401",
+    "F841",
+    "I001",
+    "PLR0402",
+    "PLR0913",
+    "PLR1730",
+    "PLW0108",
+    "RUF012",
+    "RUF100",
+    "S101",
+    "S108",
+    "S603",
+    "S607",
+    "SIM115",
+    "SIM117",
+    "SIM300",
+    "UP031",
+]
+"k2kmaced/app.py" = ["I001", "PLR0913", "RUF012", "RUF022", "RUF100", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/cli.py" = ["C901", "F401", "I001", "PLR0915", "RUF022", "SIM115", "UP006", "UP035", "UP045"]
+"k2kmaced/k2image.py" = ["RUF022", "S603", "S607", "SIM105", "SIM115", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/k2write.py" = ["RUF022", "UP006", "UP035"]
+"k2kmaced/macfile.py" = ["RUF022", "SIM102", "SIM105", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/mpc2emu_link.py" = ["RUF022", "UP045"]
+"k2kmaced/online.py" = ["UP006", "UP035", "UP045"]
+"k2kremote/app.py" = ["C901", "E731", "I001", "PLR0911", "PLR0912", "PLR0913", "PLR0917", "PLW0108", "RUF012", "RUF046", "RUF100", "S110", "UP006", "UP035", "UP045"]
+"k2kremote/braille.py" = ["I001", "UP006", "UP007", "UP035", "UP045"]
+"k2kremote/disk_browse.py" = ["RUF100", "UP006", "UP035", "UP045"]
+"k2kremote/k2kfields.py" = ["I001", "UP006", "UP007", "UP035", "UP045"]
+"k2kremote/k2kmessages.py" = ["F821", "UP006", "UP035", "UP037", "UP045"]
+"k2kremote/keymap.py" = ["UP006", "UP035", "UP045"]
+"k2kremote/macro_save.py" = ["C901", "I001", "PLR0912", "PLR0915", "RUF100", "S110", "SIM105", "UP006", "UP035", "UP045"]
+"k2kremote/midi_bridge.py" = ["C901", "I001", "PLR0912", "PLW0603", "RUF012", "RUF100", "S110", "S112", "SIM105", "UP006", "UP035", "UP037", "UP045"]
+"k2kremote/monitor.py" = ["PLR0911", "PLR0913", "PLR0917", "RUF022", "RUF100", "UP006", "UP035", "UP045"]
+"k2kremote/monitor_tui.py" = ["I001", "PLR0913", "PLR0917", "RUF012", "RUF100", "UP006", "UP035", "UP037", "UP045"]
+"k2kremote/name_cursor.py" = ["UP006", "UP035"]
+"k2kremote/refresh.py" = ["C901", "I001", "PLR0912", "PLR0913", "UP006", "UP035", "UP045"]
+"k2kremote/screenshot.py" = ["UP037"]
+"k2kremote/text_entry.py" = ["C901", "PLR0913", "PLR0917", "UP006", "UP035", "UP045"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = [
+    "--cov=k2kremote",
+    "--cov=k2kmaced",
+    "--cov-report=term-missing",
+]
+
+# Coverage is reported, not enforced yet: no `fail_under`, so a coverage drop is
+# visible in the output without turning the build red.
+[tool.coverage.run]
+source = ["k2kremote", "k2kmaced"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+python_version = "3.11"
+# Non-strict start: third-party packages ship no stubs here (textual, rtmidi,
+# PIL, the vendored k2000 library), so missing imports are tolerated.
+ignore_missing_imports = true
+warn_unused_configs = true
+
+# Vendored third-party code is not ours to type.
+[[tool.mypy.overrides]]
+module = ["k2000.*"]
+ignore_errors = true
+
+# Existing type debt is baselined per module (see the "Development checks"
+# section of README.md); these modules still get checked for syntax and imports.
+[[tool.mypy.overrides]]
+module = [
+    "k2kremote.app",
+    "k2kremote.midi_bridge",
+    "k2kremote.k2kfields",
+    "k2kremote.k2kmessages",
+    "k2kremote.text_entry",
+    "k2kremote.refresh",
+    "k2kremote.screenshot",
+    "k2kremote.monitor_tui",
+    "k2kmaced.app",
+]
+ignore_errors = true
+
+# The cleanly-typed modules are held to the individual strict flags (mypy's
+# `strict = true` is global-only, so it cannot be scoped here), so new code in
+# them cannot quietly regress. Add modules here as they are cleaned up.
+[[tool.mypy.overrides]]
+module = [
+    "k2kremote.k2kromtables",
+    "k2kremote.keymap",
+    "k2kremote.name_cursor",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+warn_return_any = true
+warn_unused_ignores = true
+no_implicit_optional = true
+no_implicit_reexport = true
+strict_equality = true
+check_untyped_defs = true
+
+[tool.vulture]
+min_confidence = 80
+paths = ["k2kremote", "k2kmaced", "tests"]
+# Unused parameters that exist only to satisfy a call/interface signature in
+# test doubles (they are required, not dead).
+ignore_names = ["cb", "queue_size_limit", "recv", "is_reply", "prompt"]
+
+[tool.deptry]
+known_first_party = ["k2kremote", "k2kmaced", "k2000"]
+extend_exclude = ["k2000", "probes", "docs"]
+# Dev tools are invoked, not imported, so "dependency defined but not used"
+# does not apply to them.
+per_rule_ignores = { DEP002 = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "pip-audit",
+    "vulture",
+    "deptry",
+    "detect-secrets",
+    "pre-commit",
+] }

@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-FileCopyrightText: Copyright (C) 2026  k2kremote contributors
+#
+# Pinned dev/quality tools. Mirrors [project.optional-dependencies].dev in
+# pyproject.toml. The repo has no lockfile of its own, so these exact pins are
+# the lock; install with:
+#
+#     pip install -r requirements-dev.txt
+#
+# (or, for the runtime packages too:  pip install -e ".[dev]")
+pytest==9.1.0
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+ruff==0.16.10
+mypy==2.4.0
+pip-audit==2.10.1
+vulture==2.16
+deptry==0.25.1
+detect-secrets==1.5.0
+pre-commit==4.6.2
