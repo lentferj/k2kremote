@@ -11,8 +11,14 @@ from types import SimpleNamespace
 import pytest
 
 from k2kremote import midi_bridge
-from k2kremote.midi_bridge import (ThrottledOut, MultiIn, BridgeConfig, MidiBridge,
-                                   SEND_GAP, SYSEX_FLOOR)
+from k2kremote.midi_bridge import (
+    ThrottledOut,
+    MultiIn,
+    BridgeConfig,
+    MidiBridge,
+    SEND_GAP,
+    SYSEX_FLOOR,
+)
 
 
 class FakeOut:
@@ -62,6 +68,7 @@ def test_to_ascii7_masks_high_bit():
 
 def test_high_bit_rows_marks_reverse_cells():
     from k2kremote.midi_bridge import _high_bit_rows
+
     # "AB" with B reverse-video (high bit), newline, then plain "Cd".
     rows = _high_bit_rows("A\xc2\nCd")
     assert rows == ["01", "00"]
@@ -72,8 +79,8 @@ def test_get_screen_text_attrs_returns_text_and_mask():
     bridge.timeout = 0.1
     bridge.client = SimpleNamespace(get_screen_text=lambda timeout: "A\xc2\nCd")
     text, mask = bridge.get_screen_text_attrs()
-    assert text == "AB\nCd"        # high bit stripped from 0xC2 -> 'B'
-    assert mask == ["01", "00"]    # and recorded as reverse-video
+    assert text == "AB\nCd"  # high bit stripped from 0xC2 -> 'B'
+    assert mask == ["01", "00"]  # and recorded as reverse-video
 
 
 def test_throttle_enforces_gap_for_sysex():
@@ -103,7 +110,7 @@ def test_gap_is_clamped_to_the_hardware_floor():
     assert ThrottledOut(FakeOut(), gap=0.0)._gap == SYSEX_FLOOR
     assert ThrottledOut(FakeOut(), gap=-1)._gap == SYSEX_FLOOR
     assert ThrottledOut(FakeOut(), gap=0.5)._gap == 0.5  # slower is always allowed
-    assert SEND_GAP >= SYSEX_FLOOR                       # ...including the default
+    assert SEND_GAP >= SYSEX_FLOOR  # ...including the default
 
 
 def test_non_sysex_is_not_throttled():
@@ -264,17 +271,18 @@ def test_rename_sends_one_change_with_whole_name_and_safe_newid():
         captured["msg"] = decoded
         return Info(decoded.type, decoded.idno, 0, True, decoded.name)
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub", timeout=0.5)
+    bridge = MidiBridge(
+        SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub", timeout=0.5
+    )
     result = bridge.rename(ObjectType.Program, 300, "Wave Of Mutil")
 
     msg = captured["msg"]
     assert isinstance(msg, Change)
     assert msg.type is ObjectType.Program
     assert msg.idno == 300
-    assert msg.newid == 0                      # never relocates / overwrites another id
-    assert msg.name == "Wave Of Mutil"         # the whole string, in one message
-    assert result == "Wave Of Mutil"           # device-confirmed name echoed back
+    assert msg.newid == 0  # never relocates / overwrites another id
+    assert msg.name == "Wave Of Mutil"  # the whole string, in one message
+    assert result == "Wave Of Mutil"  # device-confirmed name echoed back
 
 
 def test_rename_rejects_non_ascii():
@@ -297,8 +305,9 @@ def _capturing_bridge(captured, *, name="OBJ", idno_from="idno", timeout=0.5):
         idno = getattr(decoded, idno_from, 0)
         return Info(decoded.type, idno, 0, True, name)
 
-    return MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                      "stub", timeout=timeout)
+    return MidiBridge(
+        SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub", timeout=timeout
+    )
 
 
 def test_delete_object_sends_del():
@@ -312,7 +321,7 @@ def test_delete_object_sends_del():
     msg = captured["msg"]
     assert isinstance(msg, Del)
     assert msg.type is ObjectType.Program and msg.idno == 201
-    assert info.name == "DOOMED"          # device-confirmed deleted object
+    assert info.name == "DOOMED"  # device-confirmed deleted object
 
 
 def test_move_object_sends_change_with_newid_and_empty_name():
@@ -325,8 +334,8 @@ def test_move_object_sends_change_with_newid_and_empty_name():
 
     msg = captured["msg"]
     assert isinstance(msg, Change)
-    assert msg.idno == 201 and msg.newid == 305   # relocates to the new id
-    assert msg.name == ""                          # name left unchanged
+    assert msg.idno == 201 and msg.newid == 305  # relocates to the new id
+    assert msg.name == ""  # name left unchanged
 
 
 def test_delete_bank_sends_delbank_for_one_type():
@@ -335,7 +344,7 @@ def test_delete_bank_sends_delbank_for_one_type():
 
     captured = {}
     bridge = _capturing_bridge(captured, timeout=0.5)
-    bridge.delete_bank(ObjectType.Program, 2)   # wipe one type's bank
+    bridge.delete_bank(ObjectType.Program, 2)  # wipe one type's bank
 
     msg = captured["msg"]
     assert isinstance(msg, DelBank)
@@ -349,7 +358,7 @@ def test_delete_bank_treats_missing_ack_as_success():
         raise TimeoutError("no reply")
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)
-    assert bridge.delete_bank(None, 2) is None        # no exception, returns None
+    assert bridge.delete_bank(None, 2) is None  # no exception, returns None
 
 
 def test_delete_everything_uses_type_zero_bank_127():
@@ -363,7 +372,7 @@ def test_delete_everything_uses_type_zero_bank_127():
         return Info(ObjectType.Program, 0, 0, True, "")
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)
-    bridge.delete_bank(None, 127)   # the "Everything" nuke
+    bridge.delete_bank(None, 127)  # the "Everything" nuke
 
     msg = captured["msg"]
     assert isinstance(msg, DelBank)
@@ -380,19 +389,21 @@ def test_delete_everything_endofbank_reply_is_not_a_crash():
     from k2000.messages import EndOfBank, K2_HEADER, K2_FOOTER, SysexMessage
 
     # The on-the-wire ENDOFBANK the device sends back: type 0, bank 0.
-    reply = K2_HEADER + bytes([EndOfBank._msg_type_int]) \
-        + encode[7](0, 2) + encode[7](0, 1) + K2_FOOTER
+    reply = (
+        K2_HEADER + bytes([EndOfBank._msg_type_int]) + encode[7](0, 2) + encode[7](0, 1) + K2_FOOTER
+    )
     decoded = SysexMessage.decode(reply)
     assert isinstance(decoded, EndOfBank) and decoded.type is None  # no longer raises
 
-    stub = SimpleNamespace(midi_out=FakeOut(), midi_in=SimpleNamespace(
-        get_message=lambda: (list(reply), 0.0)))
+    stub = SimpleNamespace(
+        midi_out=FakeOut(), midi_in=SimpleNamespace(get_message=lambda: (list(reply), 0.0))
+    )
     client = SimpleNamespace(
-        _send_and_receive=lambda msg, timeout: K2BaseClient._send_and_receive(
-            stub, msg, timeout))
+        _send_and_receive=lambda msg, timeout: K2BaseClient._send_and_receive(stub, msg, timeout)
+    )
 
     bridge = MidiBridge(client, "stub", timeout=0.5)
-    assert bridge.delete_bank(None, 127) is None        # success, not an exception
+    assert bridge.delete_bank(None, 127) is None  # success, not an exception
 
 
 def test_delete_bank_all_types_sends_type_zero():
@@ -402,16 +413,16 @@ def test_delete_bank_all_types_sends_type_zero():
     captured = {}
 
     def fake(message, timeout):
-        captured["msg"] = message      # an all-types DELBANK encodes type 0; on
+        captured["msg"] = message  # an all-types DELBANK encodes type 0; on
         captured["timeout"] = timeout  # decode that maps back to type=None.
         return Info(ObjectType.Program, 0, 0, True, "")
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub", timeout=0.5)
-    bridge.delete_bank(None, 2)   # obj_type=None -> all object types in the bank
+    bridge.delete_bank(None, 2)  # obj_type=None -> all object types in the bank
 
     msg = captured["msg"]
     assert isinstance(msg, DelBank)
-    assert msg.type.value == 0    # the protocol's "all object types" selector
+    assert msg.type.value == 0  # the protocol's "all object types" selector
     assert msg.bank == 2
 
 
@@ -485,8 +496,7 @@ def test_list_bank_collects_info_until_endofbank():
     ]
     midi_in = _QueuedMidiIn(replies)
     midi_out = _RecordingMidiOut(midi_in)
-    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out), "stub")
 
     found, done = bridge.list_bank(ObjectType.Program, 3)
 
@@ -506,12 +516,11 @@ def test_list_bank_reports_incomplete_without_endofbank():
     replies = [Info(ObjectType.Program, 300, 264, True, "CUT 000")]
     midi_in = _QueuedMidiIn(replies)
     midi_out = _RecordingMidiOut(midi_in)
-    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out), "stub")
 
     found, done = bridge.list_bank(ObjectType.Program, 3, quiet_for=0.05)
 
-    assert done is False          # no EndOfBank seen -- an unconfirmed listing
+    assert done is False  # no EndOfBank seen -- an unconfirmed listing
     assert len(found) == 1
 
 
@@ -520,12 +529,11 @@ def test_list_bank_drains_stale_messages_before_sending():
     from k2000.messages import EndOfBank, Info
 
     midi_in = _QueuedMidiIn(
-        [Info(ObjectType.Program, 300, 264, True, "CUT 000"),
-         EndOfBank(ObjectType.Program, 3)],
-        pre_send=[Info(ObjectType.Program, 999, 1, True, "STALE")])
+        [Info(ObjectType.Program, 300, 264, True, "CUT 000"), EndOfBank(ObjectType.Program, 3)],
+        pre_send=[Info(ObjectType.Program, 999, 1, True, "STALE")],
+    )
     midi_out = _RecordingMidiOut(midi_in)
-    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out), "stub")
 
     found, done = bridge.list_bank(ObjectType.Program, 3)
 
@@ -545,20 +553,19 @@ def test_read_object_bytes_sends_dump_with_offset_and_size():
         decoded = SysexMessage.decode(bytes(message.encode()))
         captured["msg"] = decoded
         captured["timeout"] = timeout
-        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
-                   b"\x2a\x03")
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form, b"\x2a\x03")
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub", timeout=1.7)
+    bridge = MidiBridge(
+        SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub", timeout=1.7
+    )
     result = bridge.read_object_bytes(ObjectType.Program, 906, 215, 2)
 
     msg = captured["msg"]
     assert isinstance(msg, Dump)
-    assert (msg.type, msg.idno, msg.offset, msg.size) == \
-        (ObjectType.Program, 906, 215, 2)
-    assert captured["timeout"] == 1.7   # the bridge's own configured timeout,
-                                        # not the vendored client.dump()'s
-                                        # hardcoded (and too-short) 1.0s
+    assert (msg.type, msg.idno, msg.offset, msg.size) == (ObjectType.Program, 906, 215, 2)
+    assert captured["timeout"] == 1.7  # the bridge's own configured timeout,
+    # not the vendored client.dump()'s
+    # hardcoded (and too-short) 1.0s
     assert result == b"\x2a\x03"
 
 
@@ -572,14 +579,11 @@ def test_patch_object_bytes_verifies_and_returns_on_match():
         decoded = SysexMessage.decode(bytes(message.encode()))
         captured["sent"].append(decoded)
         if isinstance(decoded, Load):
-            return DataAcknowledged(decoded.type, decoded.idno,
-                                    decoded.offset, len(decoded.data))
+            return DataAcknowledged(decoded.type, decoded.idno, decoded.offset, len(decoded.data))
         # the verifying read-back (a Dump) -- answer with what was written
-        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
-                   b"\x28")
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form, b"\x28")
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub")
     result = bridge.patch_object_bytes(ObjectType.Program, 906, 215, b"\x28")
 
     load_msg, dump_msg = captured["sent"]
@@ -597,11 +601,14 @@ def test_patch_object_bytes_raises_on_dnak_without_reading_back():
         decoded = SysexMessage.decode(bytes(message.encode()))
         assert isinstance(decoded, Load), "must not read back after a DNAK"
         return DataNotAcknowledged(
-            decoded.type, decoded.idno, decoded.offset, len(decoded.data),
-            DataNotAcknowledged.ErrorCode.ObjectCurrentlyBeingEdited)
+            decoded.type,
+            decoded.idno,
+            decoded.offset,
+            len(decoded.data),
+            DataNotAcknowledged.ErrorCode.ObjectCurrentlyBeingEdited,
+        )
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub")
 
     with pytest.raises(PatchUnverified, match="ObjectCurrentlyBeingEdited"):
         bridge.patch_object_bytes(ObjectType.Program, 906, 215, b"\x28")
@@ -615,13 +622,12 @@ def test_patch_object_bytes_raises_on_readback_mismatch():
     def fake_send_and_receive(message, timeout):
         decoded = SysexMessage.decode(bytes(message.encode()))
         if isinstance(decoded, Load):
-            return DataAcknowledged(decoded.type, decoded.idno,
-                                    decoded.offset, len(decoded.data))
-        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
-                   b"\xff")  # wrong -- not what was written
+            return DataAcknowledged(decoded.type, decoded.idno, decoded.offset, len(decoded.data))
+        return Load(
+            decoded.type, decoded.idno, decoded.offset, decoded.form, b"\xff"
+        )  # wrong -- not what was written
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub")
 
     with pytest.raises(PatchUnverified, match="UNKNOWN state"):
         bridge.patch_object_bytes(ObjectType.Program, 906, 215, b"\x28")
@@ -677,8 +683,6 @@ def test_get_screen_text_masks_high_bit():
     assert bridge.get_screen_text() == "OK\nNormal"
 
 
-
-
 class ScanRtmidi:
     """Fake rtmidi for the general autodetect scan: sending an ALLTEXT request out
     the 'K2000' output makes a K2 screen reply appear on the 'K2000 In' input."""
@@ -690,7 +694,7 @@ class ScanRtmidi:
     pending = {}  # in_index -> [ (data, ts) ]
     respond = True
     live_out = set()  # constructed-but-not-deleted MidiOut instances
-    live_in = set()   # constructed-but-not-deleted MidiIn instances
+    live_in = set()  # constructed-but-not-deleted MidiIn instances
 
     class MidiOut:
         def __init__(self):
@@ -705,6 +709,7 @@ class ScanRtmidi:
 
         def send_message(self, msg):
             from k2000.messages import ScreenReply
+
             if ScanRtmidi.respond and self.idx == ScanRtmidi.K2_OUT:
                 reply = list(ScreenReply.from_screen_contents("ProgramMode").encode())
                 ScanRtmidi.pending.setdefault(ScanRtmidi.K2_IN, []).append((reply, 0.0))
@@ -771,7 +776,7 @@ def test_autodetect_success_frees_all_scan_clients(monkeypatch):
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
     bridge = MidiBridge.autodetect(scan_timeout=0.3)
     assert len(bridge.client.midi_in.ports) == 1
-    assert len(ScanRtmidi.live_in) == 1   # only the merged recv sub-port
+    assert len(ScanRtmidi.live_in) == 1  # only the merged recv sub-port
     assert len(ScanRtmidi.live_out) == 1  # only the chosen send port
 
 
@@ -783,7 +788,7 @@ def test_autodetect_failure_frees_all_scan_clients(monkeypatch):
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
     with pytest.raises(RuntimeError, match="no K2000 answered"):
         MidiBridge.autodetect(scan_timeout=0.1)
-    assert ScanRtmidi.live_in == set()   # every scan listener freed
+    assert ScanRtmidi.live_in == set()  # every scan listener freed
     assert ScanRtmidi.live_out == set()  # every probe out freed
 
 
@@ -795,7 +800,7 @@ def test_bridge_close_frees_backend_clients(monkeypatch):
     monkeypatch.setattr(midi_bridge, "rtmidi", ScanRtmidi)
     bridge = MidiBridge.autodetect(scan_timeout=0.3)
     bridge.close()
-    assert ScanRtmidi.live_in == set()   # merged recv sub-ports deleted
+    assert ScanRtmidi.live_in == set()  # merged recv sub-ports deleted
     assert ScanRtmidi.live_out == set()  # send port deleted
 
 
@@ -803,11 +808,16 @@ def test_autodetect_binds_only_the_answering_subport(monkeypatch):
     # ESI-style: one physical interface exposes several IN sub-ports, but the
     # K2000 is cabled to exactly one, so its reply always lands on that sub-port.
     # Autodetect must bind the receive side to just that port — not open all four.
-    monkeypatch.setattr(ScanRtmidi, "IN_NAMES",
-                        ["ESI M4U eX:ESI M4U eX MIDI 1 48:0",
-                         "ESI M4U eX:ESI M4U eX MIDI 2 48:1",
-                         "ESI M4U eX:ESI M4U eX MIDI 3 48:2",
-                         "ESI M4U eX:ESI M4U eX MIDI 4 48:3"])
+    monkeypatch.setattr(
+        ScanRtmidi,
+        "IN_NAMES",
+        [
+            "ESI M4U eX:ESI M4U eX MIDI 1 48:0",
+            "ESI M4U eX:ESI M4U eX MIDI 2 48:1",
+            "ESI M4U eX:ESI M4U eX MIDI 3 48:2",
+            "ESI M4U eX:ESI M4U eX MIDI 4 48:3",
+        ],
+    )
     monkeypatch.setattr(ScanRtmidi, "K2_IN", 2)  # answers on the 3rd sub-port
     ScanRtmidi.pending = {}
     ScanRtmidi.respond = True
@@ -817,9 +827,9 @@ def test_autodetect_binds_only_the_answering_subport(monkeypatch):
 
     bridge = MidiBridge.autodetect(scan_timeout=0.3)
 
-    assert len(bridge.client.midi_in.ports) == 1     # only the answering sub-port
-    assert "MIDI 3" in bridge.description            # bound to sub-port 3, not "MIDI 1"
-    assert len(ScanRtmidi.live_in) == 1              # the other three scanners freed
+    assert len(bridge.client.midi_in.ports) == 1  # only the answering sub-port
+    assert "MIDI 3" in bridge.description  # bound to sub-port 3, not "MIDI 1"
+    assert len(ScanRtmidi.live_in) == 1  # the other three scanners freed
 
 
 def test_autodetect_does_not_hand_the_scan_timeout_to_the_bridge(monkeypatch):
@@ -842,35 +852,45 @@ def test_autodetect_does_not_hand_the_scan_timeout_to_the_bridge(monkeypatch):
     monkeypatch.setattr(MidiBridge, "_connect_split", classmethod(fake_connect_split))
     monkeypatch.setattr("k2kremote.midi_bridge._enum_out", lambda: ["k2000 out"])
     monkeypatch.setattr("k2kremote.midi_bridge._enum_in", lambda: [])
-    monkeypatch.setattr("k2kremote.midi_bridge._await_screen_reply",
-                        lambda listeners, timeout, is_reply: "k2000 in")
+    monkeypatch.setattr(
+        "k2kremote.midi_bridge._await_screen_reply", lambda listeners, timeout, is_reply: "k2000 in"
+    )
 
     class _Out:
         # get_ports too: the probe looks the name up again on the client that
         # opens it, rather than reusing the enumeration's index.
-        def get_ports(self): return ["k2000 out"]
-        def open_port(self, i): pass
-        def send_message(self, m): pass
-        def close_port(self): pass
-        def delete(self): pass
+        def get_ports(self):
+            return ["k2000 out"]
+
+        def open_port(self, i):
+            pass
+
+        def send_message(self, m):
+            pass
+
+        def close_port(self):
+            pass
+
+        def delete(self):
+            pass
 
     monkeypatch.setattr("rtmidi.MidiOut", _Out)
 
     MidiBridge.autodetect(scan_timeout=0.05)
-    assert built["timeout"] == DEFAULT_TIMEOUT, (
-        "the bridge inherited the scan timeout again")
+    assert built["timeout"] == DEFAULT_TIMEOUT, "the bridge inherited the scan timeout again"
     # And whatever it is, it must clear a GETGRAPHICS with real margin.
     assert built["timeout"] > 2 * 0.9627
 
 
 # --- a host with no MIDI backend is a legitimate state, not a crash ---------
 
+
 def _no_backend(monkeypatch):
     """Make rtmidi behave as it does with no ALSA sequencer / CoreMIDI / WinMM."""
+
     class NoBackend:
         def __init__(self, *a, **k):
-            raise SystemError(
-                "MidiInAlsa::initialize: error creating ALSA sequencer client object")
+            raise SystemError("MidiInAlsa::initialize: error creating ALSA sequencer client object")
 
     monkeypatch.setattr("rtmidi.MidiIn", NoBackend)
     monkeypatch.setattr("rtmidi.MidiOut", NoBackend)
@@ -897,7 +917,7 @@ def test_ports_command_explains_itself_rather_than_raising(monkeypatch, capsys):
         midi_bridge._main(["ports"])
     message = str(excinfo.value.code)
     assert "no MIDI backend" in message
-    assert "snd-seq" in message          # and says what to do about it
+    assert "snd-seq" in message  # and says what to do about it
 
 
 def test_backend_error_clears_once_enumeration_works(monkeypatch):
@@ -909,9 +929,14 @@ def test_backend_error_clears_once_enumeration_works(monkeypatch):
     assert midi_bridge.midi_backend_error() is not None
 
     class Fine:
-        def __init__(self, *a, **k): pass
-        def get_ports(self): return ["Some Port 1"]
-        def delete(self): pass
+        def __init__(self, *a, **k):
+            pass
+
+        def get_ports(self):
+            return ["Some Port 1"]
+
+        def delete(self):
+            pass
 
     monkeypatch.setattr("rtmidi.MidiIn", Fine)
     monkeypatch.setattr("rtmidi.MidiOut", Fine)
@@ -945,9 +970,10 @@ def test_rename_refuses_control_characters_over_long_names_and_a_wrong_echo():
 
     # a reply naming something else is not a confirmation
     from k2000.messages import Info
+
     client = SimpleNamespace(
-        _send_and_receive=lambda m, t: Info(ObjectType.Program, 300, 0, True,
-                                            "SOMETHING ELSE"))
+        _send_and_receive=lambda m, t: Info(ObjectType.Program, 300, 0, True, "SOMETHING ELSE")
+    )
     with pytest.raises(ValueError):
         MidiBridge(client, "stub").rename(ObjectType.Program, 300, "Good Name")
 
@@ -983,11 +1009,9 @@ def test_every_solicited_exchange_drains_stale_input_first():
 
     def fake(message, timeout):
         sent.append(message)
-        return SimpleNamespace(data=b"\x01", type=ObjectType.Program,
-                               idno=7, offset=3)
+        return SimpleNamespace(data=b"\x01", type=ObjectType.Program, idno=7, offset=3)
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake, midi_in=port),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake, midi_in=port), "stub")
     bridge.read_object_bytes(ObjectType.Program, 7, 3, 1)
     assert port.drained == 2, "stale input was not drained before the request"
     assert len(sent) == 1
@@ -1004,8 +1028,7 @@ def test_a_reply_about_another_object_is_refused():
 
     def fake(message, timeout):
         # right class, wrong object — exactly what a stale reply looks like
-        return SimpleNamespace(data=b"\xff", type=ObjectType.Program,
-                               idno=999, offset=3)
+        return SimpleNamespace(data=b"\xff", type=ObjectType.Program, idno=999, offset=3)
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub")
     with pytest.raises(PatchUnverified):
@@ -1025,25 +1048,23 @@ def test_close_frees_a_plain_rtmidi_input_not_only_wrapped_ports():
 
     freed = []
 
-    class RawIn:                      # no _port: what _open_in returns
+    class RawIn:  # no _port: what _open_in returns
         def close_port(self):
             pass
 
         def delete(self):
             freed.append("in")
 
-    class WrappedOut:                 # ThrottledOut's shape
+    class WrappedOut:  # ThrottledOut's shape
         def __init__(self):
             self._port = SimpleNamespace(delete=lambda: freed.append("out"))
 
         def close_port(self):
             pass
 
-    bridge = MidiBridge(
-        SimpleNamespace(midi_out=WrappedOut(), midi_in=RawIn()), "stub")
+    bridge = MidiBridge(SimpleNamespace(midi_out=WrappedOut(), midi_in=RawIn()), "stub")
     bridge.close()
-    assert sorted(freed) == ["in", "out"], (
-        "close() left a backend client allocated: %r" % freed)
+    assert sorted(freed) == ["in", "out"], "close() left a backend client allocated: %r" % freed
 
 
 def test_device_id_tolerance_leaves_other_manufacturers_alone():
@@ -1116,7 +1137,7 @@ def test_throttle_holds_the_floor_across_concurrent_senders():
     # 20% of slack for scheduling and clock granularity, which is still an
     # order of magnitude away from what the bug produces: without the lock the
     # racing senders land within a millisecond of each other.
-    assert min(gaps) > 0.096, f"two sends only {min(gaps)*1000:.1f} ms apart"
+    assert min(gaps) > 0.096, f"two sends only {min(gaps) * 1000:.1f} ms apart"
 
 
 def test_delete_bank_takes_an_explicit_zero_timeout_at_face_value():
@@ -1135,7 +1156,7 @@ def test_delete_bank_takes_an_explicit_zero_timeout_at_face_value():
     assert bridge.delete_bank(ObjectType.Program, 3, timeout=0) is None
     assert seen["timeout"] == 0
     assert bridge.delete_bank(ObjectType.Program, 3) is None
-    assert seen["timeout"] == 0.5          # still the documented default
+    assert seen["timeout"] == 0.5  # still the documented default
 
 
 def test_list_bank_is_not_held_open_by_unrelated_traffic():
@@ -1156,8 +1177,9 @@ def test_list_bank_is_not_held_open_by_unrelated_traffic():
 
         def __init__(self):
             self.sent = False
-            self._first = [(list(Info(ObjectType.Program, 300, 264, True,
-                                      "CUT 000").encode()), 0.0)]
+            self._first = [
+                (list(Info(ObjectType.Program, 300, 264, True, "CUT 000").encode()), 0.0)
+            ]
 
         def get_message(self):
             if not self.sent:
@@ -1168,14 +1190,13 @@ def test_list_bank_is_not_held_open_by_unrelated_traffic():
 
     midi_in = _PanelStorm()
     midi_out = _RecordingMidiOut(midi_in)
-    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(midi_in=midi_in, midi_out=midi_out), "stub")
 
     started = time.monotonic()
     found, done = bridge.list_bank(ObjectType.Program, 3, quiet_for=0.2)
     elapsed = time.monotonic() - started
 
-    assert done is False               # honestly unconfirmed
+    assert done is False  # honestly unconfirmed
     assert [info.idno for info in found] == [300]
     assert elapsed < 2.0, f"the panel storm held the listing open for {elapsed:.1f}s"
 
@@ -1190,12 +1211,12 @@ def test_a_device_answering_garbage_reads_as_a_timeout_not_a_crash():
     which catches TimeoutError, propagated it: a crash where the answer is
     simply "no".
     """
+
     def fake_send_and_receive(message, timeout=1.0):
-        time.sleep(timeout)                       # the full wait really elapses
+        time.sleep(timeout)  # the full wait really elapses
         raise ValueError("SysexMessage has invalid footer")
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub")
     bridge.timeout = 0.05
 
     with pytest.raises(TimeoutError) as exc:
@@ -1206,11 +1227,11 @@ def test_a_device_answering_garbage_reads_as_a_timeout_not_a_crash():
 
 def test_a_send_side_failure_is_not_dressed_up_as_a_timeout():
     """The translation above must not swallow errors raised before the wait."""
+
     def fake_send_and_receive(message, timeout=1.0):
         raise ValueError("cannot encode that message")
 
-    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub")
     bridge.timeout = 0.5
 
     with pytest.raises(ValueError, match="cannot encode"):
@@ -1233,11 +1254,20 @@ def test_ports_are_opened_by_name_on_the_client_that_opens_them(monkeypatch):
     class _In:
         # what the enumeration saw is gone: "old iface" has vanished, so the
         # K2000 that was at index 1 is now at index 0.
-        def get_ports(self): return ["K2000R MIDI 1"]
-        def open_port(self, index): opened.append(index)
-        def ignore_types(self, **kw): pass
-        def close_port(self): pass
-        def delete(self): pass
+        def get_ports(self):
+            return ["K2000R MIDI 1"]
+
+        def open_port(self, index):
+            opened.append(index)
+
+        def ignore_types(self, **kw):
+            pass
+
+        def close_port(self):
+            pass
+
+        def delete(self):
+            pass
 
     monkeypatch.setattr(mb, "_enum_in", lambda: ["old iface", "K2000R MIDI 1"])
     monkeypatch.setattr(mb.rtmidi, "MidiIn", lambda *a, **kw: _In())
@@ -1259,15 +1289,19 @@ def test_movebank_decodes_an_all_types_move_like_its_siblings():
     from k2000.encoding import encode
     from k2000.messages import MoveBank, SysexMessage
 
-    raw = (bytes([0xF0, 0x07, 0x00, 0x78, 0x0F])
-           + encode[7](0, 2) + encode[7](3, 1) + encode[7](4, 1)
-           + bytes([0xF7]))
+    raw = (
+        bytes([0xF0, 0x07, 0x00, 0x78, 0x0F])
+        + encode[7](0, 2)
+        + encode[7](3, 1)
+        + encode[7](4, 1)
+        + bytes([0xF7])
+    )
 
     decoded = SysexMessage.decode(raw)
 
     assert isinstance(decoded, MoveBank)
     assert decoded.type is None and decoded.bank == 3 and decoded.newbank == 4
-    assert decoded.encode() == raw    # and it survives the round trip back out
+    assert decoded.encode() == raw  # and it survives the round trip back out
 
 
 # --- the real receive path, and the local reads around it --------------------
@@ -1275,6 +1309,7 @@ def test_movebank_decodes_an_all_types_move_like_its_siblings():
 # Gap the audit named: exactly one test drove the genuine `_send_and_receive`
 # loop and it fed a valid packet, so the behaviour of every malformed-reply
 # path was unpinned.
+
 
 class _RawPort:
     """A minimal rtmidi-shaped input that hands back pre-built raw packets.
@@ -1327,7 +1362,7 @@ def test_a_reply_that_cannot_decode_times_out_through_the_real_loop():
     """
     from k2000.messages import AllText
 
-    bad = bytes([0xF0, 0x07, 0x00, 0x78, 0x19, 0x01, 0x02])   # no F7, no payload
+    bad = bytes([0xF0, 0x07, 0x00, 0x78, 0x19, 0x01, 0x02])  # no F7, no payload
     bridge = MidiBridge(_real_client([bad]), "stub")
     bridge.timeout = 0.05
 
@@ -1355,8 +1390,9 @@ def test_a_reply_of_the_wrong_class_is_not_served_as_an_answer():
 
     # ...and _check_echo is what refuses it when it is about another object.
     with pytest.raises(PatchUnverified):
-        MidiBridge._check_echo(Info(ObjectType.Program, 300, 264, True, "X"),
-                               ObjectType.Program, 301)
+        MidiBridge._check_echo(
+            Info(ObjectType.Program, 300, 264, True, "X"), ObjectType.Program, 301
+        )
 
 
 def test_poll_panel_sees_a_press_and_drains_everything_else():
@@ -1372,7 +1408,7 @@ def test_poll_panel_sees_a_press_and_drains_everything_else():
 
     assert bridge.poll_panel() is True
     assert port.get_message() is None, "the buffer must be drained, not peeked"
-    assert bridge.poll_panel() is False      # nothing left to see
+    assert bridge.poll_panel() is False  # nothing left to see
 
 
 def test_poll_panel_ignores_traffic_that_is_not_ours():
@@ -1380,8 +1416,7 @@ def test_poll_panel_ignores_traffic_that_is_not_ours():
     note_on = bytes([0x90, 0x3C, 0x64])
     universal = bytes([0xF0, 0x7E, 0x00, 0x06, 0x02, 0xF7])
 
-    bridge = MidiBridge(SimpleNamespace(midi_in=_RawPort([note_on, universal])),
-                        "stub")
+    bridge = MidiBridge(SimpleNamespace(midi_in=_RawPort([note_on, universal])), "stub")
     assert bridge.poll_panel() is False
 
 
@@ -1402,13 +1437,15 @@ def test_ports_present_tells_a_busy_device_from_an_unplugged_one(monkeypatch):
     monkeypatch.setattr(mb, "_enum_out", lambda: [])
 
     bridge = MidiBridge(
-        SimpleNamespace(midi_in=_RawPort(ports=("K2000R MIDI 1",)),
-                        port_name="K2000R MIDI 1"), "stub")
+        SimpleNamespace(midi_in=_RawPort(ports=("K2000R MIDI 1",)), port_name="K2000R MIDI 1"),
+        "stub",
+    )
     assert bridge.ports_present() is True
 
     gone = MidiBridge(
-        SimpleNamespace(midi_in=_RawPort(ports=("Some Other IF",)),
-                        port_name="K2000R MIDI 1"), "stub")
+        SimpleNamespace(midi_in=_RawPort(ports=("Some Other IF",)), port_name="K2000R MIDI 1"),
+        "stub",
+    )
     assert gone.ports_present() is False
 
 
@@ -1418,11 +1455,14 @@ def test_ports_present_matches_both_halves_of_a_split_rig(monkeypatch):
 
     monkeypatch.setattr(mb, "_enum_out", lambda: ["UM-ONE MIDI 1"])
     bridge = MidiBridge(
-        SimpleNamespace(midi_in=_RawPort(ports=("K2000R MIDI 1",)),
-                        port_name="UM-ONE MIDI 1 -> K2000R MIDI 1"), "stub")
+        SimpleNamespace(
+            midi_in=_RawPort(ports=("K2000R MIDI 1",)), port_name="UM-ONE MIDI 1 -> K2000R MIDI 1"
+        ),
+        "stub",
+    )
     assert bridge.ports_present() is True
 
-    monkeypatch.setattr(mb, "_enum_out", lambda: [])       # the sender vanished
+    monkeypatch.setattr(mb, "_enum_out", lambda: [])  # the sender vanished
     assert bridge.ports_present() is False
 
 
@@ -1434,8 +1474,9 @@ def test_ports_present_says_present_when_it_cannot_tell(monkeypatch):
         raise RuntimeError("ALSA is not answering")
 
     monkeypatch.setattr(mb, "_enum_out", explode)
-    bridge = MidiBridge(SimpleNamespace(midi_in=SimpleNamespace(),
-                                        port_name="K2000R MIDI 1"), "stub")
+    bridge = MidiBridge(
+        SimpleNamespace(midi_in=SimpleNamespace(), port_name="K2000R MIDI 1"), "stub"
+    )
     assert bridge.ports_present() is True
 
 
@@ -1448,8 +1489,7 @@ def test_the_device_id_shim_can_be_taken_back_off():
     """
     from k2000 import messages
 
-    from k2kremote.midi_bridge import (_install_device_id_tolerance,
-                                       _uninstall_device_id_tolerance)
+    from k2kremote.midi_bridge import _install_device_id_tolerance, _uninstall_device_id_tolerance
 
     on_id_5 = bytes([0xF0, 0x07, 0x05, 0x78, 0x15, 0xF7])
     before = messages.SysexMessage.has_valid_k2_headers(on_id_5)
@@ -1459,7 +1499,7 @@ def test_the_device_id_shim_can_be_taken_back_off():
 
     _uninstall_device_id_tolerance()
     assert messages.SysexMessage.has_valid_k2_headers(on_id_5) == before
-    _uninstall_device_id_tolerance()          # idempotent
+    _uninstall_device_id_tolerance()  # idempotent
 
 
 def test_a_reply_that_is_the_request_echoed_is_not_an_answer():
@@ -1524,8 +1564,9 @@ def test_read_object_whole_asks_for_exactly_the_dir_size():
         assert isinstance(decoded, Dump)
         asked["size"] = decoded.size
         asked["offset"] = decoded.offset
-        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
-                    b"\x00" * decoded.size)
+        return Load(
+            decoded.type, decoded.idno, decoded.offset, decoded.form, b"\x00" * decoded.size
+        )
 
     bridge = MidiBridge(SimpleNamespace(_send_and_receive=fake), "stub")
     data = bridge.read_object_whole(ObjectType.Keymap, 300)

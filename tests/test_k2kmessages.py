@@ -11,9 +11,15 @@ import pathlib
 
 import pytest
 
-from k2kremote.k2kmessages import (SCREEN_ROWS, Message, _to_pattern,
-                                   extract, identify, identify_screen,
-                                   unmatched)
+from k2kremote.k2kmessages import (
+    SCREEN_ROWS,
+    Message,
+    _to_pattern,
+    extract,
+    identify,
+    identify_screen,
+    unmatched,
+)
 
 IMAGE = pathlib.Path.home() / "temp" / "k2k_fw" / "k2000_v387j.bin"
 
@@ -39,8 +45,7 @@ def test_a_format_string_identifies_the_line_it_rendered():
 
 def test_numeric_conversions_match_digits_not_text():
     table = [_msg("%s %s to: ID#%3d")]
-    assert identify("Copy Sample to: ID#201", table).captures \
-        == ("Copy", "Sample", "201")
+    assert identify("Copy Sample to: ID#201", table).captures == ("Copy", "Sample", "201")
     assert identify("Copy Sample to: ID#abc", table) is None
 
 
@@ -53,8 +58,7 @@ def test_a_literal_beats_a_format_string_that_also_matches():
 
 def test_the_more_specific_format_string_wins():
     table = [_msg("%s"), _msg("Loading program %s...")]
-    assert identify("Loading program VOX3...", table).text \
-        == "Loading program %s..."
+    assert identify("Loading program VOX3...", table).text == "Loading program %s..."
 
 
 def test_an_unmatched_line_is_none_rather_than_a_guess():
@@ -80,6 +84,7 @@ def test_percent_literal_is_not_a_wildcard():
 
 # --- the extractor, against a real image ---------------------------------
 
+
 def _table():
     if not IMAGE.exists():
         pytest.skip("ROM image not present")
@@ -91,12 +96,14 @@ def test_extractor_finds_the_strings_the_import_work_quoted():
     is quoted in docs/IMPORT_CONVERSION.md, so the extractor must find them."""
     table = _table()
     texts = {m.text for m in table}
-    for expected in ("Akai partition not found.",
-                     "No Akai sample files found.",
-                     "ROLAND.S",
-                     "Please wait...",
-                     "This is one file of a multi-disk set.",
-                     "You must load disk #1 first."):
+    for expected in (
+        "Akai partition not found.",
+        "No Akai sample files found.",
+        "ROLAND.S",
+        "Please wait...",
+        "This is one file of a multi-disk set.",
+        "You must load disk #1 first.",
+    ):
         assert expected in texts, expected
 
 
@@ -122,8 +129,7 @@ def test_a_real_dialog_line_identifies_against_the_real_table():
 
 def test_unmatched_reports_only_the_rows_no_string_accounts_for():
     table = [_msg("Please wait..."), _msg("Loading program %s...")]
-    rows = ["Please wait...", "Loading program VOX3...",
-            "SOME PRESET NAME", "", "   "]
+    rows = ["Please wait...", "Loading program VOX3...", "SOME PRESET NAME", "", "   "]
     assert unmatched(rows, table) == [(2, "SOME PRESET NAME")]
 
 
@@ -171,11 +177,13 @@ def test_an_error_screen_is_not_mistaken_for_a_busy_one():
     """
     from k2kremote.k2kmessages import ScreenState, classify_screen
 
-    for line in ("Failed writing to disk",
-                 "Problem reading file BOOT.MAC, error 3",
-                 "Error reading file DRUMS.KRZ",
-                 "Not enough memory to load this file.",
-                 "Can't delete file"):
+    for line in (
+        "Failed writing to disk",
+        "Problem reading file BOOT.MAC, error 3",
+        "Error reading file DRUMS.KRZ",
+        "Not enough memory to load this file.",
+        "Can't delete file",
+    ):
         assert classify_screen([line]) is ScreenState.ERROR, line
 
     # ...while the progress forms sharing those verbs still read as busy.
@@ -193,11 +201,13 @@ def test_a_ram_wipe_in_progress_is_destructive_not_merely_busy():
     """
     from k2kremote.k2kmessages import ScreenState, classify_screen
 
-    for line in ("Initializing all memory. Please wait...",
-                 "Clearing data...",
-                 "Deleting Program 200...",
-                 "WARNING! Hard reset? Are you sure?",
-                 "WARNING! Delete all RAM progs?"):
+    for line in (
+        "Initializing all memory. Please wait...",
+        "Clearing data...",
+        "Deleting Program 200...",
+        "WARNING! Hard reset? Are you sure?",
+        "WARNING! Delete all RAM progs?",
+    ):
         assert classify_screen([line]) is ScreenState.DESTRUCTIVE, line
 
 
@@ -219,8 +229,10 @@ def test_destructive_outranks_error_outranks_busy():
 def test_an_ordinary_screen_is_classified_as_nothing_at_all():
     from k2kremote.k2kmessages import classify_screen
 
-    assert classify_screen(["ProgramMode", "999 Grand Piano", "",
-                            "Octav- Octav+ Chan- Chan+ Sample"]) is None
+    assert (
+        classify_screen(["ProgramMode", "999 Grand Piano", "", "Octav- Octav+ Chan- Chan+ Sample"])
+        is None
+    )
     assert classify_screen([]) is None
 
 
@@ -228,6 +240,14 @@ def test_a_message_wrapped_across_rows_is_still_recognised():
     """The K2000 wraps freely, so the frame is matched joined, not per row."""
     from k2kremote.k2kmessages import ScreenState, classify_screen
 
-    rows = ["Are you sure you want to delete", "Program 200 Grand Piano?",
-            "", "", "", "", "", "Yes       No"]
+    rows = [
+        "Are you sure you want to delete",
+        "Program 200 Grand Piano?",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "Yes       No",
+    ]
     assert classify_screen(rows) is ScreenState.DESTRUCTIVE

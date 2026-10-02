@@ -18,6 +18,7 @@ a plain background `threading.Thread` marshaling results back via
 `call_from_thread` — rather than Textual's `@work` decorator, which eosed
 uses but this codebase does not.
 """
+
 from __future__ import annotations
 
 import threading
@@ -121,8 +122,15 @@ class PatchScreen(ModalScreen):
     #patchinput { margin-top: 1; }
     """
 
-    def __init__(self, app_ref, obj_type: ObjectType, idno: int, offset: int,
-                current_hex: str, field_name: str):
+    def __init__(
+        self,
+        app_ref,
+        obj_type: ObjectType,
+        idno: int,
+        offset: int,
+        current_hex: str,
+        field_name: str,
+    ):
         super().__init__()
         self._app = app_ref
         self._obj_type = obj_type
@@ -142,11 +150,12 @@ class PatchScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="patchbox"):
-            yield Static(f"{self._field_name}  (type={self._obj_type.name}"
-                         f" id={self._idno} offset={self._offset})")
+            yield Static(
+                f"{self._field_name}  (type={self._obj_type.name}"
+                f" id={self._idno} offset={self._offset})"
+            )
             yield Static(f"current: {self._current_hex}")
-            yield Static("!!! WRITES A LIVE OBJECT ON THE K2000 !!!",
-                         id="patchwarn")
+            yield Static("!!! WRITES A LIVE OBJECT ON THE K2000 !!!", id="patchwarn")
             yield self._input
             yield self._status
 
@@ -170,8 +179,7 @@ class PatchScreen(ModalScreen):
         self._writing = True
 
         def op(bridge):
-            return bridge.patch_object_bytes(self._obj_type, self._idno,
-                                            self._offset, data)
+            return bridge.patch_object_bytes(self._obj_type, self._idno, self._offset, data)
 
         self._app.device_op(op, self._done)
 
@@ -304,10 +312,8 @@ class MonitorTuiApp(App):
     def compose(self) -> ComposeResult:
         yield Static("", id="titlebar")
         with Horizontal(id="typebank"):
-            yield Input(value=self._obj_type.name, placeholder="type",
-                       id="typeinput")
-            yield Input(value=str(self._bank), placeholder="bank",
-                       id="bankinput")
+            yield Input(value=self._obj_type.name, placeholder="type", id="typeinput")
+            yield Input(value=str(self._bank), placeholder="bank", id="bankinput")
         with Horizontal(id="panes"):
             yield DataTable(id="objects")
             yield DataTable(id="fields")
@@ -329,12 +335,9 @@ class MonitorTuiApp(App):
         """
         if event.input.id == "typeinput":
             name = event.value.strip()
-            match = next((t for t in ObjectType
-                          if t.name.lower() == name.lower()), None)
+            match = next((t for t in ObjectType if t.name.lower() == name.lower()), None)
             if match is None:
-                self.notify_status(
-                    f"unknown object type {name!r}; keeping "
-                    f"{self._obj_type.name}")
+                self.notify_status(f"unknown object type {name!r}; keeping {self._obj_type.name}")
                 event.input.value = self._obj_type.name
                 return
             self._obj_type = match
@@ -346,7 +349,8 @@ class MonitorTuiApp(App):
             if not 0 <= bank <= 9:
                 self.notify_status(
                     f"bank must be 0-9 (the K2000's own bank field is the "
-                    f"hundreds digit); keeping {self._bank}")
+                    f"hundreds digit); keeping {self._bank}"
+                )
                 event.input.value = str(self._bank)
                 return
             self._bank = bank
@@ -370,8 +374,7 @@ class MonitorTuiApp(App):
     def device_op(self, thunk: Callable, on_result: Callable) -> None:
         """Run `thunk(bridge)` off the UI thread; `on_result(value, error)`
         always runs back on it."""
-        self._worker.submit(
-            thunk, lambda r, e: self.call_from_thread(on_result, r, e))
+        self._worker.submit(thunk, lambda r, e: self.call_from_thread(on_result, r, e))
 
     def notify_status(self, text: str) -> None:
         self.last_status = text
@@ -395,8 +398,13 @@ class MonitorTuiApp(App):
         table = self.query_one("#objects", DataTable)
         table.clear()
         for info in found:
-            table.add_row(str(info.idno), info.name, str(info.size),
-                          "RAM" if info.in_ram else "ROM", key=str(info.idno))
+            table.add_row(
+                str(info.idno),
+                info.name,
+                str(info.size),
+                "RAM" if info.in_ram else "ROM",
+                key=str(info.idno),
+            )
         note = "" if done else "  (no ENDOFBANK -- possibly incomplete)"
         self.notify_status(f"{len(found)} object(s){note}")
 
@@ -411,8 +419,11 @@ class MonitorTuiApp(App):
         if self._selected_idno is None:
             return
         idno = self._selected_idno
-        relevant = [(offset, field) for (obj_type, offset), field
-                   in k2kfields.KNOWN_FIELDS.items() if obj_type == self._obj_type]
+        relevant = [
+            (offset, field)
+            for (obj_type, offset), field in k2kfields.KNOWN_FIELDS.items()
+            if obj_type == self._obj_type
+        ]
         if not relevant:
             table = self.query_one("#fields", DataTable)
             table.clear()
@@ -422,8 +433,10 @@ class MonitorTuiApp(App):
         def op(bridge):
             out = {}
             for offset, field in relevant:
-                out[offset] = (bridge.read_object_bytes(
-                    self._obj_type, idno, offset, field.size), None)
+                out[offset] = (
+                    bridge.read_object_bytes(self._obj_type, idno, offset, field.size),
+                    None,
+                )
                 if field.gate is not None:
                     # A gated field's meaning depends on another byte (the
                     # DSP block type). Fetch it too rather than render the
@@ -431,8 +444,7 @@ class MonitorTuiApp(App):
                     # hand -- the whole point is that an unchecked decode
                     # here looks exactly like a verified one.
                     gate_off = field.gate[0]
-                    gate = bridge.read_object_bytes(self._obj_type, idno,
-                                                    gate_off, 1)
+                    gate = bridge.read_object_bytes(self._obj_type, idno, gate_off, 1)
                     out[offset] = (out[offset][0], gate[0])
             return out
 
@@ -446,11 +458,9 @@ class MonitorTuiApp(App):
         table.clear()
         for offset, (raw, gate_byte) in sorted(result.items()):
             field = k2kfields.KNOWN_FIELDS[(self._obj_type, offset)]
-            decoded = k2kfields.describe_field(self._obj_type, offset, raw,
-                                               gate_byte)
+            decoded = k2kfields.describe_field(self._obj_type, offset, raw, gate_byte)
             table.add_row(str(offset), field.name, decoded, key=str(offset))
-        self.notify_status(f"object {self._selected_idno}: "
-                           f"{len(result)} known field(s)")
+        self.notify_status(f"object {self._selected_idno}: {len(result)} known field(s)")
 
     # -- patch ------------------------------------------------------------
 
@@ -459,8 +469,7 @@ class MonitorTuiApp(App):
         if fields_table.cursor_row is None or self._selected_idno is None:
             self.notify_status("select an object and a field first")
             return
-        row_key = fields_table.coordinate_to_cell_key(
-            (fields_table.cursor_row, 0)).row_key
+        row_key = fields_table.coordinate_to_cell_key((fields_table.cursor_row, 0)).row_key
         offset = int(str(row_key.value))
         field = k2kfields.KNOWN_FIELDS.get((self._obj_type, offset))
         if field is None:
@@ -468,16 +477,17 @@ class MonitorTuiApp(App):
             return
 
         def op(bridge):
-            return bridge.read_object_bytes(self._obj_type, self._selected_idno,
-                                           offset, field.size)
+            return bridge.read_object_bytes(self._obj_type, self._selected_idno, offset, field.size)
 
         def open_patch(current, error):
             if error is not None:
                 self.notify_status(f"read failed: {error}")
                 return
-            self.push_screen(PatchScreen(
-                self, self._obj_type, self._selected_idno, offset,
-                current.hex(), field.name))
+            self.push_screen(
+                PatchScreen(
+                    self, self._obj_type, self._selected_idno, offset, current.hex(), field.name
+                )
+            )
 
         self.device_op(op, open_patch)
 

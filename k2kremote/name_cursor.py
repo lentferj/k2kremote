@@ -78,9 +78,9 @@ class NameCursor:
     """Tracks the column of the name-edit cursor while a name dialog is open."""
 
     active: bool = False
-    row: int = 3       # screen text row of the name field
-    origin: int = 16   # screen column of the field's first cell
-    pos: int = 0       # cursor offset within the field (0-based)
+    row: int = 3  # screen text row of the name field
+    origin: int = 16  # screen column of the field's first cell
+    pos: int = 0  # cursor offset within the field (0-based)
 
     def open(self, row: int, origin: int, pos: int = 0) -> None:
         """Begin tracking a freshly opened name dialog (cursor on cell ``pos``)."""
@@ -158,6 +158,5 @@ def merge_reverse(base: List[str], overlay: List[str], cols: int = 40) -> List[s
         b = overlay[r] if r < len(overlay) else ""
         width = max(len(a), len(b), cols)
         a, b = a.ljust(width, "0"), b.ljust(width, "0")
-        out.append("".join("1" if (a[i] == "1" or b[i] == "1") else "0"
-                           for i in range(width)))
+        out.append("".join("1" if (a[i] == "1" or b[i] == "1") else "0" for i in range(width)))
     return out

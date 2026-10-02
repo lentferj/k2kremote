@@ -77,6 +77,7 @@ def test_describe_summarises_an_info_reply():
 
 class _OneRowReply:
     """A ParameterName/ParameterValue reply: a screen reply of exactly one row."""
+
     def __str__(self):
         return "Algorithm"
 
@@ -89,6 +90,7 @@ class _ScreenReply:
 class _GraphicsReply:
     """`str()` raises on a graphics plane — the exception that once looked like a
     protocol fault when a stale reply was served to the next request."""
+
     data = b"\x00" * 40
 
     def __str__(self):
@@ -116,6 +118,7 @@ class _Code:
     """The DNAK code field is encoded via `.value`, and the vendored library
     ships no enum for it — so the test supplies the shape rather than pretending
     an int works."""
+
     value = 1
 
 
@@ -131,8 +134,14 @@ def test_describe_explains_a_dnak_code():
 def test_describe_survives_rubbish_without_raising():
     """A monitor that dies on a malformed message is useless precisely when the
     wire is malformed, which is when you reached for it."""
-    for junk in (b"", b"\xf0", b"\xf0\x07", b"\x90\x40\x7f",
-                 b"\xf0\x07\x00\x78\xff\xff\xf7", bytes(range(20))):
+    for junk in (
+        b"",
+        b"\xf0",
+        b"\xf0\x07",
+        b"\x90\x40\x7f",
+        b"\xf0\x07\x00\x78\xff\xff\xf7",
+        bytes(range(20)),
+    ):
         line = monitor.describe(junk, "in")
         assert isinstance(line, str) and line
 
@@ -233,6 +242,7 @@ def test_read_mode_offers_offset_and_size():
 # `client._send_and_receive`, decode the outgoing wire bytes, and answer with
 # a real message class so the round trip is exercised, not just the call.
 
+
 def _fake_bridge_for_patch(*, dnak=None, before=b"\x67", after=None):
     """`before` answers the pre-write Dump; `after` (default: whatever was
     sent) answers both the write and its verifying read-back, so a genuine
@@ -249,18 +259,18 @@ def _fake_bridge_for_patch(*, dnak=None, before=b"\x67", after=None):
             seen_load["data"] = decoded.data
             if dnak is not None:
                 return dnak(decoded)
-            return DataAcknowledged(decoded.type, decoded.idno,
-                                    decoded.offset, len(decoded.data))
+            return DataAcknowledged(decoded.type, decoded.idno, decoded.offset, len(decoded.data))
         # a Dump: the pre-write read (before any Load has been seen) answers
         # `before`; the post-write verification read (after a Load) answers
         # `after`, or what was actually sent if `after` was not overridden.
-        data = before if seen_load["data"] is None else \
-            (after if after is not None else seen_load["data"])
-        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form,
-                   data)
+        data = (
+            before
+            if seen_load["data"] is None
+            else (after if after is not None else seen_load["data"])
+        )
+        return Load(decoded.type, decoded.idno, decoded.offset, decoded.form, data)
 
-    return MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive),
-                      "stub")
+    return MidiBridge(SimpleNamespace(_send_and_receive=fake_send_and_receive), "stub")
 
 
 def test_patch_object_writes_after_typed_confirmation(monkeypatch, capsys):
@@ -289,8 +299,8 @@ def test_patch_object_aborts_when_confirmation_does_not_match(monkeypatch, capsy
 def test_patch_object_yes_skips_the_prompt(monkeypatch, capsys):
     bridge = _fake_bridge_for_patch()
     monkeypatch.setattr(
-        "builtins.input",
-        lambda prompt="": pytest.fail("must not prompt when --yes is set"))
+        "builtins.input", lambda prompt="": pytest.fail("must not prompt when --yes is set")
+    )
 
     rc = monitor.patch_object(bridge, "Program", 906, 215, "28", yes=True)
 
@@ -303,8 +313,12 @@ def test_patch_object_reports_dnak_without_writing(monkeypatch, capsys):
 
     def dnak(decoded):
         return DataNotAcknowledged(
-            decoded.type, decoded.idno, decoded.offset, len(decoded.data),
-            DataNotAcknowledged.ErrorCode.ObjectCurrentlyBeingEdited)
+            decoded.type,
+            decoded.idno,
+            decoded.offset,
+            len(decoded.data),
+            DataNotAcknowledged.ErrorCode.ObjectCurrentlyBeingEdited,
+        )
 
     bridge = _fake_bridge_for_patch(dnak=dnak)
     monkeypatch.setattr("builtins.input", lambda prompt="": "write")
@@ -351,10 +365,12 @@ def test_open_bridge_routes_a_port_and_refuses_a_bare_standard_rig(monkeypatch):
     assert not hasattr(MidiBridge, "open_first")
 
     seen = {}
-    monkeypatch.setattr(MidiBridge, "standard",
-                        classmethod(lambda cls, name: seen.setdefault("port", name)))
-    monkeypatch.setattr(MidiBridge, "autodetect",
-                        classmethod(lambda cls: seen.setdefault("auto", True)))
+    monkeypatch.setattr(
+        MidiBridge, "standard", classmethod(lambda cls, name: seen.setdefault("port", name))
+    )
+    monkeypatch.setattr(
+        MidiBridge, "autodetect", classmethod(lambda cls: seen.setdefault("auto", True))
+    )
 
     # a port is honoured even under the default auto rig
     monitor._open_bridge("K2000 MIDI 1", "auto")

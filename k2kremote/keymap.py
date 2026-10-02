@@ -92,7 +92,7 @@ KEYMAP: Dict[str, KeyAction] = {
     "right": _button("Cursor→", Button.CursorRight),
     # Editing / entry.
     "enter": _button("Enter", Button.Enter),
-    "escape": _button("Exit", Button.Exit),      # Esc backs out (like the EXIT button)
+    "escape": _button("Exit", Button.Exit),  # Esc backs out (like the EXIT button)
     "delete": _button("Cancel", Button.Cancel),  # Cancel moved off Esc
     "backspace": _button("Clear", Button.Clear),
     # Digits.
@@ -195,8 +195,7 @@ MODE_BAR_ALT: List[Tuple[str, str]] = [
     # strict: the letters are a parallel list maintained by hand, so a mode
     # added to MODE_BAR without one here must fail loudly rather than vanish
     # from the bar it is supposed to document.
-    for (_, name), letter in zip(MODE_BAR, ("p", "s", "q", "m", "i", "d", "g", "e"),
-                                 strict=True)
+    for (_, name), letter in zip(MODE_BAR, ("p", "s", "q", "m", "i", "d", "g", "e"), strict=True)
 ]
 
 # Key legend for the status row, as discrete blocks. The TUI folds these to the
@@ -206,16 +205,23 @@ MODE_BAR_ALT: List[Tuple[str, str]] = [
 # particular read as a block: when a greedy wrap put "F7 Edit" at the end of the
 # navigation line and started the next with "F8 Exit", F7 was reported missing.
 LEGEND_GROUPS: Tuple[Tuple[str, ...], ...] = (
-    ("↑↓←→ cursor", "+/- or PgUp/Dn value", "_ sign/case", "Enter", "Esc=Exit",
-     "Del=Cancel", "Ctrl+↑/↓ wheel", "[ ] Chan/Bank", "\\ both"),
-    ("F1-F6 soft", "F7 Edit", "F8 Exit", "F9 name", "F10 view", "F11 master",
-     "F12 png"),
+    (
+        "↑↓←→ cursor",
+        "+/- or PgUp/Dn value",
+        "_ sign/case",
+        "Enter",
+        "Esc=Exit",
+        "Del=Cancel",
+        "Ctrl+↑/↓ wheel",
+        "[ ] Chan/Bank",
+        "\\ both",
+    ),
+    ("F1-F6 soft", "F7 Edit", "F8 Exit", "F9 name", "F10 view", "F11 master", "F12 png"),
     # The F-key row above mirrors the K2000's OWN panel — "F8 Exit" is the
     # instrument's Exit button, not a way out of this program. So the app's own
     # quit belongs here, spelled out: without it the only visible "Exit" is the
     # one that does something else entirely.
-    ("Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename",
-     "Ctrl+k macro", "Ctrl+c quit"),
+    ("Alt+x panic", "p pause", "Ctrl+r refresh", "Ctrl+o rename", "Ctrl+k macro", "Ctrl+c quit"),
 )
 LEGEND_BLOCKS: Tuple[str, ...] = tuple(b for g in LEGEND_GROUPS for b in g)
 LEGEND = " · ".join(LEGEND_BLOCKS)
@@ -224,8 +230,15 @@ LEGEND = " · ".join(LEGEND_BLOCKS)
 # the F-keys (shown by the app's --alt-keys option). Only the F-key blocks change.
 LEGEND_GROUPS_ALT: Tuple[Tuple[str, ...], ...] = (
     LEGEND_GROUPS[0],
-    ("a-h soft", "Ctrl+e Edit", "Ctrl+x Exit", "Ctrl+n name", "Ctrl+v view",
-     "Ctrl+u master", "Ctrl+g png"),
+    (
+        "a-h soft",
+        "Ctrl+e Edit",
+        "Ctrl+x Exit",
+        "Ctrl+n name",
+        "Ctrl+v view",
+        "Ctrl+u master",
+        "Ctrl+g png",
+    ),
     LEGEND_GROUPS[2],
 )
 LEGEND_BLOCKS_ALT: Tuple[str, ...] = tuple(b for g in LEGEND_GROUPS_ALT for b in g)

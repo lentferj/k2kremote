@@ -45,7 +45,7 @@ def test_pram_container_holds_one_macro_table(boot):
     obj = boot.objects[0]
     assert (obj.type, obj.idno, obj.name) == (MACRO_TYPE, MACRO_ID, "Macro")
     assert boot.software_version == 354  # K2000 OS v3.54 wrote this file
-    assert boot.payload == b""           # a .MAC carries no PCM region
+    assert boot.payload == b""  # a .MAC carries no PCM region
 
 
 def test_hardware_written_file_round_trips_byte_exactly(boot, boot_bytes):
@@ -85,8 +85,11 @@ def test_decodes_the_real_boot_macro(boot):
 
     assert [e.bank for e in table][1:] == [200, 300, 400, 500, 600]
     assert [e.filename for e in table][1:] == [
-        "KPOWFAV.KRZ", "LFOALFAV.KRZ", "SOARCFAV.KRZ",
-        "TCNOAFAV.KRZ", "WAVSTFAV.KRZ",
+        "KPOWFAV.KRZ",
+        "LFOALFAV.KRZ",
+        "SOARCFAV.KRZ",
+        "TCNOAFAV.KRZ",
+        "WAVSTFAV.KRZ",
     ]
     assert table[5].path == "\\-RLNDCD2\\"
 
@@ -104,8 +107,8 @@ def test_editing_an_entry_drops_the_verbatim_source(boot):
     entry = table[1]
     assert entry._source is not None
     entry.bank = 700
-    assert entry._source is None          # rebuilt canonically from now on
-    assert table[0]._source is not None   # untouched entries keep their bytes
+    assert entry._source is None  # rebuilt canonically from now on
+    assert table[0]._source is not None  # untouched entries keep their bytes
 
 
 def test_edited_entry_keeps_its_length_and_reparses(boot):
@@ -151,10 +154,8 @@ def test_delete_and_reserialize(boot):
 
 def test_build_a_macro_from_scratch():
     entries = [
-        MacroEntry(drive=1, bank=BANK_EVERYTHING, mode=3,
-                   path="\\", filename="NULL.KRZ"),
-        MacroEntry(drive=1, bank=200, mode=2,
-                   path="\\ANALOG\\", filename="SYNAPSE.KRZ"),
+        MacroEntry(drive=1, bank=BANK_EVERYTHING, mode=3, path="\\", filename="NULL.KRZ"),
+        MacroEntry(drive=1, bank=200, mode=2, path="\\ANALOG\\", filename="SYNAPSE.KRZ"),
     ]
     pram = PramFile.for_macro(MacroTable(entries))
     blob = pram.serialize()
@@ -175,8 +176,7 @@ def test_entry_lengths_follow_the_documented_formula():
 
 
 def test_file_name_longer_than_the_field_is_refused():
-    entry = MacroEntry(drive=1, bank=0, mode=2, path="\\",
-                       filename="WAYTOOLONGNAME.KRZ")
+    entry = MacroEntry(drive=1, bank=0, mode=2, path="\\", filename="WAYTOOLONGNAME.KRZ")
     with pytest.raises(MacError, match="does not fit"):
         entry.serialize()
 
@@ -232,16 +232,21 @@ def test_short_object_block_raises_macerror_not_struct_error():
     from k2kmaced.macfile import MacError, PramFile
 
     for blocksize in range(-40, 0):
-        buf = (b"PRAM" + struct.pack(">i", 0) + b"\x00" * 24
-               + struct.pack(">i", blocksize) + b"\x00" * 64)
+        buf = (
+            b"PRAM"
+            + struct.pack(">i", 0)
+            + b"\x00" * 24
+            + struct.pack(">i", blocksize)
+            + b"\x00" * 64
+        )
         try:
             PramFile.parse(buf)
         except MacError:
             pass
         except struct.error as exc:  # pragma: no cover - the bug being fixed
             raise AssertionError(
-                "blocksize %d raised struct.error, not MacError: %s"
-                % (blocksize, exc))
+                "blocksize %d raised struct.error, not MacError: %s" % (blocksize, exc)
+            )
 
 
 def test_write_mac_leaves_the_original_intact_when_serialising_fails(tmp_path):
@@ -270,10 +275,12 @@ def test_write_mac_leaves_the_original_intact_when_serialising_fails(tmp_path):
     assert list(tmp_path.iterdir()) == [target]  # and no temp file left behind
 
 
-@pytest.mark.skipif(os.name != "posix",
-                    reason="Windows has no POSIX mode bits: os.chmod there only "
-                           "toggles the read-only flag, so st_mode reads back "
-                           "0o666 whatever was asked for")
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="Windows has no POSIX mode bits: os.chmod there only "
+    "toggles the read-only flag, so st_mode reads back "
+    "0o666 whatever was asked for",
+)
 def test_write_bytes_atomic_keeps_the_replaced_file_s_permissions(tmp_path):
     """mkstemp is 0600; a file the user could read yesterday must stay readable."""
     from k2kmaced.macfile import write_bytes_atomic
@@ -296,7 +303,7 @@ def test_write_bytes_atomic_replaces_the_file_everywhere(tmp_path):
     target.write_bytes(b"old")
     write_bytes_atomic(target, b"new")
     assert target.read_bytes() == b"new"
-    assert list(tmp_path.iterdir()) == [target]   # no temp file left behind
+    assert list(tmp_path.iterdir()) == [target]  # no temp file left behind
 
 
 def test_an_odd_length_object_is_refused_rather_than_grown_by_a_byte():

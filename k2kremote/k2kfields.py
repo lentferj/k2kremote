@@ -49,15 +49,20 @@ What is true now, per field:
 So :func:`decode` returns ``None`` for a byte a *formula* cannot vouch for,
 and a real value everywhere a *table* covers.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, Union
 
 from k2000.definitions import ObjectType
-from k2kremote.k2kromtables import (ENV2_FILFREQ_CT, FILTER_COARSE_HZ,
-                                     LFO_PITCH_CT, LFO_RATE_CHZ,
-                                     ROLAND_RATE_HZ)
+from k2kremote.k2kromtables import (
+    ENV2_FILFREQ_CT,
+    FILTER_COARSE_HZ,
+    LFO_PITCH_CT,
+    LFO_RATE_CHZ,
+    ROLAND_RATE_HZ,
+)
 
 
 @dataclass(frozen=True)
@@ -173,10 +178,10 @@ def _panner_adjust_pct(raw: bytes) -> Optional[int]:
 #: frequency -- each one checked against the panel's own reading, not
 #: assumed from the name (RESOLUTION_NOTES §69).
 FREQ_BLOCK_TYPES: Dict[int, str] = {
-    9: "PARA TREBLE",            # prog 3 F1, byte 59 -> panel "B 8 7902Hz"
-    14: "STEEP RESONANT BASS",   # prog 42 F1, byte -48 -> panel "C 0 16Hz"
-    37: "LOPAS2",                # prog 1 F3, byte 41 -> panel "F 7 2794Hz"
-    50: "4POLE LOPASS W/SEP",    # CUTCAL bank F1, 11 programs + both clamps
+    9: "PARA TREBLE",  # prog 3 F1, byte 59 -> panel "B 8 7902Hz"
+    14: "STEEP RESONANT BASS",  # prog 42 F1, byte -48 -> panel "C 0 16Hz"
+    37: "LOPAS2",  # prog 1 F3, byte 41 -> panel "F 7 2794Hz"
+    50: "4POLE LOPASS W/SEP",  # CUTCAL bank F1, 11 programs + both clamps
 }
 
 
@@ -207,7 +212,6 @@ def _f1_coarse_hz(raw: bytes) -> Optional[int]:
     if not -48 <= b <= 79:
         return None
     return FILTER_COARSE_HZ[b + 48]
-
 
 
 # --- Soundblock / Keymap -----------------------------------------------
@@ -312,15 +316,20 @@ def _keymap_entry_layout(raw: bytes) -> Optional[str]:
     method = int.from_bytes(raw[:2], "big")
     parts, width = [], 0
     if method & 0x10:
-        parts.append("tuning i16"); width += 2
+        parts.append("tuning i16")
+        width += 2
     elif method & 0x08:
-        parts.append("tuning i8"); width += 1
+        parts.append("tuning i8")
+        width += 1
     if method & 0x04:
-        parts.append("volumeAdjust i8"); width += 1
+        parts.append("volumeAdjust i8")
+        width += 1
     if method & 0x02:
-        parts.append("sampleID i16"); width += 2
+        parts.append("sampleID i16")
+        width += 2
     if method & 0x01:
-        parts.append("subSample u8"); width += 1
+        parts.append("subSample u8")
+        width += 1
     if not parts:
         return None
     return f"{' + '.join(parts)} = {width} B/entry"
@@ -372,113 +381,142 @@ def _percent_0_100(raw: bytes) -> Optional[str]:
 
 KNOWN_FIELDS: Dict[Tuple[ObjectType, int], Field] = {
     (ObjectType.Program, 196): Field(
-        name="PITCH KeyTrk", size=1, unit=None,
+        name="PITCH KeyTrk",
+        size=1,
+        unit=None,
         notes="RESOLUTION_NOTES §90; three-region ladder, 89 points. A "
-              "DEVIATION added to the KEYMAP page's KeyTrk, so 0 = normal "
-              "1:1 and byte 43 (+100) is DOUBLE tracking, not fixed pitch. "
-              "Fixed pitch here is byte 213 (-100) and occurs once in 16,649 "
-              "corpus layers -- the KEYMAP page is how it is normally done.",
+        "DEVIATION added to the KEYMAP page's KeyTrk, so 0 = normal "
+        "1:1 and byte 43 (+100) is DOUBLE tracking, not fixed pitch. "
+        "Fixed pitch here is byte 213 (-100) and occurs once in 16,649 "
+        "corpus layers -- the KEYMAP page is how it is normally done.",
         decode=_keytrk_ct_per_key,
     ),
     (ObjectType.Program, 180): Field(
-        name="KEYMAP KeyTrk", size=1, unit=None,
+        name="KEYMAP KeyTrk",
+        size=1,
+        unit=None,
         notes="RESOLUTION_NOTES §90; same ladder as offset 196. Default is "
-              "byte 43 = 100 ct/key (normal). Byte 0 = 0 ct/key = fixed "
-              "pitch, and that is where drum programs sit: 9.7x enriched "
-              "over non-drums across 4,280 corpus programs.",
+        "byte 43 = 100 ct/key (normal). Byte 0 = 0 ct/key = fixed "
+        "pitch, and that is where drum programs sit: 9.7x enriched "
+        "over non-drums across 4,280 corpus programs.",
         decode=_keytrk_ct_per_key,
     ),
     (ObjectType.Program, 43): Field(
-        name="FX Wet/Dry Mix Adjust", size=1, unit=None,
+        name="FX Wet/Dry Mix Adjust",
+        size=1,
+        unit=None,
         notes="RESOLUTION_NOTES §90; the byte IS the percentage, rails 0 and "
-              "100 both driven. EffectPreset sits at offset 42.",
+        "100 both driven. EffectPreset sits at offset 42.",
         decode=_percent_0_100,
     ),
     (ObjectType.Program, 231): Field(
-        name="F2 RES Depth", size=1, unit=None,
+        name="F2 RES Depth",
+        size=1,
+        unit=None,
         notes="RESOLUTION_NOTES §90; offset confirmed three ways (corpus, "
-              "generic empty block, and with 2P LOPASS loaded). The 0.5 dB "
-              "per unit is the DISPLAY's law and is deliberately not treated "
-              "as the acoustic one -- see the decoder's docstring. §93: the "
-              "acoustic measurement was DECLINED on prevalence, not deferred "
-              "-- 34 voices in one E4B bank of 131 are the whole demand, and "
-              "Adjust (offset 226) is what resonant material actually uses.",
+        "generic empty block, and with 2P LOPASS loaded). The 0.5 dB "
+        "per unit is the DISPLAY's law and is deliberately not treated "
+        "as the acoustic one -- see the decoder's docstring. §93: the "
+        "acoustic measurement was DECLINED on prevalence, not deferred "
+        "-- 34 voices in one E4B bank of 131 are the whole demand, and "
+        "Adjust (offset 226) is what resonant material actually uses.",
         decode=_res_depth_db,
     ),
     (ObjectType.Program, 215): Field(
-        name="ENV2->FilFreq Depth", size=1, unit="cents",
-        notes="RESOLUTION_NOTES §30/§70; ROM table 0x1F9604, signed, "
-              "all 256 bytes, +-10800 cents",
+        name="ENV2->FilFreq Depth",
+        size=1,
+        unit="cents",
+        notes="RESOLUTION_NOTES §30/§70; ROM table 0x1F9604, signed, all 256 bytes, +-10800 cents",
         decode=_env2_filfreq_depth_ct,
     ),
     (ObjectType.Program, 199): Field(
-        name="LFO1->Pitch Depth", size=1, unit="cents",
-        notes="RESOLUTION_NOTES §30/§70; ROM table 0x1FA204, signed, "
-              "all 256 bytes, +-7200 cents",
+        name="LFO1->Pitch Depth",
+        size=1,
+        unit="cents",
+        notes="RESOLUTION_NOTES §30/§70; ROM table 0x1FA204, signed, all 256 bytes, +-7200 cents",
         decode=_lfo1_pitch_depth_ct,
     ),
     (ObjectType.Program, 261): Field(
-        name="F4 AMP VelTrk", size=1, unit="dB",
+        name="F4 AMP VelTrk",
+        size=1,
+        unit="dB",
         notes="RESOLUTION_NOTES §47/§62; signed, 1 dB per unit, +-96 dB",
         decode=_amp_veltrk_db,
     ),
     (ObjectType.Program, 91): Field(
-        name="LFO1 MnRate", size=1, unit="Hz",
+        name="LFO1 MnRate",
+        size=1,
+        unit="Hz",
         notes="RESOLUTION_NOTES §61/§70; ROM table 0x1FB404, all 256 bytes, "
-              "0.00-25.00 Hz. The wheel stops at byte 184 (24.00); SysEx "
-              "and files reach 185 (24.50) and 186+ (25.00).",
+        "0.00-25.00 Hz. The wheel stops at byte 184 (24.00); SysEx "
+        "and files reach 185 (24.50) and 186+ (25.00).",
         decode=_lfo1_mnrate_hz,
     ),
     (ObjectType.Program, 210): Field(
-        name="F1 Coarse", size=1, unit="Hz",
+        name="F1 Coarse",
+        size=1,
+        unit="Hz",
         notes="RESOLUTION_NOTES §69; signed semitones, 0 = C4, "
-              "proven -48..79 (both are the field's own clamps). "
-              "Only a frequency when the F1 block type at 209 is one.",
+        "proven -48..79 (both are the field's own clamps). "
+        "Only a frequency when the F1 block type at 209 is one.",
         decode=_f1_coarse_hz,
-        gate=(209, lambda t: t in FREQ_BLOCK_TYPES,
-              "the F1 block type at offset 209 is a frequency function"),
+        gate=(
+            209,
+            lambda t: t in FREQ_BLOCK_TYPES,
+            "the F1 block type at offset 209 is a frequency function",
+        ),
     ),
     (ObjectType.Program, 242): Field(
-        name="F3 POS Adjust", size=1, unit="%",
+        name="F3 POS Adjust",
+        size=1,
+        unit="%",
         notes="RESOLUTION_NOTES §56/§57/§62; signed, 1 % per unit, +-100 %",
         decode=_panner_adjust_pct,
     ),
-
     (ObjectType.Soundblock, _SFH + 0): Field(
-        name="Sample Root", size=1, unit="",
+        name="Sample Root",
+        size=1,
+        unit="",
         notes="IMPORT_CONVERSION.md; Soundfilehead.rootkey, MIDI note. "
-              "Shown the K2000's way (C0 = 0), so 60 reads C5 not C4.",
+        "Shown the K2000's way (C0 = 0), so 60 reads C5 not C4.",
         decode=_sample_root_note,
     ),
     (ObjectType.Soundblock, _SFH + 1): Field(
-        name="Sample Loop", size=1, unit="",
+        name="Sample Loop",
+        size=1,
+        unit="",
         notes="IMPORT_CONVERSION.md; Soundfilehead.flags bit 0x80, and it "
-              "is INVERTED -- clear = looped. Confirmed by contrast: "
-              "0xB0 one-shot kits against 0x30 looped multisamples. "
-              "The other bits are not decoded; no reading survives all six "
-              "values the corpus holds.",
+        "is INVERTED -- clear = looped. Confirmed by contrast: "
+        "0xB0 one-shot kits against 0x30 looped multisamples. "
+        "The other bits are not decoded; no reading survives all six "
+        "values the corpus holds.",
         decode=_sample_loop_state,
     ),
     (ObjectType.Soundblock, _SFH + 28): Field(
-        name="Sample Rate", size=4, unit="Hz",
+        name="Sample Rate",
+        size=4,
+        unit="Hz",
         notes="IMPORT_CONVERSION.md; Soundfilehead.samplePeriod, "
-              "TRUNC(1e9/rate) -- the ROM divide at 0x18352C discards the "
-              "remainder. Device wrote 22675 at 44100, where rounding "
-              "would give 22676.",
+        "TRUNC(1e9/rate) -- the ROM divide at 0x18352C discards the "
+        "remainder. Device wrote 22675 at 44100, where rounding "
+        "would give 22676.",
         decode=_sample_rate_hz,
     ),
     (ObjectType.Keymap, 2): Field(
-        name="Keymap Method", size=2, unit="",
+        name="Keymap Method",
+        size=2,
+        unit="",
         notes="IMPORT_CONVERSION.md; bitfield selecting the per-entry "
-              "fields, in bit order. entrySize at offset 10 is their total "
-              "width -- 0x17 gives 6 bytes.",
+        "fields, in bit order. entrySize at offset 10 is their total "
+        "width -- 0x17 gives 6 bytes.",
         decode=_keymap_entry_layout,
     ),
 }
 
 
-def describe_field(obj_type: ObjectType, offset: int, raw: bytes,
-                   gate_byte: Optional[int] = None) -> str:
+def describe_field(
+    obj_type: ObjectType, offset: int, raw: bytes, gate_byte: Optional[int] = None
+) -> str:
     """``"28"`` normally, ``"28 (ENV2->FilFreq Depth: 1200 cents)"`` when the
     offset is in :data:`KNOWN_FIELDS` and its formula covers this byte. Note
     ``raw.hex()`` prints the byte in hex, not decimal -- byte ``0x58`` (88
@@ -497,12 +535,10 @@ def describe_field(obj_type: ObjectType, offset: int, raw: bytes,
             # from a verified one, which is the whole failure this gate
             # exists to prevent.
             value = field.decode(raw)
-            shown = ("unmapped for this byte" if value is None
-                     else f"{value} {field.unit}")
+            shown = "unmapped for this byte" if value is None else f"{value} {field.unit}"
             return f"{hexed} ({field.name}: {shown} -- only if {why})"
         if not allows(gate_byte):
-            return (f"{hexed} ({field.name}: not decoded -- "
-                    f"{why} does not hold, byte {gate_byte})")
+            return f"{hexed} ({field.name}: not decoded -- {why} does not hold, byte {gate_byte})"
     value = field.decode(raw)
     if value is None:
         return f"{hexed} ({field.name}: unmapped for this byte)"

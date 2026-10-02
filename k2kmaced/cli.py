@@ -157,9 +157,7 @@ def _drive(text: str) -> int:
             return code
     if text.upper().startswith("SCSI") and text[4:].strip().isdigit():
         return 1 + int(text[4:].strip())
-    raise argparse.ArgumentTypeError(
-        f"drive must be one of {', '.join(DRIVE_LABELS.values())}"
-    )
+    raise argparse.ArgumentTypeError(f"drive must be one of {', '.join(DRIVE_LABELS.values())}")
 
 
 def _index_value(arg: str) -> Tuple[int, str]:
@@ -175,8 +173,10 @@ def _index_value(arg: str) -> Tuple[int, str]:
 def _cmd_list(args) -> int:
     pram, where = load_macro(args.source)
     table = pram.macro_table()
-    print(f"{where}: {len(table)} entr{'y' if len(table) == 1 else 'ies'} "
-          f"(written by K2000 OS v{pram.software_version / 100:.2f})")
+    print(
+        f"{where}: {len(table)} entr{'y' if len(table) == 1 else 'ies'} "
+        f"(written by K2000 OS v{pram.software_version / 100:.2f})"
+    )
     for line in format_table(table):
         print(line)
     return 0
@@ -201,8 +201,10 @@ def _cmd_live(args) -> int:
     bridge = _open_bridge(args)
     try:
         table = online.read_live(bridge)
-        print(f"live macro table on {bridge.description}: "
-              f"{len(table)} entr{'y' if len(table) == 1 else 'ies'}")
+        print(
+            f"live macro table on {bridge.description}: "
+            f"{len(table)} entr{'y' if len(table) == 1 else 'ies'}"
+        )
         for line in format_table(table):
             print(line)
     finally:
@@ -293,13 +295,15 @@ _BACKUP_WARNING = _boxed(_WARNING_LINES)
 def _cmd_install(args) -> int:
     """Write a .MAC back into a disk image, over a file that is already there."""
     macro = open(args.source, "rb").read()
-    PramFile.parse(macro).macro_object()      # refuse anything that is not a macro
+    PramFile.parse(macro).macro_object()  # refuse anything that is not a macro
 
     plan = plan_replacement(args.image, args.member, len(macro))
     print(f"image  : {args.image}")
     print(f"target : {plan['path']}  ({plan['old_size']} → {plan['new_size']} bytes)")
-    print(f"clusters: {plan['clusters']} of {plan['cluster_size']} bytes "
-          f"— {plan['slack']} bytes slack, FAT untouched")
+    print(
+        f"clusters: {plan['clusters']} of {plan['cluster_size']} bytes "
+        f"— {plan['slack']} bytes slack, FAT untouched"
+    )
     print(_BACKUP_WARNING)
 
     if not args.yes:
@@ -365,8 +369,10 @@ def _cmd_push(args) -> int:
         print("read back and verified byte-identical to what was sent:")
         for line in format_table(after):
             print(line)
-        print("\nThe DISK is unchanged. To keep this, save it on the instrument;"
-              "\nsaving under a new name lets you test it with Disk -> Load first.")
+        print(
+            "\nThe DISK is unchanged. To keep this, save it on the instrument;"
+            "\nsaving under a new name lets you test it with Disk -> Load first."
+        )
     finally:
         bridge.close()
     return 0
@@ -379,8 +385,7 @@ def _cmd_check(args) -> int:
         # The usual case is checking an image's own BOOT.MAC against it; then
         # the image is opened (and, for .lzo, decompressed) exactly once.
         if member is not None and os.path.samefile(source_image, args.image):
-            pram, where = PramFile.parse(image.read_file(member)), (
-                f"{member} in {args.image}")
+            pram, where = PramFile.parse(image.read_file(member)), (f"{member} in {args.image}")
         else:
             pram, where = load_macro(args.source)
         table = pram.macro_table()
@@ -407,7 +412,8 @@ def _entry_index(table, index: int) -> int:
             raise MacError(f"no entry {index}: the macro table is empty")
         raise MacError(
             f"no entry {index}: the table has {len(table.entries)} entries "
-            f"(0-{len(table.entries) - 1})")
+            f"(0-{len(table.entries) - 1})"
+        )
     return index
 
 
@@ -418,8 +424,9 @@ def _cmd_edit(args) -> int:
 
     # Every index first, before a single entry is touched: a half-applied edit
     # is worse than a refused one, and the output is written from this table.
-    for index, _value in ((args.rebank or []) + (args.set_mode or [])
-                          + (args.set_drive or []) + (args.move or [])):
+    for index, _value in (
+        (args.rebank or []) + (args.set_mode or []) + (args.set_drive or []) + (args.move or [])
+    ):
         _entry_index(table, index)
     for index in args.delete or []:
         _entry_index(table, index)
@@ -471,8 +478,7 @@ def _cmd_new(args) -> int:
             # A macro entry with no filename is a line the K2000 can never
             # load. Nothing downstream rejects it, so the table looks fine and
             # the boot simply comes up missing that object.
-            raise MacError(
-                f"{spec!r} names no file: give a path like \\-FAVS\\KPOWFAV.KRZ")
+            raise MacError(f"{spec!r} names no file: give a path like \\-FAVS\\KPOWFAV.KRZ")
         entries.append(
             MacroEntry(
                 drive=_drive(args.drive),
@@ -501,7 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="k2kmacli",
         description="Inspect and edit Kurzweil K2000 .MAC macro files.",
         epilog="A macro source is either a .MAC path or IMAGE:\\PATH.MAC inside "
-               "a K2000 disk image. Images are opened read-only.",
+        "a K2000 disk image. Images are opened read-only.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -514,8 +520,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rig", choices=("standard", "auto"), default="auto")
     p.set_defaults(func=_cmd_live)
 
-    p = sub.add_parser(
-        "diff", help="compare the live macro table against a .MAC (read-only)")
+    p = sub.add_parser("diff", help="compare the live macro table against a .MAC (read-only)")
     p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
     p.add_argument("--port", help="exact MIDI port name")
     p.add_argument("--rig", choices=("standard", "auto"), default="auto")
@@ -529,29 +534,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("image")
     p.add_argument("member", help="path inside the image, e.g. \\BOOT.MAC")
     p.add_argument("-o", "--output", required=True)
-    p.add_argument("--force", action="store_true",
-                   help="overwrite the output file if it exists")
+    p.add_argument("--force", action="store_true", help="overwrite the output file if it exists")
     p.set_defaults(func=_cmd_extract)
 
     p = sub.add_parser(
-        "install",
-        help="WRITES: put a .MAC back into an image, over an existing file")
+        "install", help="WRITES: put a .MAC back into an image, over an existing file"
+    )
     p.add_argument("source", help="the .MAC to install (a host file)")
     p.add_argument("image", help="the RAW .img to write into (not .lzo)")
     p.add_argument("member", help="the existing file to overwrite, e.g. \\BOOT.MAC")
-    p.add_argument("--yes", action="store_true",
-                   help="skip the typed confirmation (for scripts; you own the "
-                        "backup either way)")
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the typed confirmation (for scripts; you own the backup either way)",
+    )
     p.set_defaults(func=_cmd_install)
 
-    p = sub.add_parser(
-        "push", help="WRITES: replace the running K2000's macro table over MIDI")
+    p = sub.add_parser("push", help="WRITES: replace the running K2000's macro table over MIDI")
     p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
     p.add_argument("--port", help="exact MIDI port name")
     p.add_argument("--rig", choices=("standard", "auto"), default="auto")
     p.add_argument("--backup", help="where to save the current table first")
-    p.add_argument("--yes", action="store_true",
-                   help="skip the typed confirmation")
+    p.add_argument("--yes", action="store_true", help="skip the typed confirmation")
     p.set_defaults(func=_cmd_push)
 
     p = sub.add_parser("check", help="verify a macro's files exist on an image")
@@ -563,16 +567,35 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source")
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--force", action="store_true", help="overwrite the output")
-    p.add_argument("--rebank", metavar="INDEX=BANK", type=_index_value,
-                   action="append", help="set one entry's target bank (or E)")
-    p.add_argument("--rebank-all", metavar="BANK",
-                   help="set every entry's target bank")
-    p.add_argument("--set-mode", metavar="INDEX=MODE", type=_index_value,
-                   action="append", help="Append/Merge/Fill/Overwrite/OvFill")
-    p.add_argument("--set-drive", metavar="INDEX=DRIVE", type=_index_value,
-                   action="append", help="Floppy/SCSI n/Unspecified/Library")
-    p.add_argument("--move", metavar="INDEX=POSITION", type=_index_value,
-                   action="append", help="reorder an entry")
+    p.add_argument(
+        "--rebank",
+        metavar="INDEX=BANK",
+        type=_index_value,
+        action="append",
+        help="set one entry's target bank (or E)",
+    )
+    p.add_argument("--rebank-all", metavar="BANK", help="set every entry's target bank")
+    p.add_argument(
+        "--set-mode",
+        metavar="INDEX=MODE",
+        type=_index_value,
+        action="append",
+        help="Append/Merge/Fill/Overwrite/OvFill",
+    )
+    p.add_argument(
+        "--set-drive",
+        metavar="INDEX=DRIVE",
+        type=_index_value,
+        action="append",
+        help="Floppy/SCSI n/Unspecified/Library",
+    )
+    p.add_argument(
+        "--move",
+        metavar="INDEX=POSITION",
+        type=_index_value,
+        action="append",
+        help="reorder an entry",
+    )
     p.add_argument("--delete", metavar="INDEX", type=int, action="append")
     p.set_defaults(func=_cmd_edit)
 
@@ -580,8 +603,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", required=True)
     p.add_argument("--force", action="store_true")
     p.add_argument("--drive", default="SCSI 0")
-    p.add_argument("entry", nargs="+", metavar="PATH@BANK[:MODE]",
-                   help=r"e.g. '\--FAVS\KPOWFAV.KRZ@200:Overwrite'")
+    p.add_argument(
+        "entry",
+        nargs="+",
+        metavar="PATH@BANK[:MODE]",
+        help=r"e.g. '\--FAVS\KPOWFAV.KRZ@200:Overwrite'",
+    )
     p.set_defaults(func=_cmd_new)
 
     return parser
@@ -596,8 +623,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # argparse is no longer in the loop to format the message.
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    except (MacError, ImageError, ImageWriteError, FileNotFoundError,
-            OSError) as exc:
+    except (MacError, ImageError, ImageWriteError, FileNotFoundError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

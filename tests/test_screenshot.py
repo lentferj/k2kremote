@@ -44,8 +44,7 @@ def test_text_only_frame_renders_over_blank(tmp_path):
 
 def test_overlong_rows_are_clipped_not_crashing(tmp_path):
     # >40-char rows and >8 rows would index off generate_image's canvas.
-    frame = Frame(pixels=np.zeros((240, 64), dtype=np.uint8),
-                  text_rows=["X" * 60] * 10)
+    frame = Frame(pixels=np.zeros((240, 64), dtype=np.uint8), text_rows=["X" * 60] * 10)
     out = tmp_path / "wide.png"
     screenshot.save_png(frame, str(out), scale=1)
     assert out.exists()

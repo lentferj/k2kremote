@@ -60,6 +60,7 @@ from k2kremote.refresh import Frame, RefreshWorker
 
 try:  # optional: pixel-perfect image mode via kitty/sixel (textual-image)
     import textual_image.widget as _ti_widget
+
     _HAS_IMAGE = True
 except Exception:  # pragma: no cover - depends on optional dep
     _ti_widget = None
@@ -82,6 +83,7 @@ def _detected_image_protocol() -> str:
     """Name of the renderer textual-image auto-detected at import (tgp/sixel/…)."""
     try:
         import textual_image.renderable as r
+
         return r.Image.__module__.rsplit(".", 1)[-1]
     except Exception:  # pragma: no cover
         return "?"
@@ -113,8 +115,13 @@ def wrap_blocks(blocks: List[str], width: int, sep: str = _BAR_SEP) -> str:
     return "\n".join(lines)
 
 
-def align_blocks(blocks: List[str], span: int, width: int, offset: int = 0,
-                 centres: Optional[List[Optional[float]]] = None) -> Optional[str]:
+def align_blocks(
+    blocks: List[str],
+    span: int,
+    width: int,
+    offset: int = 0,
+    centres: Optional[List[Optional[float]]] = None,
+) -> Optional[str]:
     """Lay ``blocks`` out so each sits under its zone of an ``span``-wide mirror.
 
     The K2000 divides its 40-column bottom row into six equal soft-key zones, and
@@ -143,9 +150,9 @@ def align_blocks(blocks: List[str], span: int, width: int, offset: int = 0,
         if frac is None:
             frac = (i + 0.5) / _SOFT_KEYS
         pos = offset + int(round(frac * span)) - len(block) // 2
-        pos = max(pos, offset)                 # never hang off the mirror's left
+        pos = max(pos, offset)  # never hang off the mirror's left
         if line:
-            pos = max(pos, len(line) + 1)      # never butt two blocks together
+            pos = max(pos, len(line) + 1)  # never butt two blocks together
         if width and pos + len(block) > width:
             return None
         line = line.ljust(pos) + block
@@ -192,13 +199,28 @@ _TEXT_COLS = 40  # 240 px / 6 px per char
 
 # F1-F6 soft keys -> label index, for spotting heavy disk operations.
 _SOFT_INDEX = {
-    Button.SoftA: 0, Button.SoftB: 1, Button.SoftC: 2,
-    Button.SoftD: 3, Button.SoftE: 4, Button.SoftF: 5,
+    Button.SoftA: 0,
+    Button.SoftB: 1,
+    Button.SoftC: 2,
+    Button.SoftD: 3,
+    Button.SoftE: 4,
+    Button.SoftF: 5,
 }
 # Soft-key labels that start a long, CPU-pegging K2000/SCSI operation. Polling
 # the device while one runs can crash it, so we auto-pause when one is pressed.
-_HEAVY_OPS = ("load", "save", "move", "copy", "format", "backup",
-              "store", "erase", "scan", "build", "macro")
+_HEAVY_OPS = (
+    "load",
+    "save",
+    "move",
+    "copy",
+    "format",
+    "backup",
+    "store",
+    "erase",
+    "scan",
+    "build",
+    "macro",
+)
 
 
 def soft_labels(text_rows: List[str]) -> List[str]:
@@ -300,8 +322,7 @@ def soft_label_centres(text_rows: List[str]) -> List[Optional[float]]:
             bounds[key] = [match.start(), match.end()]
         else:  # a multi-word label ("Delete Insert" style) spans both
             span[0], span[1] = min(span[0], match.start()), max(span[1], match.end())
-    return [None if b is None else ((b[0] + b[1] - 1) / 2) / _TEXT_COLS
-            for b in bounds]
+    return [None if b is None else ((b[0] + b[1] - 1) / 2) / _TEXT_COLS for b in bounds]
 
 
 def is_name_dialog(text_rows: List[str]) -> bool:
@@ -316,8 +337,8 @@ def is_name_dialog(text_rows: List[str]) -> bool:
 
 
 _TEXT_ROWS = 8  # the K2000 LCD text layer is 8 rows x 40 cols
-_CELL_W = 6     # px per character column
-_CELL_H = 8     # px per character row
+_CELL_W = 6  # px per character column
+_CELL_H = 8  # px per character row
 
 
 def render_text_grid(text_rows: List[str]) -> str:
@@ -385,14 +406,14 @@ def _is_text_page(frame: Frame) -> bool:
     for r in range(1, _TEXT_ROWS - 1):  # middle rows (skip status bar / soft labels)
         line = grid[r] if r < len(grid) else ""
         rev = reverse[r] if r < len(reverse) else ""
-        band = arr[r * _CELL_H:(r + 1) * _CELL_H]
+        band = arr[r * _CELL_H : (r + 1) * _CELL_H]
         for c in range(_TEXT_COLS):
             if (line[c] if c < len(line) else " ") != " ":
                 text_cells += 1
                 continue  # the cell holds text
             if c < len(rev) and rev[c] == "1":
                 continue  # reverse-video highlight (high-bit flagged)
-            cell = int(band[:, c * _CELL_W:(c + 1) * _CELL_W].sum())
+            cell = int(band[:, c * _CELL_W : (c + 1) * _CELL_W].sum())
             if cell >= _SOLID_CELL_PIXELS:
                 continue  # a solid block = highlight/inverse bar, not graphics
             graphics_only += cell
@@ -429,9 +450,10 @@ def render_text_overlay(pixels, text_rows: List[str], reverse_rows=None):
         attr = reverse_rows[r] if reverse_rows and r < len(reverse_rows) else ""
         for c, ch in enumerate(line):
             highlighted = (c < len(attr) and attr[c] == "1") or (
-                arr is not None and bool(
-                    arr[r * _CELL_H:(r + 1) * _CELL_H,
-                        c * _CELL_W:(c + 1) * _CELL_W].mean() > 0.5
+                arr is not None
+                and bool(
+                    arr[r * _CELL_H : (r + 1) * _CELL_H, c * _CELL_W : (c + 1) * _CELL_W].mean()
+                    > 0.5
                 )
             )
             out.append(ch, style="reverse" if highlighted else "")
@@ -507,13 +529,11 @@ class SoftBar(Static):
         cells = self.labels or [""] * _SOFT_KEYS
         keys = keymap.SOFT_KEY_LABELS_ALT if self.alt_keys else keymap.SOFT_KEY_LABELS
         blocks = [
-            f"[{keys[i]}:{label}]" if label else f"[{keys[i]}]"
-            for i, label in enumerate(cells)
+            f"[{keys[i]}:{label}]" if label else f"[{keys[i]}]" for i, label in enumerate(cells)
         ]
         width = self.size.width or 9999
         # Preferred: line each block up under its zone of the mirror above.
-        aligned = align_blocks(blocks, self.span, width, self.offset,
-                               self.centres or None)
+        aligned = align_blocks(blocks, self.span, width, self.offset, self.centres or None)
         if aligned is not None:
             return Text(aligned, no_wrap=True)
         # Otherwise fold to the bar width so a whole [F#:label] block is never
@@ -587,13 +607,16 @@ class RenameObjectScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Container(id="renamebox"):
             yield Static("Rename object — SysEx (no dial-in)", id="renametitle")
-            yield Select(_RENAMEABLE_TYPES, value=ObjectType.Program,
-                         allow_blank=False, id="renametype")
-            yield Input(placeholder="id (e.g. 201) — Enter/Tab looks it up",
-                        id="renameid", restrict=r"[0-9]*")
+            yield Select(
+                _RENAMEABLE_TYPES, value=ObjectType.Program, allow_blank=False, id="renametype"
+            )
+            yield Input(
+                placeholder="id (e.g. 201) — Enter/Tab looks it up",
+                id="renameid",
+                restrict=r"[0-9]*",
+            )
             yield Static("", id="renamecurrent")
-            yield Input(placeholder="new name — Enter to rename",
-                        id="renamenew")
+            yield Input(placeholder="new name — Enter to rename", id="renamenew")
             yield Static("Esc to close", id="renamehint")
 
     def _type(self) -> ObjectType:
@@ -671,8 +694,7 @@ class RenameObjectScreen(ModalScreen):
             # stopping on rather than reporting as done. Trailing blanks are not
             # a difference: whether the firmware pads the field is untested.
             if (name or "").rstrip() != new_name.rstrip():
-                self._set_current(_name_preview(f"device stored {name!r}, not: ",
-                                                new_name))
+                self._set_current(_name_preview(f"device stored {name!r}, not: ", new_name))
                 return
             self.app._set_status(f" renamed {self._type().name} {idno} → {name!r}")
             self.dismiss()
@@ -741,16 +763,19 @@ class DiskBrowserScreen(ModalScreen):
         self._index = 0
         self._busy = True
         self._scroll = VerticalScroll(id="browsescroll")
-        self._scroll.can_focus = False      # same reason as MacroScreen
+        self._scroll.can_focus = False  # same reason as MacroScreen
         self._list = Static("", id="browselist")
         self._title = Static("K2000 disk", id="browsetitle")
         self._hint = Static("", id="browsehint")
 
     def compose(self) -> ComposeResult:
         with Container(id="browsebox"):
-            yield Static("⚠  EXPERIMENTAL — reads the disk by driving the "
-                         "panel\n   keep the K2000's own LCD in sight: the "
-                         "mirror is PAUSED while this works", id="browsewarn")
+            yield Static(
+                "⚠  EXPERIMENTAL — reads the disk by driving the "
+                "panel\n   keep the K2000's own LCD in sight: the "
+                "mirror is PAUSED while this works",
+                id="browsewarn",
+            )
             yield self._title
             with self._scroll:
                 yield self._list
@@ -765,6 +790,7 @@ class DiskBrowserScreen(ModalScreen):
     @staticmethod
     def _open_and_list(bridge):
         from k2kremote import disk_browse
+
         disk_browse.open_browser(bridge)
         # Force ROOT rather than trusting wherever the device was last left, and
         # then track the path ourselves from here on -- never by reading it back
@@ -796,8 +822,9 @@ class DiskBrowserScreen(ModalScreen):
             # Falsy was guarded; the WRONG SHAPE was not, and that unpacks just
             # as badly. The comment above records that this class of bug took
             # the app down once, so the guard covers the class, not the case.
-            self._hint.update(f"the browser returned {type(result).__name__}, "
-                              f"not (path, items) — esc to close")
+            self._hint.update(
+                f"the browser returned {type(result).__name__}, not (path, items) — esc to close"
+            )
             return
         self._path, self._items = result
         self._index = 0
@@ -809,7 +836,8 @@ class DiskBrowserScreen(ModalScreen):
         if getattr(self._items, "complete", True) is False:
             self._hint.update(
                 f"showing {len(self._items)} of {self._items.expected} entries — "
-                f"the listing is incomplete (r to re-read)")
+                f"the listing is incomplete (r to re-read)"
+            )
 
     # -- navigation ---------------------------------------------------------
 
@@ -824,8 +852,7 @@ class DiskBrowserScreen(ModalScreen):
         if self._busy:
             return
         chosen_dir = self._path
-        self._app.master_apply("disk browse", self._close_op,
-                               lambda r, e: self._leave(chosen_dir))
+        self._app.master_apply("disk browse", self._close_op, lambda r, e: self._leave(chosen_dir))
 
     def action_choose(self) -> None:
         if self._busy or not self._items:
@@ -835,14 +862,14 @@ class DiskBrowserScreen(ModalScreen):
             if self._directory_mode:
                 # This browser is only choosing a DIRECTORY -- opening a file
                 # makes no sense here, so say what `u` is for instead.
-                self._hint.update("this picks a DIRECTORY — press u to use "
-                                  f"{self._path}, or open a folder")
+                self._hint.update(
+                    f"this picks a DIRECTORY — press u to use {self._path}, or open a folder"
+                )
                 return
             # A file: hand back the full path and leave the browser cleanly.
             path = self._path if self._path.endswith("\\") else self._path + "\\"
             chosen = path + item.filename
-            self._app.master_apply("disk browse", self._close_op,
-                                   lambda r, e: self._leave(chosen))
+            self._app.master_apply("disk browse", self._close_op, lambda r, e: self._leave(chosen))
             return
 
         # A directory: descend into it.
@@ -854,11 +881,12 @@ class DiskBrowserScreen(ModalScreen):
         # Compose the new path from what we already know -- the name of the
         # directory just entered -- rather than from the device's display.
         from k2kremote.disk_browse import descend
+
         new_path = descend(self._path, name)
 
-        def op(bridge, name=name, index=index, total=total, names=names,
-              new_path=new_path):
+        def op(bridge, name=name, index=index, total=total, names=names, new_path=new_path):
             from k2kremote import disk_browse
+
             disk_browse.enter(bridge, index, total, name, names)
             return new_path, disk_browse.listing(bridge)
 
@@ -870,10 +898,12 @@ class DiskBrowserScreen(ModalScreen):
         self._hint.update("going up ...")
         # Pop the last component from our OWN tracked path, not the device's.
         from k2kremote.disk_browse import ascend
+
         parent_path = ascend(self._path)
 
         def op(bridge, parent_path=parent_path):
             from k2kremote import disk_browse
+
             disk_browse.parent(bridge)
             return parent_path, disk_browse.listing(bridge)
 
@@ -886,6 +916,7 @@ class DiskBrowserScreen(ModalScreen):
 
         def op(bridge):
             from k2kremote import disk_browse
+
             disk_browse.root(bridge)
             return "\\", disk_browse.listing(bridge)
 
@@ -900,11 +931,11 @@ class DiskBrowserScreen(ModalScreen):
     def _close_op(bridge):
         """Leave the instrument's browser via Cancel, never OK."""
         from k2kremote import disk_browse
+
         disk_browse.close(bridge)
 
     def action_close(self) -> None:
-        self._app.master_apply("disk browse", self._close_op,
-                               lambda r, e: self._leave(None))
+        self._app.master_apply("disk browse", self._close_op, lambda r, e: self._leave(None))
 
     # -- view ---------------------------------------------------------------
 
@@ -921,12 +952,15 @@ class DiskBrowserScreen(ModalScreen):
             self._list.update("\n".join(lines))
         self._ensure_visible()
         if self._directory_mode:
-            self._hint.update(f"target: {self._path}   enter open folder · u "
-                              f"USE THIS DIRECTORY · backspace parent · r root "
-                              f"· esc cancel")
+            self._hint.update(
+                f"target: {self._path}   enter open folder · u "
+                f"USE THIS DIRECTORY · backspace parent · r root "
+                f"· esc cancel"
+            )
         else:
-            self._hint.update("enter open/pick · backspace parent · r root · "
-                              "esc cancel   (never loads anything)")
+            self._hint.update(
+                "enter open/pick · backspace parent · r root · esc cancel   (never loads anything)"
+            )
 
     def _ensure_visible(self) -> None:
         """Keep the cursor on screen — a directory is easily taller than the box.
@@ -939,8 +973,8 @@ class DiskBrowserScreen(ModalScreen):
         try:
             height = self._scroll.scrollable_content_region.height
             top = int(self._scroll.scroll_offset.y)
-        except Exception:                                   # noqa: BLE001
-            return                                          # not mounted yet
+        except Exception:  # noqa: BLE001
+            return  # not mounted yet
         if height <= 0:
             return
         if self._index < top:
@@ -991,13 +1025,11 @@ class MacroScreen(ModalScreen):
         ("down", "cursor(1)", "Down"),
         ("p", "push", "Push to K2000"),
         ("s", "save_disk", "Save to disk"),
-        Binding("ctrl+d", "save_to_root", "Save destination: root",
-               priority=True),
+        Binding("ctrl+d", "save_to_root", "Save destination: root", priority=True),
         # Reuses Ctrl+g, which the main app binds to "Save PNG" -- harmless,
         # since Textual resolves bindings against the active screen first, and
         # this screen shadows the app's binding for as long as it is on top.
-        Binding("ctrl+g", "pick_save_directory", "Pick save directory",
-               priority=True),
+        Binding("ctrl+g", "pick_save_directory", "Pick save directory", priority=True),
         # Deliberately NOT Enter: Enter accepted the filename, and confirming an
         # overwrite with the same key one keystroke later is how a double-tap
         # destroys a file. A different finger, a different decision.
@@ -1026,7 +1058,7 @@ class MacroScreen(ModalScreen):
     def __init__(self, worker):
         super().__init__()
         self._worker = worker
-        self._table = None          # k2kmaced.macfile.MacroTable
+        self._table = None  # k2kmaced.macfile.MacroTable
         self._index = 0
         self._dirty = False
         self._armed = False
@@ -1044,13 +1076,13 @@ class MacroScreen(ModalScreen):
         # no longer focusable, focus landed on this hidden Input and every
         # keystroke went into it. Pressing `a` typed an "a" nobody could see
         # instead of adding an entry.
-        self._path = Input(placeholder="\\DIR\\FILE.KRZ  (or Ctrl+f to browse)",
-                           id="macropath")
-        self._path.display = False      # shown only while editing a path
+        self._path = Input(placeholder="\\DIR\\FILE.KRZ  (or Ctrl+f to browse)", id="macropath")
+        self._path.display = False  # shown only while editing a path
         self._path.can_focus = False
         self._save_name = Input(
-            placeholder="file name, no extension  (or Ctrl+t to pick one to "
-                        "overwrite)", id="macrosave")
+            placeholder="file name, no extension  (or Ctrl+t to pick one to overwrite)",
+            id="macrosave",
+        )
         self._save_name.display = False
         self._save_name.can_focus = False
         #: Set when the save name was picked from the browser, i.e. names a file
@@ -1071,11 +1103,13 @@ class MacroScreen(ModalScreen):
             # Said on the screen itself, not only in the README: this drives the
             # instrument's own panel for anything SysEx cannot express, and the
             # person about to press `p` or `s` is the one who needs to know.
-            yield Static("⚠  EXPERIMENTAL — writes to the running instrument\n"
-                         "   keep the K2000's own LCD in sight: the mirror is "
-                         "PAUSED while this works", id="macrowarn")
-            yield Static("Macro table on the running K2000 (type 100, id 35)",
-                         id="macrotitle")
+            yield Static(
+                "⚠  EXPERIMENTAL — writes to the running instrument\n"
+                "   keep the K2000's own LCD in sight: the mirror is "
+                "PAUSED while this works",
+                id="macrowarn",
+            )
+            yield Static("Macro table on the running K2000 (type 100, id 35)", id="macrotitle")
             with self._scroll:
                 yield self._list
             yield self._path
@@ -1085,7 +1119,7 @@ class MacroScreen(ModalScreen):
 
     def on_mount(self) -> None:
         self._refresh_hint()
-        self.set_focus(None)            # keys belong to the screen's bindings
+        self.set_focus(None)  # keys belong to the screen's bindings
         self.action_reload()
 
     def _show_input(self, widget) -> None:
@@ -1115,8 +1149,9 @@ class MacroScreen(ModalScreen):
             return
         try:
             from k2kmaced.macfile import MacroTable
+
             self._table = MacroTable.parse(data)
-        except Exception as exc:                      # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             # A wrong id returns a plausible-looking object rather than an error,
             # so say which object was asked for instead of blaming the parser.
             self._status.update(f"type 100 id 35 did not parse as a macro: {exc}")
@@ -1128,8 +1163,7 @@ class MacroScreen(ModalScreen):
         # op runs is right; leaving PAUSED blinking over an idle machine for as
         # long as this screen happens to be open is not.
         self.app.resume_mirror()
-        self._status.update(f"{len(self._table.entries)} entries, as the "
-                            f"instrument has them")
+        self._status.update(f"{len(self._table.entries)} entries, as the instrument has them")
         self._redraw()
 
     def action_push(self) -> None:
@@ -1140,20 +1174,21 @@ class MacroScreen(ModalScreen):
             return
         self._armed = True
         self._refresh_hint()
-        self._status.update("ARMED — press w to write it to the K2000, Esc to "
-                            "cancel")
+        self._status.update("ARMED — press w to write it to the K2000, Esc to cancel")
         return
 
     def _write_table(self) -> None:
         self._status.update("writing ...")
         table = self._table
         from k2kmaced.online import default_backup_path
+
         # Timestamped: one fixed path meant the second push destroyed the copy
         # of the table the first one replaced.
         backup = default_backup_path()
 
         def op(bridge):
             from k2kmaced import online
+
             return online.push(bridge, table, backup_path=backup)
 
         # Through master_apply, not device_op: replacing an object rewrites the
@@ -1161,9 +1196,7 @@ class MacroScreen(ModalScreen):
         # object op is what locks this instrument up (RESOLUTION_NOTES §9). It
         # pauses the mirror, marshals the callback to the UI thread, and leaves
         # the mirror paused until `p`.
-        self.app.master_apply(
-            "macro push", op,
-            lambda r, e: self._pushed(r, e, backup))
+        self.app.master_apply("macro push", op, lambda r, e: self._pushed(r, e, backup))
 
     def _pushed(self, result, error, backup) -> None:
         if error:
@@ -1174,8 +1207,7 @@ class MacroScreen(ModalScreen):
             self._status.update(f"NOT written: {error}")
             return
         self._dirty = False
-        self._status.update(f"written and verified by read-back; previous table "
-                            f"saved to {backup}")
+        self._status.update(f"written and verified by read-back; previous table saved to {backup}")
         self._redraw()
         self.app.resume_mirror()
 
@@ -1193,9 +1225,11 @@ class MacroScreen(ModalScreen):
         if self._table is None:
             return
         if self._dirty:
-            self._status.update("push the changes to the K2000 first (p) — the "
-                                "instrument saves what is in ITS memory, not "
-                                "what is on this screen")
+            self._status.update(
+                "push the changes to the K2000 first (p) — the "
+                "instrument saves what is in ITS memory, not "
+                "what is on this screen"
+            )
             return
         self._save_name.value = ""
         self._show_input(self._save_name)
@@ -1205,6 +1239,7 @@ class MacroScreen(ModalScreen):
 
         def op(bridge):
             from k2kremote.disk_browse import disk_page_path
+
             return disk_page_path(bridge)
 
         self.app.master_apply("disk browse", op, self._show_save_destination)
@@ -1219,7 +1254,8 @@ class MacroScreen(ModalScreen):
         dest = where if not error else "(could not read — will be re-checked)"
         self._status.update(
             f"will save into: {dest}   Ctrl+d root · Ctrl+g browse · Ctrl+t "
-            f"overwrite existing · type a name (up to 8 chars); Enter saves")
+            f"overwrite existing · type a name (up to 8 chars); Enter saves"
+        )
 
     def action_save_to_root(self) -> None:
         """Reset the save destination to the root, without touching any file.
@@ -1236,6 +1272,7 @@ class MacroScreen(ModalScreen):
 
         def op(bridge):
             from k2kremote.disk_browse import reset_to_root, disk_page_path
+
             reset_to_root(bridge)
             return disk_page_path(bridge)
 
@@ -1252,11 +1289,10 @@ class MacroScreen(ModalScreen):
                 return
             self._where = path
             self._status.update(
-                f"will save into: {path}   Ctrl+d root · Ctrl+g browse · "
-                f"type a name; Enter saves")
+                f"will save into: {path}   Ctrl+d root · Ctrl+g browse · type a name; Enter saves"
+            )
 
-        self.app.push_screen(DiskBrowserScreen(self.app, directory_mode=True),
-                             chosen)
+        self.app.push_screen(DiskBrowserScreen(self.app, directory_mode=True), chosen)
 
     def action_confirm_write(self) -> None:
         """Commit whatever write is armed: a save over a file, or a push.
@@ -1275,11 +1311,11 @@ class MacroScreen(ModalScreen):
             self._write_table()
 
     def _do_save(self, stem: str, *, overwrite: bool = False) -> None:
-        self._status.update(f"saving as {stem}.MAC — the K2000 goes quiet while "
-                            f"it writes")
+        self._status.update(f"saving as {stem}.MAC — the K2000 goes quiet while it writes")
 
         def op(bridge, overwrite=overwrite):
             from k2kremote import macro_save
+
             return macro_save.save_macro(bridge, stem, overwrite=overwrite)
 
         # Through master_apply: a disk write is exactly the kind of destructive
@@ -1303,7 +1339,8 @@ class MacroScreen(ModalScreen):
                 self._refresh_hint()
                 self._status.update(
                     f"{stem}.MAC ALREADY EXISTS — nothing was written. "
-                    f"Press w to overwrite it, Esc to cancel")
+                    f"Press w to overwrite it, Esc to cancel"
+                )
                 return
             self._status.update(f"NOT saved: {error}")
             return
@@ -1316,8 +1353,7 @@ class MacroScreen(ModalScreen):
 
     def action_cursor(self, delta: int) -> None:
         if self._entries():
-            self._index = max(0, min(len(self._entries()) - 1,
-                                     self._index + delta))
+            self._index = max(0, min(len(self._entries()) - 1, self._index + delta))
             self._redraw()
 
     def action_bank(self, delta: int) -> None:
@@ -1338,7 +1374,7 @@ class MacroScreen(ModalScreen):
         if not entries:
             return
         entry = entries[self._index]
-        entry.mode = (entry.mode + 1) % 5      # Append/Merge/Fill/Overwrite/OvFill
+        entry.mode = (entry.mode + 1) % 5  # Append/Merge/Fill/Overwrite/OvFill
         self._touch()
 
     def action_shift(self, delta: int) -> None:
@@ -1365,13 +1401,16 @@ class MacroScreen(ModalScreen):
 
         entries = self._table.entries
         template = entries[self._index] if entries else None
-        entries.insert(self._index + 1 if entries else 0, MacroEntry(
-            drive=template.drive if template else 1,
-            bank=template.bank if template else 0,
-            mode=template.mode if template else 2,      # Fill
-            path="\\",
-            filename="NEW.KRZ",
-        ))
+        entries.insert(
+            self._index + 1 if entries else 0,
+            MacroEntry(
+                drive=template.drive if template else 1,
+                bank=template.bank if template else 0,
+                mode=template.mode if template else 2,  # Fill
+                path="\\",
+                filename="NEW.KRZ",
+            ),
+        )
         self._index = self._index + 1 if len(entries) > 1 else 0
         self._touch()
         self.action_edit_path()
@@ -1394,10 +1433,11 @@ class MacroScreen(ModalScreen):
         entries = self._table.entries if self._table else []
         if not entries:
             return
-        self._path.value = entries[self._index].full_path   # a property, not a call
+        self._path.value = entries[self._index].full_path  # a property, not a call
         self._show_input(self._path)
-        self._status.update("type the full path — or Ctrl+f to browse the "
-                            "K2000's disk; Enter accepts, Esc cancels")
+        self._status.update(
+            "type the full path — or Ctrl+f to browse the K2000's disk; Enter accepts, Esc cancels"
+        )
 
     def action_pick_file(self) -> None:
         """Choose this entry's file from the instrument's own disk.
@@ -1410,7 +1450,7 @@ class MacroScreen(ModalScreen):
         entries = self._table.entries if self._table else []
         if not entries:
             return
-        if self._path.display:          # abandon the half-typed path
+        if self._path.display:  # abandon the half-typed path
             self._close_path()
 
         def chosen(path):
@@ -1447,8 +1487,7 @@ class MacroScreen(ModalScreen):
             self._save_name.value = stem
             self._save_overwrites = path
             self._show_input(self._save_name)
-            self._status.update(f"WILL OVERWRITE {path} — Enter to confirm, "
-                                f"Esc to cancel")
+            self._status.update(f"WILL OVERWRITE {path} — Enter to confirm, Esc to cancel")
 
         self.app.push_screen(DiskBrowserScreen(self.app), chosen)
 
@@ -1467,8 +1506,8 @@ class MacroScreen(ModalScreen):
                 self._hide_input(self._save_name)
                 self._pending_save = stem
                 self._status.update(
-                    f"{self._save_overwrites} EXISTS — press w to overwrite it, "
-                    f"Esc to cancel")
+                    f"{self._save_overwrites} EXISTS — press w to overwrite it, Esc to cancel"
+                )
                 return
             self._hide_input(self._save_name)
             self._do_save(stem)
@@ -1488,8 +1527,7 @@ class MacroScreen(ModalScreen):
             if not filename:
                 raise ValueError("the path has no file name")
             if len(filename.encode("latin-1", errors="replace")) > 15:
-                raise ValueError(f"{filename!r} is longer than the 15-character "
-                                 f"field")
+                raise ValueError(f"{filename!r} is longer than the 15-character field")
             entry = entries[self._index]
             entry.path = (directory or "") + "\\"
             entry.filename = filename
@@ -1531,8 +1569,8 @@ class MacroScreen(ModalScreen):
         try:
             height = self._scroll.scrollable_content_region.height
             top = int(self._scroll.scroll_offset.y)
-        except Exception:                                   # noqa: BLE001
-            return                                          # not mounted yet
+        except Exception:  # noqa: BLE001
+            return  # not mounted yet
         if height <= 0:
             return
         if self._index < top:
@@ -1547,8 +1585,14 @@ class MacroScreen(ModalScreen):
             f"{state}{arm}   a add · f pick · e path · del remove · b/B bank · m mode · "
             f"ctrl+up/down move · r reload · p push · s save to disk · "
             f"esc close"
-            + ("   [w = CONFIRM OVERWRITE]" if self._pending_save
-               else "   [w = CONFIRM PUSH]" if self._armed else ""))
+            + (
+                "   [w = CONFIRM OVERWRITE]"
+                if self._pending_save
+                else "   [w = CONFIRM PUSH]"
+                if self._armed
+                else ""
+            )
+        )
 
     def action_close(self) -> None:
         # Esc closes the path editor first: losing a half-typed path is annoying,
@@ -1609,14 +1653,12 @@ class MasterFunctionScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Container(id="masterbox"):
             yield Static("Master functions — SysEx (bypasses the LCD)", id="mastertitle")
-            yield Select(_MASTER_FUNCTIONS, value="delete", allow_blank=False,
-                         id="masterfunc")
-            yield Select(_RENAMEABLE_TYPES, value=ObjectType.Program,
-                         allow_blank=False, id="mastertype")
-            yield Input(placeholder="object id (e.g. 201)", id="mastertarget",
-                        restrict=r"[0-9]*")
-            yield Input(placeholder="new id (move only)", id="masternewid",
-                        restrict=r"[0-9]*")
+            yield Select(_MASTER_FUNCTIONS, value="delete", allow_blank=False, id="masterfunc")
+            yield Select(
+                _RENAMEABLE_TYPES, value=ObjectType.Program, allow_blank=False, id="mastertype"
+            )
+            yield Input(placeholder="object id (e.g. 201)", id="mastertarget", restrict=r"[0-9]*")
+            yield Input(placeholder="new id (move only)", id="masternewid", restrict=r"[0-9]*")
             yield Static("", id="mastercurrent")
             yield Static("Esc to close", id="masterhint")
 
@@ -1649,14 +1691,15 @@ class MasterFunctionScreen(ModalScreen):
         # type-scoped — verified live: deleting "Program" bank 3 left keymaps and
         # samples intact). The all-types bank delete and "Delete all objects" ignore
         # it (they send DELBANK type 0 = all object types).
-        self.query_one("#mastertype", Select).display = func in (
-            "delete", "move", "delete_bank")
+        self.query_one("#mastertype", Select).display = func in ("delete", "move", "delete_bank")
         # The target field stays visible for every function: a bank number for the
         # bank deletes, an object id for delete/move, and (for Delete all objects)
         # the Enter-trigger for the confirm.
         if func == "delete_all":
-            target.placeholder = ("press Enter twice to delete every Program-RAM "
-                                  "object (sample RAM needs a power-cycle)")
+            target.placeholder = (
+                "press Enter twice to delete every Program-RAM "
+                "object (sample RAM needs a power-cycle)"
+            )
         elif func == "delete_bank":
             target.placeholder = "bank 0-9 (the 200s bank = 2)"
         elif func == "delete_bank_all":
@@ -1713,8 +1756,9 @@ class MasterFunctionScreen(ModalScreen):
         self._set_current("looking up…")
 
         def done(name, error):  # runs on the UI thread (app marshals it)
-            self._set_current(f"current name: {name!r}" if error is None
-                              else f"lookup failed: {error}")
+            self._set_current(
+                f"current name: {name!r}" if error is None else f"lookup failed: {error}"
+            )
 
         self.app.rename_lookup(self._type(), int(idno), done)
 
@@ -1730,13 +1774,14 @@ class MasterFunctionScreen(ModalScreen):
                 "DELETE ALL objects — frees Program RAM only; loaded sample RAM "
                 "stays (reclaim via front-panel Master→Delete→Everything, or "
                 "power-cycle)",
-                lambda b: b.delete_bank(None, 127))
+                lambda b: b.delete_bank(None, 127),
+            )
             return
         target = self.query_one("#mastertarget", Input).value
         if not target:
-            self._set_current("enter a bank 0-9"
-                              if func in ("delete_bank", "delete_bank_all")
-                              else "enter an id")
+            self._set_current(
+                "enter a bank 0-9" if func in ("delete_bank", "delete_bank_all") else "enter an id"
+            )
             return
         if func == "delete":
             summary = f"DELETE {t.name} {target}"
@@ -1760,8 +1805,10 @@ class MasterFunctionScreen(ModalScreen):
             if not 0 <= bank <= 9:
                 self._set_current("bank must be 0-9")
                 return
-            summary = (f"DELETE EVERY type in bank {bank} "
-                       f"({bank}00-{bank}99 — Programs, Keymaps, Samples, …)")
+            summary = (
+                f"DELETE EVERY type in bank {bank} "
+                f"({bank}00-{bank}99 — Programs, Keymaps, Samples, …)"
+            )
             thunk = lambda b, k=bank: b.delete_bank(None, k)
         self._confirm_or_fire(summary, thunk)
 
@@ -1770,13 +1817,13 @@ class MasterFunctionScreen(ModalScreen):
         if not self._armed:
             self._armed = True
             self.query_one("#masterhint", Static).update(
-                f"⚠ {summary} — press Enter again to FIRE, Esc to cancel")
+                f"⚠ {summary} — press Enter again to FIRE, Esc to cancel"
+            )
             return
 
         def done(info, error):  # runs on the UI thread (app marshals it)
             if error is None:
-                self.app._set_status(
-                    f" {summary} — done; mirror PAUSED, press p to resume")
+                self.app._set_status(f" {summary} — done; mirror PAUSED, press p to resume")
                 self.dismiss()
             else:
                 self._reset_hint()
@@ -1829,12 +1876,22 @@ class K2KRemoteApp(App):
         ("ctrl+k", "macro_table", "Macro table"),
     ]
 
-    def __init__(self, bridge=None, *, demo: bool = False, model: str = "K2000R",
-                 text_mode: bool = False, settle: Optional[float] = None,
-                 heartbeat: Optional[float] = None,
-                 image_protocol: str = "auto", image_cols: int = 120,
-                 alt_keys: bool = False, super_alt_keys: bool = False,
-                 manual_refresh: bool = False, mirror_panel: bool = True):
+    def __init__(
+        self,
+        bridge=None,
+        *,
+        demo: bool = False,
+        model: str = "K2000R",
+        text_mode: bool = False,
+        settle: Optional[float] = None,
+        heartbeat: Optional[float] = None,
+        image_protocol: str = "auto",
+        image_cols: int = 120,
+        alt_keys: bool = False,
+        super_alt_keys: bool = False,
+        manual_refresh: bool = False,
+        mirror_panel: bool = True,
+    ):
         super().__init__()
         self._bridge = bridge
         self._demo = demo
@@ -1919,6 +1976,7 @@ class K2KRemoteApp(App):
         if self._bridge is None:
             return
         from k2kremote.refresh import HEARTBEAT, SETTLE
+
         self._worker = RefreshWorker(
             self._bridge,
             on_frame=lambda frame: self.call_from_thread(self.show_frame, frame),
@@ -1926,7 +1984,8 @@ class K2KRemoteApp(App):
             on_connection=lambda ok: self.call_from_thread(self._set_connection, ok),
             on_waiting=lambda w: self.call_from_thread(self._set_waiting, w),
             settle=self._settle if self._settle is not None else SETTLE,
-            heartbeat=None if self._manual_refresh
+            heartbeat=None
+            if self._manual_refresh
             else (self._heartbeat if self._heartbeat is not None else HEARTBEAT),
             mirror_panel=self._mirror_panel,
         )
@@ -2022,8 +2081,10 @@ class K2KRemoteApp(App):
             event.stop()
             event.prevent_default()
             self._awaiting_mode = True
-            self._set_status(" mode → p Prog · s Setup · q QA · m Mstr · "
-                             "i MIDI · d Disk · g Song · e FX   (Esc cancels)")
+            self._set_status(
+                " mode → p Prog · s Setup · q QA · m Mstr · "
+                "i MIDI · d Disk · g Song · e FX   (Esc cancels)"
+            )
             return
 
         action = keymap.resolve(event.key)
@@ -2045,9 +2106,11 @@ class K2KRemoteApp(App):
             self._user_held_pause = True
             self._worker.set_paused(True)
             self._worker.press(action.button)
-            self._set_status(f" {op!r} sent — mirror PAUSED while the K2000 works; "
-                             "press p to resume when it's done",
-                             style=_PAUSED_STYLE)
+            self._set_status(
+                f" {op!r} sent — mirror PAUSED while the K2000 works; "
+                "press p to resume when it's done",
+                style=_PAUSED_STYLE,
+            )
             self.query_one("#titlebar", Static).update(self._titlebar_text())
             return
 
@@ -2057,8 +2120,10 @@ class K2KRemoteApp(App):
             # Mirror the cursor move this button causes in the open name dialog,
             # then re-render the last frame at once so the underline tracks
             # without waiting for the device's settle refresh to come back.
-            if (self._name_cursor.move(action.button, self._name_len())
-                    and self._last_frame is not None):
+            if (
+                self._name_cursor.move(action.button, self._name_len())
+                and self._last_frame is not None
+            ):
                 self.show_frame(self._last_frame)
             self._worker.press(action.button)
         # Keep the key-hint legend visible rather than burying it under the label
@@ -2082,8 +2147,7 @@ class K2KRemoteApp(App):
         if self._entry_active:
             return
         self._entry_active = True
-        entry = Input(placeholder="name to type (Enter to send, Esc to cancel)",
-                      id="nameentry")
+        entry = Input(placeholder="name to type (Enter to send, Esc to cancel)", id="nameentry")
         await self.mount(entry)
         entry.focus()
 
@@ -2146,7 +2210,8 @@ class K2KRemoteApp(App):
             on_result(None, "no device connected")
             return
         self._worker.lookup_name(
-            obj_type, idno, lambda n, e: self.call_from_thread(on_result, n, e))
+            obj_type, idno, lambda n, e: self.call_from_thread(on_result, n, e)
+        )
 
     def rename_apply(self, obj_type: ObjectType, idno: int, name: str, on_result) -> None:
         """Rename an object via SysEx CHANGE; ``on_result(confirmed_name, error)``
@@ -2158,7 +2223,8 @@ class K2KRemoteApp(App):
             on_result(None, "no device connected")
             return
         self._worker.rename(
-            obj_type, idno, name, lambda n, e: self.call_from_thread(on_result, n, e))
+            obj_type, idno, name, lambda n, e: self.call_from_thread(on_result, n, e)
+        )
 
     # -- standalone Master object-utility tool (delete/move/delete-bank SysEx) -
     def action_macro_table(self) -> None:
@@ -2193,8 +2259,7 @@ class K2KRemoteApp(App):
         self._pause_reason = summary or "device op"
         self._worker.set_paused(True)
         self.query_one("#titlebar", Static).update(self._titlebar_text())
-        self._worker.device_op(
-            thunk, lambda r, e: self.call_from_thread(on_result, r, e))
+        self._worker.device_op(thunk, lambda r, e: self.call_from_thread(on_result, r, e))
 
     def resume_mirror(self) -> None:
         """Lift an op-pause and repaint, once a screen that took the wire closes.
@@ -2246,9 +2311,10 @@ class K2KRemoteApp(App):
             self._pause_reason = "manual"
         self._user_held_pause = paused
         self._worker.set_paused(paused)
-        self._set_status(" PAUSED — mirror frozen; press p before SCSI load/save"
-                         if paused else " resumed",
-                         style=_PAUSED_STYLE if paused else None)
+        self._set_status(
+            " PAUSED — mirror frozen; press p before SCSI load/save" if paused else " resumed",
+            style=_PAUSED_STYLE if paused else None,
+        )
         self.query_one("#titlebar", Static).update(self._titlebar_text())
 
     def action_panic(self) -> None:
@@ -2286,7 +2352,9 @@ class K2KRemoteApp(App):
         """True if a real pixel protocol (kitty TGP / sixel) is available."""
         if not _HAS_IMAGE:
             return False
-        proto = self._image_protocol if self._image_protocol != "auto" else _detected_image_protocol()
+        proto = (
+            self._image_protocol if self._image_protocol != "auto" else _detected_image_protocol()
+        )
         return proto in ("tgp", "sixel")
 
     def _effective_mode(self, frame: Frame) -> str:
@@ -2329,9 +2397,9 @@ class K2KRemoteApp(App):
             try:
                 # Pixel-perfect bitmap via kitty/sixel (textual-image picks the
                 # protocol; falls back to half-blocks on plain terminals).
-                self.query_one("#imagedisplay").image = \
-                    screenshot.live_image(Frame(pixels=pixels, text_rows=frame.text_rows),
-                                          scale=4)
+                self.query_one("#imagedisplay").image = screenshot.live_image(
+                    Frame(pixels=pixels, text_rows=frame.text_rows), scale=4
+                )
                 self.last_render = "<image>"
             except Exception as exc:  # pragma: no cover - protocol/term specific
                 self._set_status(f" image render failed: {exc}")
@@ -2373,16 +2441,19 @@ class K2KRemoteApp(App):
         self._danger_shown = danger
         self.query_one("#titlebar", Static).update(self._titlebar_text())
         if danger:
-            self._set_status(" ⏸ PAUSED · confirm — mirror frozen (no MIDI); press "
-                             "p (or Ctrl+r) when the K2000 has finished",
-                             style=_PAUSED_STYLE)
+            self._set_status(
+                " ⏸ PAUSED · confirm — mirror frozen (no MIDI); press "
+                "p (or Ctrl+r) when the K2000 has finished",
+                style=_PAUSED_STYLE,
+            )
         elif self.last_status.startswith(" ⏸ PAUSED · confirm"):
             self._show_legend()
 
     def _effective_reverse(self, frame: Frame) -> List[str]:
         """Device-reported reverse-video cells OR'd with the software cursor cell."""
         return name_cursor.merge_reverse(
-            list(frame.reverse or []), self._name_cursor.reverse_mask())
+            list(frame.reverse or []), self._name_cursor.reverse_mask()
+        )
 
     def _name_len(self) -> int:
         """Length of the name currently in the field (trailing blanks trimmed)."""
@@ -2391,7 +2462,7 @@ class K2KRemoteApp(App):
         rows = self._last_frame.text_rows
         if self._name_cursor.row >= len(rows):
             return 0
-        return len(rows[self._name_cursor.row][self._name_cursor.origin:].rstrip())
+        return len(rows[self._name_cursor.row][self._name_cursor.origin :].rstrip())
 
     _NAME_HINT = " ✎ name dialog — press F9 (or Ctrl+n) to type a name"
 
@@ -2455,9 +2526,11 @@ class K2KRemoteApp(App):
         self._waiting = waiting
         self.query_one("#titlebar", Static).update(self._titlebar_text())
         if waiting:
-            self._set_status(" ⏳ device is not answering — busy (disk op?). The "
-                             "mirror will pick up on its own when it replies.",
-                             style=_WAITING_STYLE)
+            self._set_status(
+                " ⏳ device is not answering — busy (disk op?). The "
+                "mirror will pick up on its own when it replies.",
+                style=_WAITING_STYLE,
+            )
         elif self.last_status.startswith(" ⏳ device is not answering"):
             self._show_legend()
 
@@ -2483,7 +2556,7 @@ class K2KRemoteApp(App):
         # One unified "⏸ PAUSED · <reason>" badge whether the freeze was manual, a
         # disk op, or the automatic confirm-screen hold — all resumed with `p`.
         if self._worker is not None and self._worker.danger:
-            state = "  ·  ⏸ PAUSED · confirm"      # auto-paused on a Yes/No prompt
+            state = "  ·  ⏸ PAUSED · confirm"  # auto-paused on a Yes/No prompt
         elif self._worker is not None and self._worker.paused:
             state = f"  ·  ⏸ PAUSED · {self._pause_reason}"
         elif self._manual_refresh:
@@ -2497,7 +2570,11 @@ class K2KRemoteApp(App):
             # Show which solid renderer is active and why (width gates half-block).
             mirror = "blocks/half" if width >= braille.HALF_COLS else "blocks/quad"
         elif self._mode == "image":
-            proto = self._image_protocol if self._image_protocol != "auto" else _detected_image_protocol()
+            proto = (
+                self._image_protocol
+                if self._image_protocol != "auto"
+                else _detected_image_protocol()
+            )
             mirror = f"image/{proto}"
         # conn is styled so a disconnected/no-MIDI state can't blend into the
         # rest of the bar and go unnoticed (it did — see the 2026-08-02 report).
@@ -2767,25 +2844,39 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser = argparse.ArgumentParser(
         prog="k2kremote",
         description="Terminal remote for the Kurzweil K2000 / K2000R — mirrors the "
-                    "hardware LCD over MIDI SysEx and drives the front panel from the "
-                    "keyboard.",
+        "hardware LCD over MIDI SysEx and drives the front panel from the "
+        "keyboard.",
         epilog="Run with --long-help for a full prose user manual (setup, terminals, "
-               "controls, and safety). Inside the app, F1-F6 are the live soft keys; "
-               "press Ctrl+r to refresh and Alt+x to panic.")
+        "controls, and safety). Inside the app, F1-F6 are the live soft keys; "
+        "press Ctrl+r to refresh and Alt+x to panic.",
+    )
     conn = parser.add_argument_group("connection")
-    conn.add_argument("--rig", choices=["auto", "standard"], default="standard",
-                      help="how to find the K2000: 'standard' (default) uses one "
-                           "bidirectional MIDI port; 'auto' probes every port for a "
-                           "K2000 that answers SysEx")
-    conn.add_argument("--port", metavar="NAME",
-                      help="exact MIDI port name to use (implies --rig standard); "
-                           "list names with: python -m k2kremote.midi_bridge ports")
-    conn.add_argument("--config", default="config.toml", metavar="FILE",
-                      help="TOML file remembering the port/rig selection "
-                           "(default: config.toml; ignored if absent)")
-    conn.add_argument("--save-config", action="store_true",
-                      help="write the effective port/rig selection to --config, so "
-                           "later runs need no flags")
+    conn.add_argument(
+        "--rig",
+        choices=["auto", "standard"],
+        default="standard",
+        help="how to find the K2000: 'standard' (default) uses one "
+        "bidirectional MIDI port; 'auto' probes every port for a "
+        "K2000 that answers SysEx",
+    )
+    conn.add_argument(
+        "--port",
+        metavar="NAME",
+        help="exact MIDI port name to use (implies --rig standard); "
+        "list names with: python -m k2kremote.midi_bridge ports",
+    )
+    conn.add_argument(
+        "--config",
+        default="config.toml",
+        metavar="FILE",
+        help="TOML file remembering the port/rig selection "
+        "(default: config.toml; ignored if absent)",
+    )
+    conn.add_argument(
+        "--save-config",
+        action="store_true",
+        help="write the effective port/rig selection to --config, so later runs need no flags",
+    )
     # Defaults are interpolated from the constants, never typed in prose: all
     # three of these help strings had drifted (150/150/1200 against actual
     # 500/350/2500 ms), and two of them recommended raising a value TO a
@@ -2794,70 +2885,117 @@ def main(argv: Optional[List[str]] = None) -> None:
     from k2kremote.midi_bridge import SEND_GAP, SYSEX_FLOOR
     from k2kremote.refresh import HEARTBEAT, SETTLE
 
-    conn.add_argument("-i", "--sysex-interval", type=float, metavar="MS",
-                      help=f"minimum delay between outgoing SysEx messages in "
-                           f"milliseconds (default {SEND_GAP * 1000:.0f}, like "
-                           f"'amidi -i'; clamped to the RE'd "
-                           f"{SYSEX_FLOOR * 1000:.0f} ms floor). Lower = snappier "
-                           f"UI but more risk of garbling the K2000's LCD")
+    conn.add_argument(
+        "-i",
+        "--sysex-interval",
+        type=float,
+        metavar="MS",
+        help=f"minimum delay between outgoing SysEx messages in "
+        f"milliseconds (default {SEND_GAP * 1000:.0f}, like "
+        f"'amidi -i'; clamped to the RE'd "
+        f"{SYSEX_FLOOR * 1000:.0f} ms floor). Lower = snappier "
+        f"UI but more risk of garbling the K2000's LCD",
+    )
 
     disp = parser.add_argument_group("display")
-    disp.add_argument("--text", action="store_true",
-                      help="start in fast text (ALLTEXT) mode instead of auto; clean "
-                           "for text-heavy pages like Disk. Cycle modes live with F10")
-    disp.add_argument("--image-protocol", choices=["auto", "tgp", "sixel", "halfcell"],
-                      default="auto",
-                      help="terminal graphics protocol for image mode (default: auto-"
-                           "detect). Force 'tgp' for kitty, 'sixel' for WezTerm/Windows "
-                           "Terminal, 'halfcell' for a universal text fallback")
-    disp.add_argument("--image-cols", type=int, default=120, metavar="N",
-                      help="cap the pixel image at N columns so it isn't huge on wide "
-                           "monitors (default 120; height follows the LCD's aspect)")
-    disp.add_argument("--model", default="K2000R", metavar="NAME",
-                      help="model label shown in the title bar (default: K2000R)")
+    disp.add_argument(
+        "--text",
+        action="store_true",
+        help="start in fast text (ALLTEXT) mode instead of auto; clean "
+        "for text-heavy pages like Disk. Cycle modes live with F10",
+    )
+    disp.add_argument(
+        "--image-protocol",
+        choices=["auto", "tgp", "sixel", "halfcell"],
+        default="auto",
+        help="terminal graphics protocol for image mode (default: auto-"
+        "detect). Force 'tgp' for kitty, 'sixel' for WezTerm/Windows "
+        "Terminal, 'halfcell' for a universal text fallback",
+    )
+    disp.add_argument(
+        "--image-cols",
+        type=int,
+        default=120,
+        metavar="N",
+        help="cap the pixel image at N columns so it isn't huge on wide "
+        "monitors (default 120; height follows the LCD's aspect)",
+    )
+    disp.add_argument(
+        "--model",
+        default="K2000R",
+        metavar="NAME",
+        help="model label shown in the title bar (default: K2000R)",
+    )
 
     misc = parser.add_argument_group("behaviour")
-    misc.add_argument("--settle", type=float, metavar="MS",
-                      help=f"delay after a keypress before reading the redrawn LCD "
-                           f"in milliseconds (default {SETTLE * 1000:.0f}; lower = "
-                           f"snappier. Too low just costs one cheap re-read — the "
-                           f"mirror takes a second look when the screen comes back "
-                           f"unchanged)")
-    misc.add_argument("--heartbeat", type=float, metavar="MS",
-                      help=f"idle refresh cadence in milliseconds (default "
-                           f"{HEARTBEAT * 1000:.0f}). The idle poll reads only the "
-                           f"321-byte text plane and stops there when nothing "
-                           f"changed, so it is ~8x cheaper than a full frame; "
-                           f"lower = front-panel changes appear sooner")
-    misc.add_argument("--alt-keys", action="store_true",
-                      help="show the terminal-safe key alternates (a-h soft keys, "
-                           "Ctrl+e/x/n/v/g) in the legend and soft-key bar — for "
-                           "terminals that intercept the F-keys (Alt-chords stay)")
-    misc.add_argument("--super-alt-keys", action="store_true",
-                      help="everything --alt-keys does, plus move the mode buttons "
-                           "to the 'm' leader (press m, then p/s/q/m/i/d/g/e) — for "
-                           "terminals that also grab the Alt+letter mode chords")
-    misc.add_argument("--no-panel-mirror", action="store_true",
-                      help="ignore the K2000's own front-panel presses. The unit "
-                           "only sends them when MIDI XMIT 'Bttns' is On; each one "
-                           "costs a screen read, so turn this off if the mirror "
-                           "feels heavy while you work at the hardware")
-    misc.add_argument("--manual-refresh", action="store_true",
-                      help="disable the periodic heartbeat entirely; refresh the "
-                           "mirror only on front-panel events and explicit Ctrl+r. "
-                           "Strongest guard against polling the K2000 during a "
-                           "delete/save (the heartbeat can lock up the unit there)")
-    misc.add_argument("--demo", action="store_true",
-                      help="run against a static synthetic frame with no MIDI — try "
-                           "the UI and render modes without any hardware")
-    misc.add_argument("--print-size", action="store_true",
-                      help="print the terminal size to open at as COLSxROWS and "
-                           "exit — the size the app was last closed at, or the "
-                           "smallest that shows the mirror uncompromised. Use it "
-                           "to launch a right-sized window: "
-                           "kitty -o initial_window_width=$(...)c …")
-    misc.add_argument("--long-help", action="store_true",
-                      help="print a full prose user manual and exit")
+    misc.add_argument(
+        "--settle",
+        type=float,
+        metavar="MS",
+        help=f"delay after a keypress before reading the redrawn LCD "
+        f"in milliseconds (default {SETTLE * 1000:.0f}; lower = "
+        f"snappier. Too low just costs one cheap re-read — the "
+        f"mirror takes a second look when the screen comes back "
+        f"unchanged)",
+    )
+    misc.add_argument(
+        "--heartbeat",
+        type=float,
+        metavar="MS",
+        help=f"idle refresh cadence in milliseconds (default "
+        f"{HEARTBEAT * 1000:.0f}). The idle poll reads only the "
+        f"321-byte text plane and stops there when nothing "
+        f"changed, so it is ~8x cheaper than a full frame; "
+        f"lower = front-panel changes appear sooner",
+    )
+    misc.add_argument(
+        "--alt-keys",
+        action="store_true",
+        help="show the terminal-safe key alternates (a-h soft keys, "
+        "Ctrl+e/x/n/v/g) in the legend and soft-key bar — for "
+        "terminals that intercept the F-keys (Alt-chords stay)",
+    )
+    misc.add_argument(
+        "--super-alt-keys",
+        action="store_true",
+        help="everything --alt-keys does, plus move the mode buttons "
+        "to the 'm' leader (press m, then p/s/q/m/i/d/g/e) — for "
+        "terminals that also grab the Alt+letter mode chords",
+    )
+    misc.add_argument(
+        "--no-panel-mirror",
+        action="store_true",
+        help="ignore the K2000's own front-panel presses. The unit "
+        "only sends them when MIDI XMIT 'Bttns' is On; each one "
+        "costs a screen read, so turn this off if the mirror "
+        "feels heavy while you work at the hardware",
+    )
+    misc.add_argument(
+        "--manual-refresh",
+        action="store_true",
+        help="disable the periodic heartbeat entirely; refresh the "
+        "mirror only on front-panel events and explicit Ctrl+r. "
+        "Strongest guard against polling the K2000 during a "
+        "delete/save (the heartbeat can lock up the unit there)",
+    )
+    misc.add_argument(
+        "--demo",
+        action="store_true",
+        help="run against a static synthetic frame with no MIDI — try "
+        "the UI and render modes without any hardware",
+    )
+    misc.add_argument(
+        "--print-size",
+        action="store_true",
+        help="print the terminal size to open at as COLSxROWS and "
+        "exit — the size the app was last closed at, or the "
+        "smallest that shows the mirror uncompromised. Use it "
+        "to launch a right-sized window: "
+        "kitty -o initial_window_width=$(...)c …",
+    )
+    misc.add_argument(
+        "--long-help", action="store_true", help="print a full prose user manual and exit"
+    )
 
     args = parser.parse_args(argv)
     if args.print_size:
@@ -2871,12 +3009,20 @@ def main(argv: Optional[List[str]] = None) -> None:
     bridge = None if args.demo else _build_bridge(args)
     settle = args.settle / 1000.0 if args.settle is not None else None
     heartbeat = args.heartbeat / 1000.0 if args.heartbeat is not None else None
-    app = K2KRemoteApp(bridge=bridge, demo=args.demo, model=args.model,
-                       text_mode=args.text, settle=settle, heartbeat=heartbeat,
-                       image_protocol=args.image_protocol, image_cols=args.image_cols,
-                       alt_keys=args.alt_keys, super_alt_keys=args.super_alt_keys,
-                       manual_refresh=args.manual_refresh,
-                       mirror_panel=not args.no_panel_mirror)
+    app = K2KRemoteApp(
+        bridge=bridge,
+        demo=args.demo,
+        model=args.model,
+        text_mode=args.text,
+        settle=settle,
+        heartbeat=heartbeat,
+        image_protocol=args.image_protocol,
+        image_cols=args.image_cols,
+        alt_keys=args.alt_keys,
+        super_alt_keys=args.super_alt_keys,
+        manual_refresh=args.manual_refresh,
+        mirror_panel=not args.no_panel_mirror,
+    )
     try:
         app.run()
     finally:

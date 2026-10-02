@@ -46,6 +46,7 @@ Four hazards, all met on hardware while mapping this flow:
 * **The device goes silent during the write** (~10 s), which is normal and not a
   disconnection — see RESOLUTION_NOTES §17.
 """
+
 from __future__ import annotations
 
 import time
@@ -56,8 +57,7 @@ from k2kremote import text_entry
 from k2kremote.midi_bridge import normalise_param_label
 
 #: Soft keys, left to right.
-_SOFT = (Button.SoftA, Button.SoftB, Button.SoftC,
-         Button.SoftD, Button.SoftE, Button.SoftF)
+_SOFT = (Button.SoftA, Button.SoftB, Button.SoftC, Button.SoftD, Button.SoftE, Button.SoftF)
 
 #: How long to wait for the disk write before giving up on the screen coming
 #: back. Measured at ~10 s for a small macro on a ZuluSCSI.
@@ -95,7 +95,7 @@ def _rows(bridge, tries: int = 5) -> List[str]:
     for _ in range(tries):
         try:
             rows = bridge.get_screen_text().split("\n")
-        except Exception as exc:                            # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             last = exc
             time.sleep(1.0)
             continue
@@ -134,15 +134,15 @@ def _soft_index(label_row: str, label: str) -> Optional[int]:
             return None
         before_ok = at == 0 or not label_row[at - 1].isalnum()
         after = at + len(label)
-        after_ok = (after >= len(label_row) or not label_row[after].isalnum()
-                    or not label[-1].isalnum())
+        after_ok = (
+            after >= len(label_row) or not label_row[after].isalnum() or not label[-1].isalnum()
+        )
         if before_ok and after_ok:
             return min(5, int(at * 6 / 40))
         start = at + 1
 
 
-def _press_labelled(bridge, label: str, *, settle: float = 1.3,
-                    hops: int = 4) -> None:
+def _press_labelled(bridge, label: str, *, settle: float = 1.3, hops: int = 4) -> None:
     """Press the soft key showing `label`, cycling label pages to find it.
 
     Raises rather than guessing: pressing a position that happened to hold the
@@ -170,8 +170,7 @@ def current_disk(bridge) -> Optional[str]:
     cursor is walked until the *instrument* names the field.
     """
     for _ in range(8):
-        name = normalise_param_label(
-            bridge.client.get_current_parameter_name())
+        name = normalise_param_label(bridge.client.get_current_parameter_name())
         value = bridge.client.get_current_parameter_value().strip()
         if name == "CurrentDisk":
             return value
@@ -180,8 +179,14 @@ def current_disk(bridge) -> Optional[str]:
     return None
 
 
-def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
-               name_width: int = 12, overwrite: bool = False) -> str:
+def save_macro(
+    bridge,
+    filename: str,
+    *,
+    expect_drive: str = "SCSI 0",
+    name_width: int = 12,
+    overwrite: bool = False,
+) -> str:
     """Save the live macro table to `filename` on the current disk.
 
     Returns the final screen's first row. Raises :class:`SaveRefused` before
@@ -226,15 +231,16 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
     # 1. The drive, before anything else. This is the check that a save landing
     #    on the floppy would have needed.
     from k2kremote import disk_browse
+
     if not disk_browse.ensure_disk_mode(bridge):
         raise SaveRefused(
-            f"could not reach Disk mode; the panel shows "
-            f"{_rows(bridge)[0].rstrip()!r}"
+            f"could not reach Disk mode; the panel shows {_rows(bridge)[0].rstrip()!r}"
         )
     drive = current_disk(bridge)
     if drive is None:
         raise SaveRefused("could not read CurrentDisk from the device")
     from k2kremote.disk_browse import disk_page_path
+
     where = disk_page_path(bridge)
     if drive != expect_drive:
         raise SaveRefused(
@@ -245,12 +251,10 @@ def save_macro(bridge, filename: str, *, expect_drive: str = "SCSI 0",
 
     # 2-5 run inside dialogs on the instrument's own screen, so every exit
     #     from here has to leave the panel somewhere sane -- see _from_disk_page.
-    return _from_disk_page(bridge, stem, where, name_width=name_width,
-                           overwrite=overwrite)
+    return _from_disk_page(bridge, stem, where, name_width=name_width, overwrite=overwrite)
 
 
-def _from_disk_page(bridge, stem: str, where, *, name_width: int,
-                    overwrite: bool) -> str:
+def _from_disk_page(bridge, stem: str, where, *, name_width: int, overwrite: bool) -> str:
     """Steps 2-5 of :func:`save_macro`, from the Disk page to the written file.
 
     Split out so the one caller can guarantee the back-out: from step 2 on, the
@@ -265,6 +269,7 @@ def _from_disk_page(bridge, stem: str, where, *, name_width: int,
     rule `disk_browse.ensure_disk_mode` follows, which is what does it here.
     """
     from k2kremote import disk_browse
+
     try:
         # 2. Disk -> Save -> Macro -> All lands on the filename editor.
         _press_labelled(bridge, "Save")
@@ -293,9 +298,7 @@ def _from_disk_page(bridge, stem: str, where, *, name_width: int,
 
         shown = _rows(bridge)[3].split("Save as:")[-1].strip()
         if shown.upper() != stem:
-            raise SaveRefused(
-                f"the field reads {shown!r}, not {stem!r} — nothing was written"
-            )
+            raise SaveRefused(f"the field reads {shown!r}, not {stem!r} — nothing was written")
 
         # 4. Commit: name -> OK, then the directory prompt -> OK.
         _press_labelled(bridge, "OK", settle=1.6)
@@ -303,9 +306,7 @@ def _from_disk_page(bridge, stem: str, where, *, name_width: int,
         if "current directory" not in row:
             raise SaveUnverified(f"expected the directory prompt, got {row[:80]!r}")
         if stem not in row.upper():
-            raise SaveRefused(
-                f"the prompt names a different file than {stem!r}: {row[:80]!r}"
-            )
+            raise SaveRefused(f"the prompt names a different file than {stem!r}: {row[:80]!r}")
         _press_labelled(bridge, "OK", settle=2.5)
 
         # 5. The instrument's own overwrite guard, then the write. It goes silent
@@ -314,7 +315,7 @@ def _from_disk_page(bridge, stem: str, where, *, name_width: int,
         while time.monotonic() < deadline:
             try:
                 rows = bridge.get_screen_text().split("\n")
-            except Exception:                                   # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 time.sleep(1.5)
                 continue
             text = " ".join(rows)
@@ -350,6 +351,6 @@ def _from_disk_page(bridge, stem: str, where, *, name_width: int,
         # that itself fails must not replace it.
         try:
             disk_browse.ensure_disk_mode(bridge)
-        except Exception:                                   # noqa: BLE001
+        except Exception:  # noqa: BLE001
             pass
         raise

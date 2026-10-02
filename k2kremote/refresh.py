@@ -115,7 +115,7 @@ SETTLE = 0.35
 # landed anyway, so it buys nothing and adds traffic. Kept because it is what
 # makes a short settle viable — set it if you also lower SETTLE.
 SETTLE_RETRY = None
-HEARTBEAT = 2.5     # idle refresh cadence; well under the flood threshold
+HEARTBEAT = 2.5  # idle refresh cadence; well under the flood threshold
 INBOUND_POLL = 0.25  # how often to drain the local RX buffer for inbound PANEL
 # Longest the pixel plane may go unread while the text plane keeps reporting
 # "unchanged". Bounds the one thing the text-as-delta shortcut cannot see: a
@@ -146,7 +146,7 @@ GRAPHICS_MAX_AGE = 12.0
 DISCONNECT_GRACE = 12.0
 
 # Why a refresh is happening — it decides how much we are willing to pay for it.
-_FULL = "full"            # explicit: startup, Ctrl+r, resume, inbound PANEL
+_FULL = "full"  # explicit: startup, Ctrl+r, resume, inbound PANEL
 _SETTLE_ORIGIN = "settle"  # the read scheduled after a press/wheel
 _HEARTBEAT_ORIGIN = "heartbeat"  # the idle cadence
 # Only these two may stop after the cheap text read when nothing changed; a
@@ -185,6 +185,7 @@ _CHEAP_ORIGINS = (_SETTLE_ORIGIN, _HEARTBEAT_ORIGIN)
 # the operation §9 warns about. The structural signal below is ours and stays
 # here: it is about the soft-key row's *shape*, not about any wording.
 _CONFIRM_SOFT_PAIR = {"yes", "no"}
+
 
 def is_busy_screen(text_rows) -> bool:
     """True when the LCD says the K2000 is mid-operation (disk I/O).
@@ -231,6 +232,7 @@ def is_destructive_screen(text_rows) -> bool:
     if classify_screen(text_rows) is ScreenState.DESTRUCTIVE:
         return True
     return _is_confirm_dialog(text_rows)
+
 
 # Internal command kinds queued ahead of refreshes. Every one is
 # ``(kind, payload)``; the payload's shape is what differs, and the annotation
@@ -541,8 +543,12 @@ class RefreshWorker(threading.Thread):
                 # unlocked reads are atomic enough today only because CPython
                 # makes them so; the invariant this code actually needs is that
                 # they describe ONE moment.
-                idle = (self._mirror_panel and not self._paused
-                        and not self._danger and not self._commands)
+                idle = (
+                    self._mirror_panel
+                    and not self._paused
+                    and not self._danger
+                    and not self._commands
+                )
             if idle:
                 try:
                     if self._bridge.poll_panel():
@@ -567,7 +573,11 @@ class RefreshWorker(threading.Thread):
                         wait = timeout
                         # Cap the wait so we revisit the RX buffer for inbound PANEL.
                         if self._mirror_panel:
-                            wait = self._inbound_poll if wait is None else min(wait, self._inbound_poll)
+                            wait = (
+                                self._inbound_poll
+                                if wait is None
+                                else min(wait, self._inbound_poll)
+                            )
                         self._cond.wait(timeout=wait)
                         continue
                     # A refresh is due now. Which deadline fired decides how much
@@ -673,6 +683,7 @@ class RefreshWorker(threading.Thread):
             return
         if kind == "rename":
             from k2000.definitions import ObjectType
+
             obj_type, idno, name, on_result = payload
             try:
                 confirmed = self._bridge.rename(obj_type, idno, name)
@@ -708,6 +719,7 @@ class RefreshWorker(threading.Thread):
                 self._bridge.panic()
             elif kind == "type_name":
                 from k2kremote import text_entry
+
                 target, start_col = payload
                 text_entry.type_name(self._bridge, target, start_col=start_col)
         except Exception as exc:  # keep the worker alive on transient MIDI errors
@@ -844,13 +856,13 @@ class RefreshWorker(threading.Thread):
         # opened still enumerated? A K2000 disk load silences the unit for
         # minutes while its ports stay put (verified 2026-08-16), which is why
         # neither screen text nor an elapsed-time rule can tell them apart.
-        present = None            # None = the bridge cannot tell us
+        present = None  # None = the bridge cannot tell us
         try:
             present = self._bridge.ports_present()
         except Exception:
-            present = None        # older/fake bridge, or enumeration failed
+            present = None  # older/fake bridge, or enumeration failed
         if present:
-            self._set_waiting(True)     # silent, but still plugged in: just busy
+            self._set_waiting(True)  # silent, but still plugged in: just busy
         elif not self._busy and now - self._failing_since >= self._disconnect_grace:
             # Ports gone, or no way to ask: fall back to "silent for long enough".
             self._set_connected(False)

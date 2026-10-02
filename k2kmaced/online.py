@@ -50,6 +50,7 @@ has, which is the only way to answer "is the macro in RAM the same as the
 `BOOT.MAC` on the card?" — the two drift whenever someone records a macro from
 the panel and does not save it, or saves it somewhere else.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -76,8 +77,7 @@ def read_live(bridge, timeout: Optional[float] = None) -> MacroTable:
     rather than letting a struct error surface — a short or empty object means
     something specific (no macro recorded) and deserves to say so.
     """
-    data = bridge.read_macro_table(timeout) if timeout is not None \
-        else bridge.read_macro_table()
+    data = bridge.read_macro_table(timeout) if timeout is not None else bridge.read_macro_table()
     if not data:
         raise MacError(
             "the K2000 returned an empty Macro Table object — nothing has been "
@@ -221,8 +221,11 @@ def push(bridge, table: MacroTable, *, backup_path=None, allow_empty=False):
             f"wrote {len(payload)} bytes but read back {len(after)} that differ — "
             f"the live macro table is now in an UNKNOWN state and must not be "
             f"saved to disk. "
-            + (f"The previous contents are in {backup_path}." if backup_path
-               else "No backup was taken.")
+            + (
+                f"The previous contents are in {backup_path}."
+                if backup_path
+                else "No backup was taken."
+            )
         )
     return MacroTable.parse(after)
 
@@ -232,5 +235,4 @@ def summarise(rows: Sequence[DiffRow]) -> str:
     bad = [r for r in rows if not r.same]
     if not bad:
         return f"identical — {len(rows)} entries match"
-    return (f"{len(bad)} of {len(rows)} position(s) differ "
-            f"(first at index {bad[0].index})")
+    return f"{len(bad)} of {len(rows)} position(s) differ (first at index {bad[0].index})"

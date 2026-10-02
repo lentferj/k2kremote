@@ -38,9 +38,9 @@ def test_soft_labels_keeps_word_whole_across_boundary():
     from k2kremote.app import soft_labels, _TEXT_COLS
 
     row = list(" " * _TEXT_COLS)
-    for j, ch in enumerate("Format"):   # cols 28..33
+    for j, ch in enumerate("Format"):  # cols 28..33
         row[28 + j] = ch
-    for j, ch in enumerate("more>"):    # cols 35..39
+    for j, ch in enumerate("more>"):  # cols 35..39
         row[35 + j] = ch
     labels = soft_labels([""] * 7 + ["".join(row)])
     assert labels[4] == "Format"
@@ -72,9 +72,9 @@ def test_apply_cursor_underline_marks_bottom_row():
     assert out.shape == (240, 64)  # blank width-major buffer
     y = 3 * _CELL_H + (_CELL_H - 1)  # bottom pixel row of the cell
     x0 = 5 * _CELL_W
-    assert out[x0:x0 + _CELL_W, y].all()           # underline lit
-    assert out[x0:x0 + _CELL_W, y - 1].sum() == 0  # nothing above it
-    assert out.sum() == _CELL_W                     # only those pixels
+    assert out[x0 : x0 + _CELL_W, y].all()  # underline lit
+    assert out[x0 : x0 + _CELL_W, y - 1].sum() == 0  # nothing above it
+    assert out.sum() == _CELL_W  # only those pixels
 
 
 def test_apply_cursor_underline_idempotent_on_filled_cell():
@@ -93,7 +93,7 @@ def test_apply_cursor_underline_noop_without_flags():
     from k2kremote.app import apply_cursor_underline
 
     px = np.zeros((240, 64), dtype=np.uint8)
-    assert apply_cursor_underline(px, []) is px          # nothing flagged
+    assert apply_cursor_underline(px, []) is px  # nothing flagged
     assert apply_cursor_underline(px, ["0000"]) is px
 
 
@@ -119,12 +119,14 @@ def test_is_name_dialog_detects_naming_page():
                 row[col + j] = ch
         return [""] * 7 + ["".join(row)]
 
-    naming = place([(0, "Delete"), (7, "Insert"), (14, "<<<"),
-                    (21, ">>>"), (28, "OK"), (34, "Cancel")])
+    naming = place(
+        [(0, "Delete"), (7, "Insert"), (14, "<<<"), (21, ">>>"), (28, "OK"), (34, "Cancel")]
+    )
     assert is_name_dialog(naming) is True
 
-    other = place([(0, "Octav-"), (7, "Octav+"), (14, "Panic"),
-                   (21, "View"), (28, "Chan-"), (35, "Chan+")])
+    other = place(
+        [(0, "Octav-"), (7, "Octav+"), (14, "Panic"), (21, "View"), (28, "Chan-"), (35, "Chan+")]
+    )
     assert is_name_dialog(other) is False
     assert is_name_dialog([]) is False
 
@@ -210,18 +212,20 @@ async def test_mode_cycle_covers_all_modes_and_wraps():
             renders[app._mode] = app.last_render
             await pilot.press("f10")
             await pilot.pause()
-        assert app._mode == "auto"                 # wrapped back round
-        assert set(renders) == set(app._MODES)     # visited every mode
-        assert renders["braille"].count("\n") == 15      # 16 braille rows
-        assert renders["blocks"].count("\n") == 31       # 32 quadrant rows at 130 cols
-        assert renders["text"].count("\n") == 7          # 8-row text grid
+        assert app._mode == "auto"  # wrapped back round
+        assert set(renders) == set(app._MODES)  # visited every mode
+        assert renders["braille"].count("\n") == 15  # 16 braille rows
+        assert renders["blocks"].count("\n") == 31  # 32 quadrant rows at 130 cols
+        assert renders["text"].count("\n") == 7  # 8-row text grid
 
 
 @pytest.mark.asyncio
 async def test_image_mode_renders_via_image_widget():
     import k2kremote.app as appmod
+
     if not appmod._HAS_IMAGE:
         import pytest
+
         pytest.skip("textual-image not installed")
     from k2kremote.app import K2KRemoteApp
 
@@ -246,7 +250,7 @@ async def test_blocks_mode_uses_wide_halfblock_when_terminal_is_wide():
         app._mode = "blocks"
         app.show_frame(app._last_frame)
         rows = app.last_render.split("\n")
-        assert len(rows) == 32          # half-block rows
+        assert len(rows) == 32  # half-block rows
         assert all(len(r) == 240 for r in rows)  # full 240-wide, aspect-correct
 
 
@@ -365,14 +369,14 @@ async def test_cursor_key_advances_and_sends_press():
 
     app = K2KRemoteApp(demo=True, text_mode=True)
     async with app.run_test() as pilot:
-        app._worker = _RecordingWorker()       # pretend a device is attached
+        app._worker = _RecordingWorker()  # pretend a device is attached
         app.show_frame(_naming_frame())
         await pilot.pause()
-        await pilot.press("right")              # CursorRight
+        await pilot.press("right")  # CursorRight
         await pilot.pause()
-        assert app._name_cursor.screen_col() == 17           # advanced one cell
+        assert app._name_cursor.screen_col() == 17  # advanced one cell
         assert app._effective_reverse(app._last_frame)[3][17] == "1"
-        assert Button.CursorRight in app._worker.presses     # still drove the device
+        assert Button.CursorRight in app._worker.presses  # still drove the device
 
 
 @pytest.mark.asyncio
@@ -387,11 +391,11 @@ async def test_name_entry_types_from_tracked_cursor_offset():
         app.show_frame(_naming_frame())
         await pilot.pause()
         await pilot.press("right")
-        await pilot.press("right")              # cursor now on cell 2
+        await pilot.press("right")  # cursor now on cell 2
         await pilot.pause()
         app._dispatch_name("abc")
         assert app._worker.typed == [("abc", 2)]
-        assert app._name_cursor.pos == 4        # typed abc at cells 2,3,4
+        assert app._name_cursor.pos == 4  # typed abc at cells 2,3,4
 
 
 @pytest.mark.asyncio
@@ -422,7 +426,7 @@ def test_name_preview_colours_only_the_overflow():
 
     name = "a" * (_NAME_DISPLAY_WIDTH + 4)
     text = _name_preview("current name: ", name)
-    assert text.plain == "current name: " + name           # full name is shown
+    assert text.plain == "current name: " + name  # full name is shown
     base = len("current name: ")
     overflow = [(s.start, s.end) for s in text.spans if str(s.style) == _OVERFLOW_STYLE]
     # exactly the characters past the display width carry the orange style
@@ -463,13 +467,13 @@ async def test_mode_leader_sends_mode_under_super_alt_keys():
     async with app.run_test() as pilot:
         app._worker = _RecordingWorker()
         await pilot.pause()
-        assert "m,d" in app._mode_bar_text()       # lowercase leader scheme (no Shift)
+        assert "m,d" in app._mode_bar_text()  # lowercase leader scheme (no Shift)
         assert "Alt+d" not in app._mode_bar_text()
-        assert app._alt_keys                         # super implies the F-key alternates
-        await pilot.press("m")                       # leader
+        assert app._alt_keys  # super implies the F-key alternates
+        await pilot.press("m")  # leader
         await pilot.pause()
         assert app._awaiting_mode
-        await pilot.press("d")                       # -> Disk
+        await pilot.press("d")  # -> Disk
         await pilot.pause()
         assert not app._awaiting_mode
         assert Button.Disk in app._worker.presses
@@ -484,7 +488,7 @@ async def test_alt_keys_keeps_alt_mode_chords_and_no_leader():
         app._worker = _RecordingWorker()
         await pilot.pause()
         assert "Alt+d" in app._mode_bar_text() and "m,d" not in app._mode_bar_text()
-        await pilot.press("m")                       # 'm' is NOT a leader here
+        await pilot.press("m")  # 'm' is NOT a leader here
         await pilot.pause()
         assert not app._awaiting_mode
 
@@ -496,9 +500,9 @@ async def test_press_keeps_legend_visible():
     app = K2KRemoteApp(demo=True, text_mode=True)
     async with app.run_test() as pilot:
         app._worker = _RecordingWorker()
-        app.show_frame(_demo_frame_other())          # ordinary (non-name) page
+        app.show_frame(_demo_frame_other())  # ordinary (non-name) page
         await pilot.pause()
-        await pilot.press("right")                   # a routine navigation press
+        await pilot.press("right")  # a routine navigation press
         await pilot.pause()
         # The hint legend lives on its own persistent line and is never replaced
         # by the label of what was just pressed.
@@ -607,7 +611,8 @@ async def test_rename_flags_a_name_the_device_did_not_store():
     app = K2KRemoteApp(demo=True, text_mode=True)
     async with app.run_test() as pilot:
         screen, still_open = await _rename_and_confirm(
-            app, pilot, "Wave Of Mutilation", "Wave Of Mutilat")
+            app, pilot, "Wave Of Mutilation", "Wave Of Mutilat"
+        )
         assert still_open, "a mismatch must keep the dialog up, not dismiss it"
         assert "Wave Of Mutilat" in str(screen.query_one("#renamecurrent").content)
 
@@ -641,7 +646,7 @@ async def test_rename_tool_looks_up_on_tab_out_of_id():
         id_field.focus()
         id_field.value = "305"
         await pilot.pause()
-        await pilot.press("tab")          # move off the id field without Enter
+        await pilot.press("tab")  # move off the id field without Enter
         await pilot.pause()
         assert app._worker.looked_up == [(ObjectType.Program, 305)]
 
@@ -668,7 +673,9 @@ def test_resolve_config_precedence(tmp_path):
     assert cfg.rig == "auto"
 
     # No file -> defaults.
-    cfg = resolve_config(SimpleNamespace(config=str(tmp_path / "none.toml"), rig="standard", port=None))
+    cfg = resolve_config(
+        SimpleNamespace(config=str(tmp_path / "none.toml"), rig="standard", port=None)
+    )
     assert cfg.rig == "standard" and cfg.port is None
 
 
@@ -686,8 +693,9 @@ def test_build_bridge_saves_effective_config(tmp_path, monkeypatch):
 
     monkeypatch.setattr(MidiBridge, "from_config", staticmethod(fake_from_config))
     path = tmp_path / "config.toml"
-    args = SimpleNamespace(config=str(path), rig="auto", port=None, save_config=True,
-                           sysex_interval=200.0)
+    args = SimpleNamespace(
+        config=str(path), rig="auto", port=None, save_config=True, sysex_interval=200.0
+    )
 
     assert appmod._build_bridge(args) == "BRIDGE"
     assert captured["gap"] == 0.2  # 200 ms -> 0.2 s
@@ -720,15 +728,18 @@ async def test_screenshot_binding_saves_current_frame(monkeypatch):
     from k2kremote.app import K2KRemoteApp
 
     captured = {}
-    monkeypatch.setattr(screenshot, "save_png",
-                        lambda frame, path, **kw: captured.setdefault("frame", frame) or path)
+    monkeypatch.setattr(
+        screenshot,
+        "save_png",
+        lambda frame, path, **kw: captured.setdefault("frame", frame) or path,
+    )
 
     app = K2KRemoteApp(demo=True)
     async with app.run_test() as pilot:
-        await pilot.pause()           # demo frame is shown -> _last_frame set
+        await pilot.pause()  # demo frame is shown -> _last_frame set
         await pilot.press("f12")
         await pilot.pause()
-        assert "frame" in captured    # save_png was called with the live frame
+        assert "frame" in captured  # save_png was called with the live frame
         assert "saved" in app.last_status
 
 
@@ -812,13 +823,16 @@ def test_is_text_page_uses_graphics_in_blank_cells():
     # Setup / program-list page: a thin box outline (chrome, ~hundreds of px) drawn
     # around a TEXT-HEAVY table. The graphics do NOT dominate the text -> text page
     # (this is the real Setup bug from probes/p23: a box tipped it to braille).
-    busy = ["SetupMode",
-            "          99 Earth and Sky",
-            "Chan/Program Info   100 Basic Setup",
-            "1  150 Magic Orch     1 Majesty",
-            "2   16 Matrix 12      2 Sahara",
-            "3   17 OBX Braz 4     3 Full Orch",
-            "", "Octav-"]
+    busy = [
+        "SetupMode",
+        "          99 Earth and Sky",
+        "Chan/Program Info   100 Basic Setup",
+        "1  150 Magic Orch     1 Majesty",
+        "2   16 Matrix 12      2 Sahara",
+        "3   17 OBX Braz 4     3 Full Orch",
+        "",
+        "Octav-",
+    ]
     chrome = np.zeros((240, 64), dtype=np.uint8)
     chrome[0:60, 8:12] = 0xFF  # thin box-edge strokes in blank cells of row 1
     assert _is_text_page(Frame(pixels=chrome, text_rows=busy))
@@ -829,7 +843,7 @@ def test_is_text_page_uses_graphics_in_blank_cells():
     # blank padding cells with a SOLID block. That is a highlight, not graphics —
     # so the page stays text whether or not the high-bit flag is set.
     hl_g = np.zeros((240, 64), dtype=np.uint8)
-    hl_g[30:90, 24:48] = 0xFF                 # solid block: cols 5-14, rows 3-5
+    hl_g[30:90, 24:48] = 0xFF  # solid block: cols 5-14, rows 3-5
     hl_row = "".join("1" if 5 <= c < 15 else "0" for c in range(40))
     rev = [""] * 3 + [hl_row] * 3 + [""] * 2  # rows 3-5, cols 5-14 flagged reverse
     text_rows = [""] * 8
@@ -859,12 +873,16 @@ async def test_auto_forces_braille_for_song_mode():
         await pilot.pause()
         app._graphics_capable = lambda: False  # pretend a non-graphics terminal
         # Song page: mostly text, but the channel strip is graphics-only -> braille.
-        song = Frame(pixels=np.zeros((240, 64), np.uint8),
-                     text_rows=["SongMode:MAIN  Events:189K", "CurSong:1 NewSong"] + [""] * 6)
+        song = Frame(
+            pixels=np.zeros((240, 64), np.uint8),
+            text_rows=["SongMode:MAIN  Events:189K", "CurSong:1 NewSong"] + [""] * 6,
+        )
         assert app._effective_mode(song) == "braille"
         # An ordinary text page is still text.
-        disk = Frame(pixels=np.zeros((240, 64), np.uint8),
-                     text_rows=["DiskMode", "Current dir:", "\\K2KREMOT"] + [""] * 5)
+        disk = Frame(
+            pixels=np.zeros((240, 64), np.uint8),
+            text_rows=["DiskMode", "Current dir:", "\\K2KREMOT"] + [""] * 5,
+        )
         assert app._effective_mode(disk) == "text"
 
 
@@ -897,15 +915,16 @@ def test_heavy_disk_op_detection():
                 row[bounds[i] + j] = ch
 
     app = K2KRemoteApp(demo=True)
-    app._last_frame = Frame(pixels=np.zeros((240, 64), dtype=np.uint8),
-                            text_rows=[""] * 7 + ["".join(row)])
-    assert app._heavy_op_for(Button.SoftB) == "Load"     # F2 = heavy
-    assert app._heavy_op_for(Button.SoftA) == "Format"   # F1 = heavy
-    assert app._heavy_op_for(Button.SoftC) == "Move"     # F3 = heavy
-    assert app._heavy_op_for(Button.SoftD) is None       # Util = safe
-    assert app._heavy_op_for(Button.Enter) is None       # not a soft key
+    app._last_frame = Frame(
+        pixels=np.zeros((240, 64), dtype=np.uint8), text_rows=[""] * 7 + ["".join(row)]
+    )
+    assert app._heavy_op_for(Button.SoftB) == "Load"  # F2 = heavy
+    assert app._heavy_op_for(Button.SoftA) == "Format"  # F1 = heavy
+    assert app._heavy_op_for(Button.SoftC) == "Move"  # F3 = heavy
+    assert app._heavy_op_for(Button.SoftD) is None  # Util = safe
+    assert app._heavy_op_for(Button.Enter) is None  # not a soft key
     app._last_frame = None
-    assert app._heavy_op_for(Button.SoftB) is None        # no frame -> unknown
+    assert app._heavy_op_for(Button.SoftB) is None  # no frame -> unknown
 
 
 @pytest.mark.asyncio
@@ -948,8 +967,9 @@ async def test_heavy_op_press_autopauses_before_sending():
             for j, ch in enumerate(lab):
                 if bounds[i] + j < _TEXT_COLS:
                     row[bounds[i] + j] = ch
-        app._last_frame = Frame(pixels=np.zeros((240, 64), dtype=np.uint8),
-                                text_rows=[""] * 7 + ["".join(row)])
+        app._last_frame = Frame(
+            pixels=np.zeros((240, 64), dtype=np.uint8), text_rows=[""] * 7 + ["".join(row)]
+        )
 
         await pilot.press("f2")  # Load
         await pilot.pause()
@@ -1011,8 +1031,8 @@ async def test_p_resumes_confirm_autopause_via_force_refresh():
         app._worker = FakeWorker()
         await pilot.press("p")
         await pilot.pause()
-        assert calls["forced"] == 1        # resumed by re-reading
-        assert calls["set_paused"] == 0    # did NOT stack a manual pause
+        assert calls["forced"] == 1  # resumed by re-reading
+        assert calls["set_paused"] == 0  # did NOT stack a manual pause
 
 
 @pytest.mark.asyncio
@@ -1033,8 +1053,10 @@ async def test_ctrl_alternates_for_app_fkeys():
 @pytest.mark.asyncio
 async def test_auto_uses_image_on_graphics_capable_terminal():
     import k2kremote.app as appmod
+
     if not appmod._HAS_IMAGE:
         import pytest
+
         pytest.skip("textual-image not installed")
     import numpy as np
     from k2kremote.app import K2KRemoteApp
@@ -1049,8 +1071,10 @@ async def test_auto_uses_image_on_graphics_capable_terminal():
         g[20:200, 16:48] = 0xFF
         graphics = Frame(pixels=g, text_rows=["ProgramMode"] + [""] * 7)
         assert app._effective_mode(graphics) == "image"
-        text = Frame(pixels=np.zeros((240, 64), np.uint8),
-                     text_rows=["DiskMode", "Current dir:", "\\K2KREMOT"] + [""] * 5)
+        text = Frame(
+            pixels=np.zeros((240, 64), np.uint8),
+            text_rows=["DiskMode", "Current dir:", "\\K2KREMOT"] + [""] * 5,
+        )
         assert app._effective_mode(text) == "image"  # text page -> image too
         # The image lives inside the centring box.
         app.show_frame(graphics)
@@ -1094,17 +1118,16 @@ async def test_master_tool_two_step_confirm_and_autopause():
         screen = app.screen
         screen.query_one("#mastertarget").value = "201"
 
-        screen._attempt()                      # first Enter -> arm only
+        screen._attempt()  # first Enter -> arm only
         assert screen._armed is True
         assert calls["ops"] == []
 
-        screen._attempt()                      # second Enter -> fire
+        screen._attempt()  # second Enter -> fire
         assert len(calls["ops"]) == 1
-        assert calls["paused"] >= 1            # mirror auto-paused around the op
+        assert calls["paused"] >= 1  # mirror auto-paused around the op
         # The queued thunk targets the chosen object via the bridge's delete_object.
         rec = []
-        SpyBridge = type("SpyBridge", (), {
-            "delete_object": lambda self, t, i: rec.append((t, i))})
+        SpyBridge = type("SpyBridge", (), {"delete_object": lambda self, t, i: rec.append((t, i))})
         calls["ops"][0](SpyBridge())
         assert rec == [(ObjectType.Program, 201)]
 
@@ -1135,8 +1158,7 @@ async def test_master_tool_bank_delete_variants():
             pass
 
     bank_calls = []
-    SpyBridge = type("SpyBridge", (), {
-        "delete_bank": lambda self, t, k: bank_calls.append((t, k))})
+    SpyBridge = type("SpyBridge", (), {"delete_bank": lambda self, t, k: bank_calls.append((t, k))})
 
     app = K2KRemoteApp(demo=True)
     async with app.run_test() as pilot:
@@ -1150,19 +1172,19 @@ async def test_master_tool_bank_delete_variants():
             screen.query_one("#masterfunc").value = func
             screen._sync_fields()
             screen.query_one("#mastertarget").value = target
-            screen._attempt()   # arm
-            screen._attempt()   # fire
+            screen._attempt()  # arm
+            screen._attempt()  # fire
 
-        fire("delete_bank", "3")        # one type's bank
-        fire("delete_bank_all", "3")    # every type in bank 3
-        fire("delete_all")              # everything (no target needed)
+        fire("delete_bank", "3")  # one type's bank
+        fire("delete_bank_all", "3")  # every type in bank 3
+        fire("delete_all")  # everything (no target needed)
 
         for fn in ops:
             fn(SpyBridge())
         assert bank_calls == [
-            (ObjectType.Program, 3),    # type-scoped (default type = Program)
-            (None, 3),                  # all types in bank 3 -> DELBANK type 0
-            (None, 127),                # everything -> type 0, bank 127
+            (ObjectType.Program, 3),  # type-scoped (default type = Program)
+            (None, 3),  # all types in bank 3 -> DELBANK type 0
+            (None, 127),  # everything -> type 0, bank 127
         ]
 
 
@@ -1176,13 +1198,14 @@ async def test_master_tool_bank_delete_variants():
 # The screen therefore freezes while input keeps working, which is exactly what
 # "takes no keyboard input" looks like from the outside.
 
+
 class _PauseProbeWorker:
     """Stands in for RefreshWorker: records presses and the pause state."""
 
     def __init__(self):
         self.presses = []
         self.paused = False
-        self.danger = False   # the titlebar reads this
+        self.danger = False  # the titlebar reads this
         self.refreshes = 0
 
     def press(self, button):
@@ -1250,24 +1273,25 @@ def test_save_page_soft_rows_do_not_themselves_trigger_the_guard():
     from k2kremote.app import _HEAVY_OPS, soft_labels
 
     captured = [
-        "              Rename Cancel Yes    No",      # save dialog
-        "Object             Rename Replace Cancel",   # save-as page
-        "Delete Insert  <<<    >>>    OK   Cancel",   # the name page itself
+        "              Rename Cancel Yes    No",  # save dialog
+        "Object             Rename Replace Cancel",  # save-as page
+        "Delete Insert  <<<    >>>    OK   Cancel",  # the name page itself
     ]
     for bottom in captured:
         for label in soft_labels([""] * 7 + [bottom.ljust(40)]):
             assert not any(op in label.lower() for op in _HEAVY_OPS), (
-                f"{label!r} would now auto-pause the editor's Save flow")
+                f"{label!r} would now auto-pause the editor's Save flow"
+            )
 
 
 # --- soft-key labels line up under the mirror -------------------------------
+
 
 def test_align_blocks_centres_each_block_in_its_zone():
     """Each block's centre must land in the same zone soft_labels reads back."""
     from k2kremote.app import align_blocks, _SOFT_KEYS
 
-    blocks = ["[F1:Select]", "[F2:Root]", "[F3:Parent]", "[F4:Open]",
-              "[F5:OK]", "[F6:Cancel]"]
+    blocks = ["[F1:Select]", "[F2:Root]", "[F3:Parent]", "[F4:Open]", "[F5:OK]", "[F6:Cancel]"]
     span = 120  # braille / the usual capped pixel image
     line = align_blocks(blocks, span, width=200)
     assert line is not None
@@ -1286,9 +1310,9 @@ def test_align_blocks_is_the_inverse_of_soft_labels():
     """
     from k2kremote.app import align_blocks, soft_labels, _SOFT_KEYS, _TEXT_COLS
 
-    bottom = "Delete Insert  <<<    >>>    OK   Cancel"   # captured from hardware
+    bottom = "Delete Insert  <<<    >>>    OK   Cancel"  # captured from hardware
     labels = soft_labels([""] * 7 + [bottom])
-    blocks = [f"[F{i+1}:{l}]" for i, l in enumerate(labels)]
+    blocks = [f"[F{i + 1}:{l}]" for i, l in enumerate(labels)]
     span = 120
     line = align_blocks(blocks, span, width=200)
     assert line is not None
@@ -1305,7 +1329,7 @@ def test_align_blocks_is_the_inverse_of_soft_labels():
 def test_align_blocks_shifts_by_offset():
     from k2kremote.app import align_blocks
 
-    blocks = [f"[F{i+1}:X]" for i in range(6)]
+    blocks = [f"[F{i + 1}:X]" for i in range(6)]
     plain = align_blocks(blocks, 120, width=200)
     shifted = align_blocks(blocks, 120, width=200, offset=7)
     assert shifted == " " * 7 + plain
@@ -1315,11 +1339,10 @@ def test_align_blocks_declines_when_it_cannot_fit():
     """40-col text mode: six [F#:label] blocks do not fit under 40 columns."""
     from k2kremote.app import align_blocks
 
-    blocks = ["[F1:Select]", "[F2:Root]", "[F3:Parent]", "[F4:Open]",
-              "[F5:OK]", "[F6:Cancel]"]
-    assert align_blocks(blocks, 40, width=200) is None      # span too narrow
-    assert align_blocks(blocks, 120, width=30) is None      # bar too narrow
-    assert align_blocks(blocks, 0, width=200) is None       # geometry unknown
+    blocks = ["[F1:Select]", "[F2:Root]", "[F3:Parent]", "[F4:Open]", "[F5:OK]", "[F6:Cancel]"]
+    assert align_blocks(blocks, 40, width=200) is None  # span too narrow
+    assert align_blocks(blocks, 120, width=30) is None  # bar too narrow
+    assert align_blocks(blocks, 0, width=200) is None  # geometry unknown
     assert align_blocks(blocks[:3], 120, width=200) is None  # not six keys
 
 
@@ -1334,9 +1357,10 @@ async def test_soft_bar_aligns_to_the_span_it_is_given():
         bar.labels = ["Select", "Root", "Parent", "Open", "OK", "Cancel"]
         bar.span, bar.offset = 120, 3
         await pilot.pause()
-        blocks = [f"[F{i+1}:{l}]" for i, l in enumerate(bar.labels)]
-        assert str(bar.render()) == align_blocks(blocks, 120, bar.size.width or 9999,
-                                                 3, bar.centres or None)
+        blocks = [f"[F{i + 1}:{l}]" for i, l in enumerate(bar.labels)]
+        assert str(bar.render()) == align_blocks(
+            blocks, 120, bar.size.width or 9999, 3, bar.centres or None
+        )
 
         # Span 0 (geometry unknown) falls back to left-packed blocks.
         bar.span, bar.offset = 0, 0
@@ -1345,6 +1369,7 @@ async def test_soft_bar_aligns_to_the_span_it_is_given():
 
 
 # --- a frozen mirror has to look frozen -------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_paused_badge_is_styled_not_plain_text():
@@ -1368,7 +1393,7 @@ async def test_paused_badge_is_styled_not_plain_text():
         assert "⏸ PAUSED · manual" in badge.plain
         styled = [span for span in badge.spans if span.style == _PAUSED_STYLE]
         assert styled, "the pause badge carries no style"
-        assert "PAUSED" in badge.plain[styled[0].start:styled[0].end]
+        assert "PAUSED" in badge.plain[styled[0].start : styled[0].end]
 
         # The auto-pause on a confirm screen gets the same treatment.
         worker.paused, worker.danger = False, True
@@ -1378,7 +1403,7 @@ async def test_paused_badge_is_styled_not_plain_text():
 def test_paused_style_is_loud_and_distinct():
     from k2kremote.app import _PAUSED_STYLE, _OVERFLOW_STYLE
 
-    assert "blink" in _PAUSED_STYLE          # kitty honours it; others degrade to bold
+    assert "blink" in _PAUSED_STYLE  # kitty honours it; others degrade to bold
     assert "orange" in _PAUSED_STYLE
     assert _PAUSED_STYLE != _OVERFLOW_STYLE  # not confusable with the rename overflow
 
@@ -1392,11 +1417,11 @@ def test_align_blocks_follows_the_real_label_positions():
     """
     from k2kremote.app import align_blocks, soft_label_centres, soft_labels, _TEXT_COLS
 
-    bottom = "Octav- Octav+ Panic  View   Chan-  Chan+"   # captured from hardware
+    bottom = "Octav- Octav+ Panic  View   Chan-  Chan+"  # captured from hardware
     rows = [""] * 7 + [bottom]
     labels = soft_labels(rows)
     centres = soft_label_centres(rows)
-    blocks = [f"[F{i+1}:{l}]" for i, l in enumerate(labels)]
+    blocks = [f"[F{i + 1}:{l}]" for i, l in enumerate(labels)]
     span, offset = 120, 6
 
     line = align_blocks(blocks, span, width=140, offset=offset, centres=centres)
@@ -1427,6 +1452,7 @@ def test_soft_label_centres_handles_gaps_and_multiword_labels():
 
 # --- window sizing ----------------------------------------------------------
 
+
 def test_optimal_size_fits_the_mirror_and_all_the_chrome():
     from k2kremote import braille
     from k2kremote.app import optimal_size, _CHROME_ROWS
@@ -1445,7 +1471,7 @@ def test_size_is_remembered_across_launches(tmp_path, monkeypatch):
 
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     assert remembered_size() is None
-    assert startup_size() == optimal_size()      # nothing cached yet
+    assert startup_size() == optimal_size()  # nothing cached yet
 
     remember_size(160, 40)
     assert remembered_size() == (160, 40)
@@ -1478,6 +1504,7 @@ async def test_closing_the_app_records_its_size(tmp_path, monkeypatch):
 
 # --- the legend folds between groups, not through them ----------------------
 
+
 def test_wrap_groups_keeps_the_function_key_run_together():
     """The bug this fixes: F7 got orphaned onto the navigation line and was
     reported missing. Whatever the width, the F-keys must stay contiguous."""
@@ -1491,8 +1518,8 @@ def test_wrap_groups_keeps_the_function_key_run_together():
         assert len(holding) == 1, f"width {width}: 'F1-F6 soft' appears oddly"
         line = lines[holding[0]]
         assert all(block in line for block in fkeys), (
-            f"width {width}: the F-key run was split across the fold:\n"
-            + "\n".join(lines))
+            f"width {width}: the F-key run was split across the fold:\n" + "\n".join(lines)
+        )
 
 
 def test_wrap_groups_still_respects_the_width():
@@ -1531,8 +1558,7 @@ def test_legend_groups_and_flat_blocks_stay_in_sync():
     from k2kremote import keymap
 
     assert keymap.LEGEND_BLOCKS == tuple(b for g in keymap.LEGEND_GROUPS for b in g)
-    assert keymap.LEGEND_BLOCKS_ALT == tuple(
-        b for g in keymap.LEGEND_GROUPS_ALT for b in g)
+    assert keymap.LEGEND_BLOCKS_ALT == tuple(b for g in keymap.LEGEND_GROUPS_ALT for b in g)
     assert "F7 Edit" in keymap.LEGEND_BLOCKS
     assert "Ctrl+e Edit" in keymap.LEGEND_BLOCKS_ALT
 
@@ -1556,12 +1582,14 @@ def test_timing_help_text_matches_the_shipped_constants(capsys):
         main(["--help"])
     text = " ".join(capsys.readouterr().out.split())
 
-    for label, value in (("--sysex-interval", SEND_GAP),
-                         ("--settle", SETTLE),
-                         ("--heartbeat", HEARTBEAT)):
+    for label, value in (
+        ("--sysex-interval", SEND_GAP),
+        ("--settle", SETTLE),
+        ("--heartbeat", HEARTBEAT),
+    ):
         assert "default %.0f" % (value * 1000) in text, (
-            "%s help does not state its actual default of %.0f ms"
-            % (label, value * 1000))
+            "%s help does not state its actual default of %.0f ms" % (label, value * 1000)
+        )
     assert "%.0f ms floor" % (SYSEX_FLOOR * 1000) in text
 
 
@@ -1602,13 +1630,13 @@ async def test_resume_mirror_does_not_lift_a_pause_the_user_asked_for():
         await pilot.pause()
         app._worker = _PauseSpy()
 
-        app.action_pause()                     # the user freezes the mirror
+        app.action_pause()  # the user freezes the mirror
         assert app._worker.paused is True
 
-        app.resume_mirror()                    # a screen hands the wire back
+        app.resume_mirror()  # a screen hands the wire back
         assert app._worker.paused is True, "a user's pause was lifted for them"
 
-        app.action_pause()                     # only `p` lifts it
+        app.action_pause()  # only `p` lifts it
         assert app._worker.paused is False
 
         # and an op-pause IS ours to lift
@@ -1695,6 +1723,7 @@ async def test_the_master_id_field_does_not_ask_the_device_per_keystroke():
 
 # --- main() and teardown: the paths the audit found untested -----------------
 
+
 def test_main_prints_the_startup_size_and_exits(capsys):
     from k2kremote.app import main
 
@@ -1745,18 +1774,23 @@ def test_sysex_interval_below_the_floor_is_clamped_not_obeyed(monkeypatch):
 
     def fake_from_config(config, *, gap):
         seen["gap"] = gap
-        return SimpleNamespace(client=SimpleNamespace(
-            midi_out=ThrottledOut(SimpleNamespace(send_message=lambda m: None),
-                                  gap=gap)))
+        return SimpleNamespace(
+            client=SimpleNamespace(
+                midi_out=ThrottledOut(SimpleNamespace(send_message=lambda m: None), gap=gap)
+            )
+        )
 
-    monkeypatch.setattr(MidiBridge, "from_config", classmethod(
-        lambda cls, config, *, gap: fake_from_config(config, gap=gap)))
-    monkeypatch.setattr("k2kremote.midi_bridge.bidirectional_ports",
-                        lambda: ["a port"])
+    monkeypatch.setattr(
+        MidiBridge,
+        "from_config",
+        classmethod(lambda cls, config, *, gap: fake_from_config(config, gap=gap)),
+    )
+    monkeypatch.setattr("k2kremote.midi_bridge.bidirectional_ports", lambda: ["a port"])
 
-    args = SimpleNamespace(sysex_interval=10.0, config=None, rig="standard",
-                           port=None, save_config=False)
+    args = SimpleNamespace(
+        sysex_interval=10.0, config=None, rig="standard", port=None, save_config=False
+    )
     bridge = appmod._build_bridge(args)
 
-    assert seen["gap"] == 0.01                       # the CLI passes it through
+    assert seen["gap"] == 0.01  # the CLI passes it through
     assert bridge.client.midi_out._gap == SYSEX_FLOOR  # and the floor holds

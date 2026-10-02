@@ -57,7 +57,7 @@ def test_chanbank_combo_uses_dedicated_code():
 
 def test_edit_keys():
     assert keymap.resolve("enter").button == Button.Enter
-    assert keymap.resolve("escape").button == Button.Exit    # Esc backs out
+    assert keymap.resolve("escape").button == Button.Exit  # Esc backs out
     assert keymap.resolve("delete").button == Button.Cancel  # Cancel on Delete
     assert keymap.resolve("backspace").button == Button.Clear
 

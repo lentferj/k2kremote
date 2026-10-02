@@ -248,9 +248,7 @@ class MacroEntry:
             raise MacError(f"macro entry at {offset} runs past the object data")
         raw = bytes(buf[offset : offset + length])
 
-        drive, unknown4, bank, mode, unknown10, unknown12 = struct.unpack_from(
-            ">6H", raw, 2
-        )
+        drive, unknown4, bank, mode, unknown10, unknown12 = struct.unpack_from(">6H", raw, 2)
         name = _cstr(raw[_ENTRY_HEADER : _ENTRY_HEADER + _NAME_FIELD])
 
         rest = raw[_ENTRY_HEADER + _NAME_FIELD :]
@@ -291,11 +289,11 @@ class MacroEntry:
         except UnicodeEncodeError as exc:
             raise MacError(
                 f"{self.path + self.filename!r} has characters the K2000 "
-                f"cannot store (latin-1 only)") from exc
+                f"cannot store (latin-1 only)"
+            ) from exc
         if len(name) >= _NAME_FIELD:
             raise MacError(
-                f"file name {self.filename!r} does not fit the "
-                f"{_NAME_FIELD - 1}-character field"
+                f"file name {self.filename!r} does not fit the {_NAME_FIELD - 1}-character field"
             )
 
         body = (
@@ -398,9 +396,7 @@ class PramObject:
     @property
     def hash(self) -> int:
         return (
-            ((self.type << 10) | self.idno)
-            if self.type <= 42
-            else ((self.type << 8) | self.idno)
+            ((self.type << 10) | self.idno) if self.type <= 42 else ((self.type << 8) | self.idno)
         )
 
     def serialize(self) -> bytes:
@@ -479,9 +475,7 @@ class PramFile:
             idno = (hash_ & 0x3FF) if (hash_ & 0x8000) else (hash_ & 0xFF)
             name = _cstr(block[6 : 4 + ofs])
             # size counts from the size field (block offset 2) and includes 2.
-            objects.append(
-                PramObject(type_, idno, name, bytes(block[4 + ofs : 2 + size - 2]))
-            )
+            objects.append(PramObject(type_, idno, name, bytes(block[4 + ofs : 2 + size - 2])))
             pos -= blocksize
         else:
             raise MacError("object section is not terminated")
@@ -505,13 +499,7 @@ class PramFile:
     def serialize(self) -> bytes:
         body = b"".join(o.serialize() for o in self.objects) + b"\x00\x00\x00\x00"
         osize = 32 + len(body)
-        return (
-            self.MAGIC
-            + struct.pack(">i", osize)
-            + self.header_rest
-            + body
-            + self.payload
-        )
+        return self.MAGIC + struct.pack(">i", osize) + self.header_rest + body + self.payload
 
     # -- macro convenience -------------------------------------------------
 
@@ -533,9 +521,7 @@ class PramFile:
         rest = bytearray(24)
         struct.pack_into(">I", rest, 8, software_version)
         return cls(
-            objects=[
-                PramObject(MACRO_TYPE, MACRO_ID, MACRO_OBJECT_NAME, table.serialize())
-            ],
+            objects=[PramObject(MACRO_TYPE, MACRO_ID, MACRO_OBJECT_NAME, table.serialize())],
             header_rest=bytes(rest),
         )
 

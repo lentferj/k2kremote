@@ -21,8 +21,9 @@ def _program_field_count():
     counting the whole registry would fail the moment a non-Program offset
     is registered -- against correct app behaviour.
     """
-    return sum(1 for t, _ in k2kfields.KNOWN_FIELDS
-               if t is ObjectType.Program)
+    return sum(1 for t, _ in k2kfields.KNOWN_FIELDS if t is ObjectType.Program)
+
+
 from k2kremote.midi_bridge import PatchUnverified
 from k2kremote.monitor_tui import MonitorTuiApp
 
@@ -53,19 +54,35 @@ class FakeK2000Bridge:
         # 209 is not a registered field; it is the BLOCK-TYPE byte that
         # offset 210's entry is gated on, and refresh_fields() reads it
         # too, so a fake without it fails the read rather than the assert.
-        self._data = {906: {215: b"\x28", 199: bytes([79]), 261: bytes([36]),
-                            242: bytes([37]),
-                            209: bytes([50]), 210: bytes([24]),
-                            91: bytes([46]),
-                            # RESOLUTION_NOTES §90, measured 2026-09-25/26
-                            196: bytes([43]), 180: bytes([43]),
-                            43: bytes([73]), 231: bytes([24])},
-                      907: {215: b"\x05", 199: bytes([50]), 261: bytes([0]),
-                            242: bytes([256 - 32]),
-                            209: bytes([50]), 210: bytes([100]),
-                            91: bytes([186]),
-                            196: bytes([213]), 180: bytes([0]),
-                            43: bytes([100]), 231: bytes([236])}}
+        self._data = {
+            906: {
+                215: b"\x28",
+                199: bytes([79]),
+                261: bytes([36]),
+                242: bytes([37]),
+                209: bytes([50]),
+                210: bytes([24]),
+                91: bytes([46]),
+                # RESOLUTION_NOTES §90, measured 2026-09-25/26
+                196: bytes([43]),
+                180: bytes([43]),
+                43: bytes([73]),
+                231: bytes([24]),
+            },
+            907: {
+                215: b"\x05",
+                199: bytes([50]),
+                261: bytes([0]),
+                242: bytes([256 - 32]),
+                209: bytes([50]),
+                210: bytes([100]),
+                91: bytes([186]),
+                196: bytes([213]),
+                180: bytes([0]),
+                43: bytes([100]),
+                231: bytes([236]),
+            },
+        }
         # every canned program must answer every known offset: if only 906
         # is checked, adding a field leaves 907 raising KeyError, which
         # device_op swallows into a "read failed" status and the test then
@@ -75,13 +92,12 @@ class FakeK2000Bridge:
         # selected type, so a future Keymap or Setup entry must not make this
         # guard demand Program data for it
         for idno, data in self._data.items():
-            missing = set(o for t, o in k2kfields.KNOWN_FIELDS
-                          if t is ObjectType.Program) - set(data)
-            assert not missing, (
-                f"fake bridge has no data for offsets {missing} on {idno}")
+            missing = set(o for t, o in k2kfields.KNOWN_FIELDS if t is ObjectType.Program) - set(
+                data
+            )
+            assert not missing, f"fake bridge has no data for offsets {missing} on {idno}"
         self.patches = []
-        self.client = SimpleNamespace(
-            midi_in=SimpleNamespace(get_message=lambda: None))
+        self.client = SimpleNamespace(midi_in=SimpleNamespace(get_message=lambda: None))
 
     def list_bank(self, obj_type, bank, *, ram_only=True, quiet_for=2.0):
         return (list(self.objects), True)
@@ -118,8 +134,7 @@ async def test_selecting_an_object_populates_known_fields():
         app.refresh_fields()
         fields = app.query_one("#fields")
         assert await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
-        rendered = {str(fields.get_cell_at((r, 2)))
-                   for r in range(fields.row_count)}
+        rendered = {str(fields.get_cell_at((r, 2))) for r in range(fields.row_count)}
         assert any("ENV2->FilFreq Depth: 1200 cents" in text for text in rendered)
         assert any("LFO1->Pitch Depth: 1200 cents" in text for text in rendered)
 
@@ -134,8 +149,7 @@ async def test_unmapped_byte_reports_unmapped_not_a_fabricated_value():
         app.refresh_fields()
         fields = app.query_one("#fields")
         await _wait_for(pilot, lambda: fields.row_count == _program_field_count())
-        rendered = {str(fields.get_cell_at((r, 2)))
-                   for r in range(fields.row_count)}
+        rendered = {str(fields.get_cell_at((r, 2))) for r in range(fields.row_count)}
         assert any("unmapped for this byte" in text for text in rendered)
 
 
@@ -155,8 +169,7 @@ async def test_patch_writes_through_patch_object_bytes():
 
         screen = app.screen
         screen._input.value = "50"
-        screen.on_input_submitted(
-            type(screen._input).Submitted(screen._input, "50"))
+        screen.on_input_submitted(type(screen._input).Submitted(screen._input, "50"))
 
         assert await _wait_for(pilot, lambda: len(bridge.patches) == 1)
         obj_type, idno, offset, data = bridge.patches[0]
@@ -165,8 +178,7 @@ async def test_patch_writes_through_patch_object_bytes():
         # 199, then 91 (LFO1 MnRate) at §70, now 43 (FX Wet/Dry) at §90 --
         # so if this fails after a registry addition, check whether the new
         # field simply sorts first before hunting a bug.
-        assert (obj_type, idno, offset, data) == (ObjectType.Program, 906,
-                                                   43, bytes.fromhex("50"))
+        assert (obj_type, idno, offset, data) == (ObjectType.Program, 906, 43, bytes.fromhex("50"))
         assert await _wait_for(pilot, lambda: len(app.screen_stack) == 1)
 
 
@@ -185,11 +197,9 @@ async def test_patch_reports_dnak_without_closing_the_modal():
         await _wait_for(pilot, lambda: len(app.screen_stack) > 1)
 
         screen = app.screen
-        screen.on_input_submitted(
-            type(screen._input).Submitted(screen._input, "50"))
+        screen.on_input_submitted(type(screen._input).Submitted(screen._input, "50"))
 
-        assert await _wait_for(
-            pilot, lambda: "NOT written" in str(screen._status.render()))
+        assert await _wait_for(pilot, lambda: "NOT written" in str(screen._status.render()))
         assert len(app.screen_stack) > 1  # modal stays open on failure
 
 
@@ -230,8 +240,7 @@ async def test_escape_during_a_write_neither_cancels_nor_closes():
     app = MonitorTuiApp(bridge)
     async with app.run_test() as pilot:
         screen = await _open_patch_dialog(app, pilot)
-        screen.on_input_submitted(
-            type(screen._input).Submitted(screen._input, "50"))
+        screen.on_input_submitted(type(screen._input).Submitted(screen._input, "50"))
         assert await _wait_for(pilot, lambda: bridge.started.is_set())
 
         screen.action_close()
@@ -324,6 +333,6 @@ def test_worker_hands_nothing_back_once_it_is_stopping():
     running.wait(2)
 
     worker.stop()
-    time.sleep(0.4)          # long enough for the op to have finished and fired
+    time.sleep(0.4)  # long enough for the op to have finished and fired
 
     assert called == []

@@ -28,20 +28,19 @@ def test_charset_ring():
     assert te.char_index(" ") == len(te.CHARSET) - 1
 
 
-@pytest.mark.parametrize("clicks, expected",
-                         [(0, []), (63, [63]), (64, [63, 1]), (-70, [-63, -7])])
+@pytest.mark.parametrize("clicks, expected", [(0, []), (63, [63]), (64, [63, 1]), (-70, [-63, -7])])
 def test_chunk_wheel(clicks, expected):
     assert te.chunk_wheel(clicks) == expected and sum(te.chunk_wheel(clicks)) == clicks
 
 
 # -- offline plan_name (no Clear; reset+cycle; default case lower) -----------
 def test_plan_default_case_is_lower():
-    assert te.plan_name("a") == [n(1)]            # lowercase: no toggle
-    assert te.plan_name("A") == [PM, n(1)]        # uppercase: toggle first
+    assert te.plan_name("a") == [n(1)]  # lowercase: no toggle
+    assert te.plan_name("A") == [PM, n(1)]  # uppercase: toggle first
 
 
 def test_plan_letters_cycle_within_group():
-    assert te.plan_name("c") == [n(1), n(1), n(1)]   # a,b,c
+    assert te.plan_name("c") == [n(1), n(1), n(1)]  # a,b,c
     assert te.plan_name("d") == [n(2)]
     assert te.plan_name("z") == [n(9), n(9)]
 
@@ -70,7 +69,7 @@ def test_plan_no_clear_anywhere():
 
 
 def test_plan_punctuation_anchor_then_wheel():
-    plan = te.plan_name("-")           # '-' nearest digit anchor is '0'
+    plan = te.plan_name("-")  # '-' nearest digit anchor is '0'
     assert plan[0] == n(0)
     assert sum(c[1] for c in plan if c[0] == "wheel") == te.clicks_between("0", "-")
 
@@ -99,12 +98,20 @@ class FakeK2000Field:
         if btn in te.PAD_GROUPS:
             group = te.PAD_GROUPS[btn]
             cur = self.field[self.cursor].upper() if self.cursor < len(self.field) else ""
-            nxt = group[(group.index(cur) + 1) % len(group)] if (self.last == btn and cur in group) else group[0]
+            nxt = (
+                group[(group.index(cur) + 1) % len(group)]
+                if (self.last == btn and cur in group)
+                else group[0]
+            )
             self._set(nxt.lower() if self.case == "lower" else nxt)
             self.last = btn
         elif btn == Button.Number0:
             cur = self.field[self.cursor] if self.cursor < len(self.field) else ""
-            nxt = "0123456789"[("0123456789".index(cur) + 1) % 10] if (self.last == btn and cur in "0123456789") else "0"
+            nxt = (
+                "0123456789"[("0123456789".index(cur) + 1) % 10]
+                if (self.last == btn and cur in "0123456789")
+                else "0"
+            )
             self._set(nxt)
             self.last = btn
         elif btn == Button.PlusMinus:
@@ -155,9 +162,10 @@ def test_type_name_raises_when_a_cell_never_takes():
 
     The caller's next move is Save, so a quiet return writes the garbled name to
     the device under the user's nose."""
+
     class DeadPad(FakeK2000Field):
         def press_button(self, btn):
-            if btn in te.PAD_GROUPS:      # letters never register
+            if btn in te.PAD_GROUPS:  # letters never register
                 return
             super().press_button(btn)
 
@@ -167,9 +175,9 @@ def test_type_name_raises_when_a_cell_never_takes():
 
 def test_type_name_budget_is_derived_from_the_pad_not_a_constant():
     """`_passes` must scale with the ring it bounds: one reset plus a full lap."""
-    assert te._passes(len(te._DIGITS), None) == 11      # ring of 10
-    assert te._passes(3, None) == 4                     # a letter pad ("ABC")
-    assert te._passes(3, 99) == 99                      # explicit override wins
+    assert te._passes(len(te._DIGITS), None) == 11  # ring of 10
+    assert te._passes(3, None) == 4  # a letter pad ("ABC")
+    assert te._passes(3, 99) == 99  # explicit override wins
 
 
 def test_type_name_starts_at_cursor_offset():
@@ -177,10 +185,10 @@ def test_type_name_starts_at_cursor_offset():
     # must land at the cursor, leaving the cells before it untouched. Without the
     # start_col plumbing the feedback reads cell 0 and the name is garbled.
     fake = FakeK2000Field(initial="VOICES", case="upper")
-    fake.cursor = 3                       # cursor on the 'C' of VOICES
+    fake.cursor = 3  # cursor on the 'C' of VOICES
     te.type_name(fake, "abc", settle=0, start_col=3)
-    assert "".join(fake.field[3:6]) == "abc"   # typed at the cursor
-    assert "".join(fake.field[:3]) == "VOI"    # prefix left intact
+    assert "".join(fake.field[3:6]) == "abc"  # typed at the cursor
+    assert "".join(fake.field[:3]) == "VOI"  # prefix left intact
 
 
 def test_type_name_finds_field_by_name_label():
@@ -189,6 +197,7 @@ def test_type_name_finds_field_by_name_label():
 
 
 # --- cursor homing -----------------------------------------------------------
+
 
 class _CursorRecorder:
     """Records presses; enough bridge surface for `home_cursor`."""
@@ -230,7 +239,7 @@ def test_home_cursor_needs_no_screen_reads():
     depend on parsing the screen."""
     from k2kremote.text_entry import home_cursor
 
-    bridge = _CursorRecorder()          # no get_screen_text at all
+    bridge = _CursorRecorder()  # no get_screen_text at all
     home_cursor(bridge, width=4, settle=0)
     assert len(bridge.presses) == 4
 
@@ -243,9 +252,10 @@ def test_a_short_screen_fails_as_name_entry_failed_not_index_error():
     from a bug in the typing logic; NameEntryFailed is the documented failure
     and the one the callers already handle.
     """
+
     class _ShortScreen:
         def get_screen_text(self):
-            return "\n".join(["short"] * 8)     # 5 columns, not 40
+            return "\n".join(["short"] * 8)  # 5 columns, not 40
 
         def press_button(self, button):
             pass
@@ -254,6 +264,5 @@ def test_a_short_screen_fails_as_name_entry_failed_not_index_error():
             pass
 
     with pytest.raises(te.NameEntryFailed) as exc:
-        te.type_name(_ShortScreen(), "AB", name_row=3, name_col=16,
-                     settle=0.0)
+        te.type_name(_ShortScreen(), "AB", name_row=3, name_col=16, settle=0.0)
     assert "came back short" in str(exc.value)

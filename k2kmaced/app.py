@@ -155,8 +155,7 @@ def path_tree(catalogue: Sequence[str]) -> dict:
             ensure(walk)
         if filename:
             ensure(directory)["files"].append(filename)
-    return {d: {"dirs": sorted(v["dirs"]), "files": sorted(v["files"])}
-            for d, v in tree.items()}
+    return {d: {"dirs": sorted(v["dirs"]), "files": sorted(v["files"])} for d, v in tree.items()}
 
 
 def browse_rows(tree: dict, directory: str) -> List[tuple]:
@@ -183,9 +182,21 @@ def browse_rows(tree: dict, directory: str) -> List[tuple]:
 #: two keys that can change a disk image — off the end of the line where nobody
 #: would ever see them. So the legend is folded instead of clipped.
 LEGEND_BLOCKS: tuple = (
-    "ctrl+o open", "↑↓ select", "b/B bank", "m mode", "d drive", "e path",
-    "f browse", "o move to #", "a add", "ctrl+↑↓ nudge", "del remove",
-    "ctrl+s write file", "w write gate", "i install to image", "ctrl+c quit",
+    "ctrl+o open",
+    "↑↓ select",
+    "b/B bank",
+    "m mode",
+    "d drive",
+    "e path",
+    "f browse",
+    "o move to #",
+    "a add",
+    "ctrl+↑↓ nudge",
+    "del remove",
+    "ctrl+s write file",
+    "w write gate",
+    "i install to image",
+    "ctrl+c quit",
 )
 
 _BAR_SEP = " · "
@@ -229,11 +240,16 @@ class MacroEditor:
     Split out so the editing rules are unit-testable without a terminal.
     """
 
-    def __init__(self, pram: PramFile, source: str, *,
-                 missing: Optional[set] = None,
-                 catalogue: Optional[Sequence[str]] = None,
-                 image_path: Optional[str] = None,
-                 member: Optional[str] = None):
+    def __init__(
+        self,
+        pram: PramFile,
+        source: str,
+        *,
+        missing: Optional[set] = None,
+        catalogue: Optional[Sequence[str]] = None,
+        image_path: Optional[str] = None,
+        member: Optional[str] = None,
+    ):
         self.pram = pram
         self.table: MacroTable = pram.macro_table()
         self.source = source
@@ -253,8 +269,9 @@ class MacroEditor:
     @property
     def can_install(self) -> bool:
         """True when there is an unambiguous place to write back to."""
-        return bool(self.image_path and self.member
-                    and not str(self.image_path).lower().endswith(".lzo"))
+        return bool(
+            self.image_path and self.member and not str(self.image_path).lower().endswith(".lzo")
+        )
 
     def serialize(self) -> bytes:
         """The macro as it would be written, without writing it anywhere."""
@@ -362,11 +379,10 @@ class MacroEditor:
                 encoded = part.encode("latin-1")
             except UnicodeEncodeError as exc:
                 raise MacError(
-                    f"the {label} {part!r} has characters the K2000 cannot "
-                    f"store (latin-1 only)") from exc
+                    f"the {label} {part!r} has characters the K2000 cannot store (latin-1 only)"
+                ) from exc
             if label == "file name" and len(encoded) > 15:
-                raise MacError(
-                    f"{filename!r} is longer than the 15-character field")
+                raise MacError(f"{filename!r} is longer than the 15-character field")
         entry.path = directory + "\\"
         entry.filename = filename
         self._touch()
@@ -382,7 +398,7 @@ class MacroEditor:
         entry = MacroEntry(
             drive=template.drive if template else 1,
             bank=template.bank if template else 0,
-            mode=template.mode if template else 2,   # Fill
+            mode=template.mode if template else 2,  # Fill
             path="\\",
             filename="NEW.KRZ",
         )
@@ -400,14 +416,16 @@ class MacroEditor:
             flag = "MISSING" if entry.full_path.upper() in self.missing else ""
             if not flag and entry.has_object_list:
                 flag = "Obj"
-            out.append((
-                str(i),
-                entry.drive_label,
-                entry.full_path,
-                entry.bank_label,
-                entry.mode_label,
-                flag,
-            ))
+            out.append(
+                (
+                    str(i),
+                    entry.drive_label,
+                    entry.full_path,
+                    entry.bank_label,
+                    entry.mode_label,
+                    flag,
+                )
+            )
         return out
 
     def save(self, path: str) -> int:
@@ -449,11 +467,17 @@ def build_editor(source: str, image: Optional[str] = None) -> MacroEditor:
     missing, catalogue = set(), []
     if image:
         present, catalogue = scan_image(image)
-        missing = {e.full_path.upper() for e in pram.macro_table()
-                   if e.full_path.upper() not in present}
-    return MacroEditor(pram, where, missing=missing, catalogue=catalogue,
-                       image_path=from_image if member is not None else None,
-                       member=member)
+        missing = {
+            e.full_path.upper() for e in pram.macro_table() if e.full_path.upper() not in present
+        }
+    return MacroEditor(
+        pram,
+        where,
+        missing=missing,
+        catalogue=catalogue,
+        image_path=from_image if member is not None else None,
+        member=member,
+    )
 
 
 # --- the terminal app ------------------------------------------------------
@@ -534,8 +558,7 @@ else:
             options = self._list
             options.clear_options()
             options.add_options([label for label, _, _ in self.rows])
-            self._where.update(
-                f"{self.directory}   (enter opens · backspace up · esc cancels)")
+            self._where.update(f"{self.directory}   (enter opens · backspace up · esc cancels)")
             for i, (_, kind, target) in enumerate(self.rows):
                 if kind == "file" and target.upper() == self.current.upper():
                     options.highlighted = i
@@ -557,7 +580,7 @@ else:
             _, kind, target = self.rows[event.option_index]
             if kind == "file":
                 self.dismiss(target)
-            else:                      # "dir" or "up": both just move
+            else:  # "dir" or "up": both just move
                 self.directory = target
                 self._show()
 
@@ -593,6 +616,7 @@ else:
         def __init__(self, start: Optional[str] = None):
             super().__init__()
             import pathlib
+
             self.here = pathlib.Path(start or ".").expanduser().resolve()
             self.rows: List[tuple] = []
 
@@ -610,10 +634,12 @@ else:
 
         def _candidates(self) -> List[tuple]:
             import pathlib
+
             rows: List[tuple] = [("..", "dir", str(self.here.parent))]
             try:
-                entries = sorted(self.here.iterdir(),
-                                 key=lambda p: (not p.is_dir(), p.name.lower()))
+                entries = sorted(
+                    self.here.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+                )
             except PermissionError:
                 return rows
             for entry in entries:
@@ -624,8 +650,7 @@ else:
                         rows.append((entry.name + "/", "dir", str(entry)))
                     elif entry.name.lower().endswith(self.SUFFIXES):
                         size = entry.stat().st_size
-                        rows.append((f"{entry.name}   ({size:,} bytes)",
-                                     "file", str(entry)))
+                        rows.append((f"{entry.name}   ({size:,} bytes)", "file", str(entry)))
                 except OSError:
                     continue
             del pathlib
@@ -636,8 +661,7 @@ else:
             options = self._list
             options.clear_options()
             options.add_options([label for label, _, _ in self.rows])
-            self._where.update(
-                f"{self.here}   (enter opens · backspace up · esc cancels)")
+            self._where.update(f"{self.here}   (enter opens · backspace up · esc cancels)")
             if self.rows:
                 options.highlighted = 0
 
@@ -650,6 +674,7 @@ else:
 
         def on_option_list_option_selected(self, event) -> None:
             import pathlib
+
             _, kind, target = self.rows[event.option_index]
             if kind == "dir":
                 self.here = pathlib.Path(target)
@@ -722,8 +747,9 @@ else:
         InstallScreen .armed { color: $error; text-style: bold; }
         """
 
-        def __init__(self, editor: MacroEditor, plan: Optional[dict],
-                     problem: Optional[str] = None):
+        def __init__(
+            self, editor: MacroEditor, plan: Optional[dict], problem: Optional[str] = None
+        ):
             super().__init__()
             self.editor = editor
             self.plan = plan
@@ -814,9 +840,12 @@ else:
 
         COLUMNS = ("#", "Drive", "File", "Bank", "Mode", "")
 
-        def __init__(self, editor: Optional[MacroEditor] = None,
-                     output: Optional[str] = None,
-                     allow_write: bool = False):
+        def __init__(
+            self,
+            editor: Optional[MacroEditor] = None,
+            output: Optional[str] = None,
+            allow_write: bool = False,
+        ):
             super().__init__()
             self.editor = editor
             self.output = output
@@ -863,8 +892,8 @@ else:
                 missing = len(self.editor.missing)
                 self._status(
                     f"{len(self.editor.table)} entries from {self.editor.source}"
-                    + (f" — {missing} file(s) MISSING from the image" if missing
-                       else ""))
+                    + (f" — {missing} file(s) MISSING from the image" if missing else "")
+                )
 
         # -- state ---------------------------------------------------------
 
@@ -970,8 +999,10 @@ else:
             field.value = ""
             field.display = True
             field.focus()
-            self._status(f"move entry {self.editor.index} to which position? "
-                         f"(0-{len(self.editor.table) - 1}, enter to apply)")
+            self._status(
+                f"move entry {self.editor.index} to which position? "
+                f"(0-{len(self.editor.table) - 1}, enter to apply)"
+            )
 
         def on_input_submitted(self, event: Input.Submitted) -> None:
             if event.input.id == "moveentry":
@@ -983,9 +1014,10 @@ else:
                 landed = self.editor.move_to(int(text))
                 self._close_entry("moveentry")
                 self._after_edit()
-                self._status(f"moved entry {was} to position {landed}"
-                             + ("" if landed == int(text) else
-                                f" (clamped from {int(text)})"))
+                self._status(
+                    f"moved entry {was} to position {landed}"
+                    + ("" if landed == int(text) else f" (clamped from {int(text)})")
+                )
                 return
             try:
                 self.editor.set_full_path(event.value)
@@ -1000,8 +1032,10 @@ else:
             # focused Input, so the app-level binding never sees it.
             if event.key != "escape":
                 return
-            for which, message in (("pathentry", "path unchanged"),
-                                   ("moveentry", "order unchanged")):
+            for which, message in (
+                ("pathentry", "path unchanged"),
+                ("moveentry", "order unchanged"),
+            ):
                 if self.query_one(f"#{which}", Input).display:
                     self._close_entry(which)
                     self._status(message)
@@ -1146,8 +1180,9 @@ else:
                     raise result
                 self._loaded_editor(result)
 
-            self._in_background(lambda: build_editor(source), built,
-                                opening=os.path.basename(source))
+            self._in_background(
+                lambda: build_editor(source), built, opening=os.path.basename(source)
+            )
 
         def _loaded_editor(self, editor: "MacroEditor") -> None:
             self.editor = editor
@@ -1157,9 +1192,10 @@ else:
             self.allow_write = False
             self.refresh_banner()
             self.refresh_rows()
-            self._status(f"opened {editor.source} — {len(editor.table)} entries"
-                         + ("" if editor.can_install else
-                            "  (read-only source: no install target)"))
+            self._status(
+                f"opened {editor.source} — {len(editor.table)} entries"
+                + ("" if editor.can_install else "  (read-only source: no install target)")
+            )
 
         # -- writing back into the image ------------------------------------
 
@@ -1184,8 +1220,7 @@ else:
             source = self.editor.source if self.editor else "(nothing open)"
             text = Text(f"{source} → {target}")
             if self.allow_write:
-                text.append("   [WRITE GATE ARMED — i installs to the image]",
-                            style=_ARMED_STYLE)
+                text.append("   [WRITE GATE ARMED — i installs to the image]", style=_ARMED_STYLE)
             else:
                 text.append("   (write gate off; w to arm)", style="dim")
             self.query_one("#where", Static).update(text)
@@ -1194,21 +1229,28 @@ else:
             if not self._loaded():
                 return
             if not self.editor.can_install:
-                self._status("nothing to install into: open a macro from inside "
-                             "a raw .img to enable writing back")
+                self._status(
+                    "nothing to install into: open a macro from inside "
+                    "a raw .img to enable writing back"
+                )
                 return
             self.allow_write = not self.allow_write
             self.refresh_banner()
-            self._status("write gate ARMED — i installs into the image"
-                         if self.allow_write else "write gate off")
+            self._status(
+                "write gate ARMED — i installs into the image"
+                if self.allow_write
+                else "write gate off"
+            )
 
         def action_install(self) -> None:
             """Write the macro back into the image it was opened from."""
             if not self._loaded():
                 return
             if not self.editor.can_install:
-                self._status("this macro did not come from a raw .img, so there "
-                             "is nowhere unambiguous to write it back to")
+                self._status(
+                    "this macro did not come from a raw .img, so there "
+                    "is nowhere unambiguous to write it back to"
+                )
                 return
             if not self.allow_write:
                 self._status("write gate is off — press w to arm it first")
@@ -1217,8 +1259,7 @@ else:
             data = self.editor.serialize()
             plan, problem = None, None
             try:
-                plan = plan_replacement(self.editor.image_path,
-                                        self.editor.member, len(data))
+                plan = plan_replacement(self.editor.image_path, self.editor.member, len(data))
             except (ImageWriteError, ImageError, FileNotFoundError, OSError) as exc:
                 problem = str(exc)
 
@@ -1227,14 +1268,14 @@ else:
                     self._status("install cancelled — nothing was written")
                     return
                 try:
-                    replace_file_in_image(self.editor.image_path,
-                                          self.editor.member, data)
+                    replace_file_in_image(self.editor.image_path, self.editor.member, data)
                 except (ImageWriteError, ImageError, OSError) as exc:
                     self._status(f"install FAILED: {exc}")
                     return
                 self.editor.dirty = False
-                self._status(f"wrote {len(data)} bytes into {self.editor.member} "
-                             f"and read it back to verify")
+                self._status(
+                    f"wrote {len(data)} bytes into {self.editor.member} and read it back to verify"
+                )
 
             self.push_screen(InstallScreen(self.editor, plan, problem), done)
 
@@ -1246,17 +1287,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="k2kmaced",
         description="Edit a Kurzweil K2000 .MAC macro. Never opens a MIDI port. "
-                    "Run with no arguments and pick the file in the app.",
+        "Run with no arguments and pick the file in the app.",
     )
-    parser.add_argument("source", nargs="?",
-                        help="FILE.MAC or IMAGE:\\PATH.MAC (optional — ctrl+o "
-                             "opens one from inside the app)")
+    parser.add_argument(
+        "source",
+        nargs="?",
+        help="FILE.MAC or IMAGE:\\PATH.MAC (optional — ctrl+o opens one from inside the app)",
+    )
     parser.add_argument("-o", "--output", help="where ctrl+s writes")
     parser.add_argument("--image", help="check the entries against this image")
-    parser.add_argument("--allow-write", action="store_true",
-                        help="start with the write gate already armed; off by "
-                             "default, because writing back edits the disk image "
-                             "in place")
+    parser.add_argument(
+        "--allow-write",
+        action="store_true",
+        help="start with the write gate already armed; off by "
+        "default, because writing back edits the disk image "
+        "in place",
+    )
     args = parser.parse_args(argv)
 
     editor = None
@@ -1267,8 +1313,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
     if args.output and parse_source(args.output)[1] is not None:
-        print("error: the output must be a plain file, not a path in an image",
-              file=sys.stderr)
+        print("error: the output must be a plain file, not a path in an image", file=sys.stderr)
         return 1
 
     K2kmacedApp(editor, args.output, allow_write=args.allow_write).run()

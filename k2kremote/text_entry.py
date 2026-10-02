@@ -62,9 +62,15 @@ MAX_CLICKS_PER_EVENT = 63
 
 # Alphanumeric-pad letter groups (manual keypad legend, verified).
 PAD_GROUPS = {
-    Button.Number1: "ABC", Button.Number2: "DEF", Button.Number3: "GHI",
-    Button.Number4: "JKL", Button.Number5: "MNO", Button.Number6: "PQR",
-    Button.Number7: "STU", Button.Number8: "VWX", Button.Number9: "YZ",
+    Button.Number1: "ABC",
+    Button.Number2: "DEF",
+    Button.Number3: "GHI",
+    Button.Number4: "JKL",
+    Button.Number5: "MNO",
+    Button.Number6: "PQR",
+    Button.Number7: "STU",
+    Button.Number8: "VWX",
+    Button.Number9: "YZ",
 }
 _DIGITS = "0123456789"
 # letter -> (button, taps); e.g. "C" -> (Number1, 3).
@@ -236,9 +242,16 @@ def home_cursor(bridge, width: int = 16, *, settle: float = 0.28) -> None:
         time.sleep(settle)
 
 
-def type_name(bridge, target: str, *, settle: float = 0.55,
-              name_row: Optional[int] = None, name_col: Optional[int] = None,
-              start_col: int = 0, max_passes: Optional[int] = None) -> None:
+def type_name(
+    bridge,
+    target: str,
+    *,
+    settle: float = 0.55,
+    name_row: Optional[int] = None,
+    name_col: Optional[int] = None,
+    start_col: int = 0,
+    max_passes: Optional[int] = None,
+) -> None:
     """Type ``target`` into the K2000's *open* name dialog, with feedback.
 
     Reads each position back over MIDI and corrects the letter, its case, and
@@ -303,38 +316,39 @@ def type_name(bridge, target: str, *, settle: float = 0.55,
             press(Button.CursorRight)
 
 
-def _type_char(press: Callable, wheel: Callable, shown: Callable,
-               col: int, ch: str, max_passes: int) -> None:
+def _type_char(
+    press: Callable, wheel: Callable, shown: Callable, col: int, ch: str, max_passes: int
+) -> None:
     if ch == " ":
-        press(Button.Number0)                       # known '0'
+        press(Button.Number0)  # known '0'
         for c in chunk_wheel(clicks_between("0", " ")):
             wheel(c)
         return
     if ch in _DIGITS:
         # Number0 cycles 0..9, so the bound is the ring, not a round number.
         for _ in range(_passes(len(_DIGITS), max_passes)):
-            press(Button.Number0)                   # reset to 0, then cycle
+            press(Button.Number0)  # reset to 0, then cycle
             if shown(col) == ch:
                 return
         raise NameEntryFailed(
-            f"cell {col} still shows {shown(col)!r} after cycling the digit pad "
-            f"for {ch!r}")
+            f"cell {col} still shows {shown(col)!r} after cycling the digit pad for {ch!r}"
+        )
     if ch.isalpha():
         button, _ = _LETTER_TAPS[ch.upper()]
         for _ in range(_passes(len(PAD_GROUPS[button]), max_passes)):
-            press(button)                           # reset, then cycle to it
+            press(button)  # reset, then cycle to it
             if shown(col).upper() == ch.upper():
                 break
         else:
             raise NameEntryFailed(
-                f"cell {col} still shows {shown(col)!r} after cycling "
-                f"{button.name} for {ch!r}")
-        if shown(col) != ch:                         # fix case (sticky toggle)
+                f"cell {col} still shows {shown(col)!r} after cycling {button.name} for {ch!r}"
+            )
+        if shown(col) != ch:  # fix case (sticky toggle)
             press(Button.PlusMinus)
         if shown(col) != ch:
             raise NameEntryFailed(
-                f"cell {col} shows {shown(col)!r}, not {ch!r}: the case toggle "
-                f"did not take")
+                f"cell {col} shows {shown(col)!r}, not {ch!r}: the case toggle did not take"
+            )
         return
     # punctuation: type the nearest pad char, then wheel to it
     anchor = _nearest_anchor(ch)

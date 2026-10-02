@@ -36,8 +36,10 @@ def test_sample_rate_across_a_whole_imported_volume():
     bodies = [bytes.fromhex(h) for h in d["samples"].values()]
     assert len(bodies) == 19
     for body in bodies:
-        assert describe_field(ObjectType.Soundblock, 40, body[40:44]) \
+        assert (
+            describe_field(ObjectType.Soundblock, 40, body[40:44])
             == "00005893 (Sample Rate: 44100 Hz)"
+        )
 
 
 def test_the_truncated_arm_is_what_makes_44100_reachable():
@@ -47,44 +49,42 @@ def test_the_truncated_arm_is_what_makes_44100_reachable():
     Inverting the truncation answers 44101 -- tidy, and not a rate the
     machine can produce. Snapping to the ROM's own table answers 44100.
     """
-    assert describe_field(ObjectType.Soundblock, 40, bytes.fromhex("00005893")) \
+    assert (
+        describe_field(ObjectType.Soundblock, 40, bytes.fromhex("00005893"))
         == "00005893 (Sample Rate: 44100 Hz)"
-    assert round(1e9 / 22675) == 44101      # what inverting would have said
-    assert int(1e9 / 44100) == 22675        # what the device actually wrote
+    )
+    assert round(1e9 / 22675) == 44101  # what inverting would have said
+    assert int(1e9 / 44100) == 22675  # what the device actually wrote
 
 
 def test_loop_state_is_read_from_the_inverted_bit():
     """0x80 CLEAR = looped. Confirmed by contrast on two real imports."""
-    assert describe_field(ObjectType.Soundblock, 13, bytes([0x30])) \
-        == "30 (Sample Loop: looped)"
-    assert describe_field(ObjectType.Soundblock, 13, bytes([0xB0])) \
-        == "b0 (Sample Loop: one-shot)"
+    assert describe_field(ObjectType.Soundblock, 13, bytes([0x30])) == "30 (Sample Loop: looped)"
+    assert describe_field(ObjectType.Soundblock, 13, bytes([0xB0])) == "b0 (Sample Loop: one-shot)"
 
 
 def test_root_note_matches_the_akai_header_that_pinned_it():
     """Header root 87 is D#6 -- the value that showed the K2000 reads the
     AKAI header and not the sample's name (which said `D 5`)."""
-    assert describe_field(ObjectType.Soundblock, 12, bytes([87])) \
-        == "57 (Sample Root: D#6 (87))"
-    assert describe_field(ObjectType.Soundblock, 12, bytes([60])) \
-        == "3c (Sample Root: C4 (60))"
+    assert describe_field(ObjectType.Soundblock, 12, bytes([87])) == "57 (Sample Root: D#6 (87))"
+    assert describe_field(ObjectType.Soundblock, 12, bytes([60])) == "3c (Sample Root: C4 (60))"
 
 
 def test_roland_import_roots_decode_across_the_whole_set():
     d = _load("akai_sopranosax2_readback.json")
     for hexs in d["samples"].values():
-        out = describe_field(ObjectType.Soundblock, 12,
-                             bytes.fromhex(hexs)[12:13])
+        out = describe_field(ObjectType.Soundblock, 12, bytes.fromhex(hexs)[12:13])
         assert "Sample Root" in out and "unmapped" not in out
 
 
 def test_keymap_method_layout_from_a_real_imported_keymap():
     """0x17 is the 6-byte form, and the layout is what decoded the entries."""
     d = _load("akai_accordion_cymbals_readback.json")
-    body = bytes.fromhex(d["objs"]["Keymap_300"])[:540]   # the DIRBANK size
+    body = bytes.fromhex(d["objs"]["Keymap_300"])[:540]  # the DIRBANK size
     assert describe_field(ObjectType.Keymap, 2, body[2:4]) == (
         "0017 (Keymap Method: tuning i16 + volumeAdjust i8 + sampleID i16 "
-        "+ subSample u8 = 6 B/entry)")
+        "+ subSample u8 = 6 B/entry)"
+    )
 
 
 def test_a_period_no_table_rate_produces_decodes_to_none():
@@ -111,11 +111,22 @@ def test_keytrk_ladder_reproduces_the_measured_points():
     from k2kremote.k2kfields import describe_field
     from k2000.definitions import ObjectType
 
-    measured = {                      # byte -> displayed ct/key
-        0: 0, 1: 5, 3: 15, 8: 40,     # region 1: 5*|b|
-        9: 42, 13: 50, 23: 70, 33: 90,  # region 2: 40+2*(|b|-8)
-        34: 91, 43: 100, 45: 102,     # region 3: 90+(|b|-33)
-        255: -5, 249: -35, 213: -100, 211: -102,   # two's complement
+    measured = {  # byte -> displayed ct/key
+        0: 0,
+        1: 5,
+        3: 15,
+        8: 40,  # region 1: 5*|b|
+        9: 42,
+        13: 50,
+        23: 70,
+        33: 90,  # region 2: 40+2*(|b|-8)
+        34: 91,
+        43: 100,
+        45: 102,  # region 3: 90+(|b|-33)
+        255: -5,
+        249: -35,
+        213: -100,
+        211: -102,  # two's complement
     }
     for byte, ct in measured.items():
         out = describe_field(ObjectType.Program, 196, bytes([byte]))

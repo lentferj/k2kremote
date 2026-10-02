@@ -108,15 +108,15 @@ class PatchUnverified(Exception):
 # frames and 16 presses each left the panel byte-identical to a reference
 # capture. The gap has NOT been swept below the floor; that needs a human
 # watching the LCD, since a garbled panel appears in no reply.
-SYSEX_FLOOR = 0.12         # RE'd hard floor; never send faster than this
+SYSEX_FLOOR = 0.12  # RE'd hard floor; never send faster than this
 # 500 ms, restored 2026-08-16 after 150 ms locked the unit up in ordinary use.
 # The margin the sweep suggested was an illusion: it stalled the K2000 at 100 ms
 # with *presses alone*, and real navigation layers a heartbeat, a settle read and
 # a 963 ms GETGRAPHICS on top of those presses. 1.5x over a pure-press failure
 # point is not 1.5x over the real traffic. Lower it with `-i` if you want to
 # experiment, but do it with the panel in view.
-SEND_GAP = 0.5             # min seconds between outgoing SysEx (default)
-DEFAULT_TIMEOUT = 2.5      # a slow interface round-trip; allow margin
+SEND_GAP = 0.5  # min seconds between outgoing SysEx (default)
+DEFAULT_TIMEOUT = 2.5  # a slow interface round-trip; allow margin
 # SysX Device ID for OUTGOING requests. Hardware finding (2026-06-18 on a real
 # K2000R): the unit answers device id 0 (its factory default) but does NOT
 # reply to broadcast 127, despite the MIDI spec — so 0 is the working default.
@@ -160,10 +160,12 @@ def _install_device_id_tolerance() -> None:
         manufacturer byte (0x07) and the 0x78 that follows the device id
         leaves every other manufacturer's traffic byte-for-byte intact.
         """
-        if (len(data) > len(K2_HEADER)
-                and data[0] == K2_HEADER[0]
-                and data[1] == K2_HEADER[1]
-                and data[3] == K2_HEADER[3]):
+        if (
+            len(data) > len(K2_HEADER)
+            and data[0] == K2_HEADER[0]
+            and data[1] == K2_HEADER[1]
+            and data[3] == K2_HEADER[3]
+        ):
             buf = bytearray(data)
             buf[_DEVICE_ID_INDEX] = canonical
             return bytes(buf)
@@ -172,9 +174,7 @@ def _install_device_id_tolerance() -> None:
     _orig_decode = messages.SysexMessage.decode
     _orig_valid = messages.SysexMessage.has_valid_k2_headers
 
-    messages.SysexMessage.decode = classmethod(
-        lambda cls, data: _orig_decode(_normalize(data))
-    )
+    messages.SysexMessage.decode = classmethod(lambda cls, data: _orig_decode(_normalize(data)))
     messages.SysexMessage.has_valid_k2_headers = classmethod(
         lambda cls, data: _orig_valid(_normalize(data))
     )
@@ -209,6 +209,7 @@ def _uninstall_device_id_tolerance() -> None:
 # orphans a "RtMidiIn Client" until the process exits. On a host with dozens of
 # MIDI ports, a single autodetect scan could exhaust the ALSA sequencer's client
 # slots (open /dev/snd/seq → ENOMEM). We call ``delete()`` to free clients now.
+
 
 def _delete_quiet(port) -> None:
     """Immediately free an rtmidi port's backend client; never raise."""
@@ -256,7 +257,7 @@ def _enumerate(factory) -> List[str]:
     try:
         probe = factory()
         names = probe.get_ports()
-    except Exception as exc:          # no ALSA sequencer, no CoreMIDI, no WinMM
+    except Exception as exc:  # no ALSA sequencer, no CoreMIDI, no WinMM
         _BACKEND_ERROR = f"{type(exc).__name__}: {exc}"
         return []
     finally:
@@ -284,8 +285,9 @@ class ThrottledOut:
     rewritten on the way out, so one shim handles broadcast addressing too.
     """
 
-    def __init__(self, port: rtmidi.MidiOut, gap: float = SEND_GAP,
-                 device_id: Optional[int] = None):
+    def __init__(
+        self, port: rtmidi.MidiOut, gap: float = SEND_GAP, device_id: Optional[int] = None
+    ):
         self._port = port
         # Clamped, not trusted: the floor is a hardware property, so no caller —
         # config file, CLI flag or API user — gets to send below it.
@@ -313,8 +315,7 @@ class ThrottledOut:
             self._port.send_message(message)
             return
 
-        if self._device_id is not None and len(message) > _DEVICE_ID_INDEX \
-                and message[1] == 0x07:
+        if self._device_id is not None and len(message) > _DEVICE_ID_INDEX and message[1] == 0x07:
             message = list(message)
             message[_DEVICE_ID_INDEX] = self._device_id
 
@@ -356,8 +357,7 @@ class MultiIn:
             # Not the index from the enumeration above: that list came from a
             # different, already-deleted client (see :func:`_index_of`). `skip`
             # keeps two identically named ports distinct.
-            index = _index_of(port.get_ports(), port_name,
-                              skip=opened.count(port_name))
+            index = _index_of(port.get_ports(), port_name, skip=opened.count(port_name))
             if index is None:
                 _delete_quiet(port)  # it went away between listing and opening
                 continue
@@ -407,10 +407,7 @@ def _high_bit_rows(text: str) -> List[str]:
     the masked text rows from :func:`_to_ascii7` (both split the same string on
     newlines), so a renderer can mark exactly those cells.
     """
-    return [
-        "".join("1" if (ord(ch) & 0x80) else "0" for ch in line)
-        for line in text.split("\n")
-    ]
+    return ["".join("1" if (ord(ch) & 0x80) else "0" for ch in line) for line in text.split("\n")]
 
 
 def list_ports() -> Tuple[List[str], List[str]]:
@@ -501,17 +498,21 @@ class MidiBridge:
     timeout. Button helpers map onto the library's ``Panel``/``ButtonEvent``.
     """
 
-    def __init__(self, client: K2000Client, description: str,
-                 timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, client: K2000Client, description: str, timeout: float = DEFAULT_TIMEOUT):
         self.client = client
         self.description = description
         self.timeout = timeout
 
     # -- constructors --------------------------------------------------------
     @classmethod
-    def standard(cls, port_name: str, *, gap: float = SEND_GAP,
-                 device_id: Optional[int] = DEFAULT_DEVICE_ID,
-                 timeout: float = DEFAULT_TIMEOUT) -> "MidiBridge":
+    def standard(
+        cls,
+        port_name: str,
+        *,
+        gap: float = SEND_GAP,
+        device_id: Optional[int] = DEFAULT_DEVICE_ID,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> "MidiBridge":
         """Connect over a single bidirectional port (the portable default)."""
         _install_device_id_tolerance()
         out = ThrottledOut(_open_out(port_name), gap=gap, device_id=device_id)
@@ -524,10 +525,15 @@ class MidiBridge:
         return cls(client, f"standard:{port_name}", timeout=timeout)
 
     @classmethod
-    def split_rig(cls, *, send_port: str = SPLIT_SEND_PORT,
-                  recv_iface: str = SPLIT_RECV_IFACE, gap: float = SEND_GAP,
-                  device_id: Optional[int] = DEFAULT_DEVICE_ID,
-                  timeout: float = DEFAULT_TIMEOUT) -> "MidiBridge":
+    def split_rig(
+        cls,
+        *,
+        send_port: str = SPLIT_SEND_PORT,
+        recv_iface: str = SPLIT_RECV_IFACE,
+        gap: float = SEND_GAP,
+        device_id: Optional[int] = DEFAULT_DEVICE_ID,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> "MidiBridge":
         """Connect over a split send/receive interface (separate IN and OUT).
 
         Advanced/API use: send on the port matching ``send_port`` and receive on
@@ -552,17 +558,26 @@ class MidiBridge:
         if config.rig == "auto":
             return cls.autodetect(gap=gap, device_id=config.device_id)
         if config.rig == "split":
-            return cls.split_rig(send_port=config.send_port,
-                                 recv_iface=config.recv_iface,
-                                 gap=gap, device_id=config.device_id)
+            return cls.split_rig(
+                send_port=config.send_port,
+                recv_iface=config.recv_iface,
+                gap=gap,
+                device_id=config.device_id,
+            )
         if not config.port:
             raise RuntimeError("config has no 'port' set for standard rig mode")
         return cls.standard(config.port, gap=gap, device_id=config.device_id)
 
     @classmethod
-    def autodetect(cls, *, gap: float = SEND_GAP, device_id: int = DEFAULT_DEVICE_ID,
-                   scan_timeout: float = 1.0, timeout: float = DEFAULT_TIMEOUT,
-                   on_try: Optional[Callable[[str], None]] = None) -> "MidiBridge":
+    def autodetect(
+        cls,
+        *,
+        gap: float = SEND_GAP,
+        device_id: int = DEFAULT_DEVICE_ID,
+        scan_timeout: float = 1.0,
+        timeout: float = DEFAULT_TIMEOUT,
+        on_try: Optional[Callable[[str], None]] = None,
+    ) -> "MidiBridge":
         """Find a K2000 on any accessible MIDI ports — fully general.
 
         Sends an ALLTEXT request out **each output port** while listening on
@@ -597,8 +612,9 @@ class MidiBridge:
         out_names = _enum_out()
         in_names = _enum_in()
         # Try K2000-ish named ports first so a labelled rig is found fast.
-        order = sorted(range(len(out_names)),
-                       key=lambda i: 0 if _looks_like_k2(out_names[i]) else 1)
+        order = sorted(
+            range(len(out_names)), key=lambda i: 0 if _looks_like_k2(out_names[i]) else 1
+        )
 
         # Open every input once as a merged scan listener.
         listeners: List[Tuple[str, "rtmidi.MidiIn"]] = []
@@ -615,9 +631,12 @@ class MidiBridge:
 
         def is_screen_reply(data) -> bool:
             from k2000.messages import SysexMessage
-            return (SysexMessage.has_valid_k2_headers(data)
-                    and len(data) > type_index
-                    and data[type_index] == ScreenReply._msg_type_int)
+
+            return (
+                SysexMessage.has_valid_k2_headers(data)
+                and len(data) > type_index
+                and data[type_index] == ScreenReply._msg_type_int
+            )
 
         try:
             for i in order:
@@ -636,14 +655,14 @@ class MidiBridge:
                         while port.get_message() is not None:
                             pass
                     out.send_message(request)
-                    reply_port = _await_screen_reply(listeners, scan_timeout,
-                                                     is_screen_reply)
+                    reply_port = _await_screen_reply(listeners, scan_timeout, is_screen_reply)
                 finally:
                     out.close_port()
                     _delete_quiet(out)  # don't orphan a probe client per output port
                 if reply_port is not None:
-                    return cls._connect_split(out_name, reply_port,
-                                              gap=gap, device_id=device_id, timeout=timeout)
+                    return cls._connect_split(
+                        out_name, reply_port, gap=gap, device_id=device_id, timeout=timeout
+                    )
         finally:
             for _, port in listeners:
                 port.close_port()
@@ -655,8 +674,9 @@ class MidiBridge:
         )
 
     @classmethod
-    def _connect_split(cls, send_name: str, recv_port: str, *, gap: float,
-                       device_id: Optional[int], timeout: float) -> "MidiBridge":
+    def _connect_split(
+        cls, send_name: str, recv_port: str, *, gap: float, device_id: Optional[int], timeout: float
+    ) -> "MidiBridge":
         """Build a bridge: send via the exact ``send_name`` port, receive on the
         single ``recv_port`` the device answered on (its cabling is fixed)."""
         _install_device_id_tolerance()
@@ -727,9 +747,11 @@ class MidiBridge:
             if message is None:
                 break
             data = message[0]
-            if (SysexMessage.has_valid_k2_headers(data)
-                    and len(data) > type_index
-                    and data[type_index] == Panel._msg_type_int):
+            if (
+                SysexMessage.has_valid_k2_headers(data)
+                and len(data) > type_index
+                and data[type_index] == Panel._msg_type_int
+            ):
                 seen = True
         return seen
 
@@ -757,7 +779,7 @@ class MidiBridge:
             names = getattr(self.client.midi_in, "get_ports", _enum_in)()
             outs = _enum_out()
         except Exception:
-            return True   # can't tell: assume present rather than declare a loss
+            return True  # can't tell: assume present rather than declare a loss
         wanted = [p for p in (self.client.port_name or "").split(" -> ") if p]
         if not wanted:
             return True
@@ -825,7 +847,7 @@ class MidiBridge:
         needs its own loop); everything else did not.
         """
         port = getattr(self.client, "midi_in", None)
-        if port is None:          # a send-only client has no stale input
+        if port is None:  # a send-only client has no stale input
             return 0
         dropped = 0
         while port.get_message() is not None:
@@ -863,7 +885,8 @@ class MidiBridge:
                 raise TimeoutError(
                     f"the only reply to {type(message).__name__} was a copy of "
                     f"the request -- a loopback or a stale packet, not the "
-                    f"device answering")
+                    f"device answering"
+                )
         raise AssertionError("unreachable")
 
     def _ask_once(self, message, timeout):
@@ -897,8 +920,7 @@ class MidiBridge:
         Fields are checked only when the reply carries them, so this stays
         usable across reply types.
         """
-        for attr, want in (("type", obj_type), ("idno", idno),
-                           ("offset", offset)):
+        for attr, want in (("type", obj_type), ("idno", idno), ("offset", offset)):
             if want is None:
                 continue
             got = getattr(reply, attr, None)
@@ -906,10 +928,12 @@ class MidiBridge:
                 raise PatchUnverified(
                     f"reply is about {attr}={got!r}, not the {attr}={want!r} "
                     f"that was requested -- refusing to treat it as this "
-                    f"request's answer")
+                    f"request's answer"
+                )
 
-    def rename(self, obj_type: ObjectType, idno: int, name: str,
-               timeout: Optional[float] = None) -> str:
+    def rename(
+        self, obj_type: ObjectType, idno: int, name: str, timeout: Optional[float] = None
+    ) -> str:
         """Rename an existing object in one CHANGE (0x08) — the whole name at once.
 
         Sets the object's name directly, **leaving its id untouched** (``newid=0``,
@@ -940,12 +964,14 @@ class MidiBridge:
             raise ValueError(
                 f"name contains the non-printable character {bad!r} "
                 f"(0x{ord(bad):02x}); the K2000's name field is printable "
-                f"ASCII 0x20-0x7E")
+                f"ASCII 0x20-0x7E"
+            )
         if len(name) > 16:
             raise ValueError(
                 f"name {name!r} is {len(name)} characters; the field is 16 "
                 f"and the firmware's truncation is unverified, so this "
-                f"refuses rather than guessing what would be stored")
+                f"refuses rather than guessing what would be stored"
+            )
         info = self._ask(Change(obj_type, idno, 0, name), timeout)
         # The INFO reply is presented to the caller as device-confirmed, so
         # check that it IS this rename's reply and not a stale one, and that
@@ -953,7 +979,8 @@ class MidiBridge:
         if info.name != name:
             raise ValueError(
                 f"the K2000 reports {info.name!r} after being asked to store "
-                f"{name!r} -- not treating that as a confirmed rename")
+                f"{name!r} -- not treating that as a confirmed rename"
+            )
         return info.name
 
     def object_name(self, obj_type: ObjectType, idno: int) -> str:
@@ -965,6 +992,7 @@ class MidiBridge:
         # for exactly this reason; these three were left behind, so the
         # k2kmaced online push could flake on a slow interface.
         from k2000.messages import Dir
+
         return self._ask(Dir(obj_type, idno)).name
 
     def object_info(self, obj_type: ObjectType, idno: int) -> "Info":
@@ -976,10 +1004,12 @@ class MidiBridge:
         happily hand back more (see its docstring).
         """
         from k2000.messages import Dir
+
         return self._ask(Dir(obj_type, idno))
 
-    def read_object_whole(self, obj_type: ObjectType, idno: int,
-                          timeout: Optional[float] = None) -> bytes:
+    def read_object_whole(
+        self, obj_type: ObjectType, idno: int, timeout: Optional[float] = None
+    ) -> bytes:
         """Every byte of an object and **not one more** — DIR for the size,
         then one DUMP of exactly that many bytes.
 
@@ -1004,8 +1034,9 @@ class MidiBridge:
         info = self.object_info(obj_type, idno)
         return self.read_object_bytes(obj_type, idno, 0, info.size, timeout)
 
-    def list_bank(self, obj_type: ObjectType, bank: int, *, ram_only: bool = True,
-                  quiet_for: float = 2.0) -> Tuple[List["Info"], bool]:
+    def list_bank(
+        self, obj_type: ObjectType, bank: int, *, ram_only: bool = True, quiet_for: float = 2.0
+    ) -> Tuple[List["Info"], bool]:
         """Every object INFO the K2000 reports for one bank — DIRBANK (0x0C).
 
         Promoted from `probes/p33_bankdir.py`'s `list_bank()` (same reasoning
@@ -1027,6 +1058,7 @@ class MidiBridge:
         bank as a literal 300 (see `k2kmaced.macfile`'s own note on this).
         """
         from k2000.messages import DirBank, EndOfBank, Info, SysexMessage
+
         client = self.client
         while client.midi_in.get_message() is not None:
             pass  # drain anything stale
@@ -1089,8 +1121,8 @@ class MidiBridge:
         # for exactly this reason; these three were left behind, so the
         # k2kmaced online push could flake on a slow interface.
         return self._ask(
-            Dump(ObjectType.MacroTable, MACRO_TABLE_ID, 0, 2**21 - 1,
-                 EncodingFormat.BitStream)).data
+            Dump(ObjectType.MacroTable, MACRO_TABLE_ID, 0, 2**21 - 1, EncodingFormat.BitStream)
+        ).data
 
     def write_macro_table(self, data: bytes, name: str = "Macro"):
         """Replace the live Macro Table object — WRITE (0x09). **This writes.**
@@ -1114,14 +1146,27 @@ class MidiBridge:
         # k2kmaced online push could flake on a slow interface.
         from k2000.definitions import WriteMode
         from k2000.messages import Write
+
         return self._ask(
-            Write(ObjectType.MacroTable, MACRO_TABLE_ID,
-                  WriteMode.WriteToExactIDNumber, name,
-                  EncodingFormat.BitStream, data))
+            Write(
+                ObjectType.MacroTable,
+                MACRO_TABLE_ID,
+                WriteMode.WriteToExactIDNumber,
+                name,
+                EncodingFormat.BitStream,
+                data,
+            )
+        )
 
     # -- byte-offset field patching (DUMP/LOAD, not WRITE) --------------------
-    def read_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
-                          size: int, timeout: Optional[float] = None) -> bytes:
+    def read_object_bytes(
+        self,
+        obj_type: ObjectType,
+        idno: int,
+        offset: int,
+        size: int,
+        timeout: Optional[float] = None,
+    ) -> bytes:
         """`size` bytes at `offset` within an object — DUMP (0x00), a pure read.
 
         The general-purpose sibling of :meth:`read_macro_table`: any object,
@@ -1157,14 +1202,13 @@ class MidiBridge:
         when you want the whole thing; use this one when you already know the
         offset and width you are after.
         """
-        reply = self._ask(
-            Dump(obj_type, idno, offset, size, EncodingFormat.BitStream),
-            timeout)
+        reply = self._ask(Dump(obj_type, idno, offset, size, EncodingFormat.BitStream), timeout)
         self._check_echo(reply, obj_type, idno, offset)
         return reply.data
 
-    def patch_object_bytes(self, obj_type: ObjectType, idno: int, offset: int,
-                           data: bytes) -> bytes:
+    def patch_object_bytes(
+        self, obj_type: ObjectType, idno: int, offset: int, data: bytes
+    ) -> bytes:
         """Patch `len(data)` bytes at `offset` in an EXISTING object — LOAD
         (0x01) — then read the same range back and refuse to return unless it
         matches exactly. **This writes.**
@@ -1198,8 +1242,7 @@ class MidiBridge:
         hardcoded 1.0 s timeout has no override — see that method's
         docstring for what DUMPing a nonexistent object actually does.
         """
-        reply = self._ask(
-            Load(obj_type, idno, offset, EncodingFormat.BitStream, data))
+        reply = self._ask(Load(obj_type, idno, offset, EncodingFormat.BitStream, data))
         code = getattr(getattr(reply, "code", None), "name", None)
         if code is not None:
             raise PatchUnverified(
@@ -1226,23 +1269,22 @@ class MidiBridge:
     # pause the mirror around them (the worker is single-threaded, so no heartbeat
     # can interleave the blocking send, and the app stays paused afterwards). Each
     # returns the device's INFO reply describing the affected object.
-    def delete_object(self, obj_type: ObjectType, idno: int,
-                      timeout: Optional[float] = None):
+    def delete_object(self, obj_type: ObjectType, idno: int, timeout: Optional[float] = None):
         """Delete one object — DEL (0x07). Returns the INFO reply (the deleted
         object, or the ROM object it uncovers; a ROM object cannot be deleted)."""
-        return self._ask(Del(obj_type, idno),
-                                             timeout or self.timeout)
+        return self._ask(Del(obj_type, idno), timeout or self.timeout)
 
-    def move_object(self, obj_type: ObjectType, idno: int, newid: int,
-                    timeout: Optional[float] = None):
+    def move_object(
+        self, obj_type: ObjectType, idno: int, newid: int, timeout: Optional[float] = None
+    ):
         """Relocate one object to ``newid`` — CHANGE (0x08) with an empty name (the
         name is left unchanged). **Destructive at the destination:** the protocol
         deletes whatever object already sits at ``newid``. Returns the INFO reply."""
-        return self._ask(Change(obj_type, idno, newid, ""),
-                                             timeout or self.timeout)
+        return self._ask(Change(obj_type, idno, newid, ""), timeout or self.timeout)
 
-    def delete_bank(self, obj_type: Optional[ObjectType], bank: int,
-                    timeout: Optional[float] = None):
+    def delete_bank(
+        self, obj_type: Optional[ObjectType], bank: int, timeout: Optional[float] = None
+    ):
         """Delete a whole 100-id bank — DELBANK (0x0E). ``obj_type=None`` sets the
         DELBANK ``type`` field to 0 = **all object types** in the bank (what a
         front-panel range delete does); ``bank=127`` with ``obj_type=None`` wipes
@@ -1264,14 +1306,13 @@ class MidiBridge:
         all-types/`bank=127` nuke would mean re-listing every bank on an
         instrument that has just been given a lot of work to do.
         """
-        msg = DelBank(obj_type if obj_type is not None else self._ALL_OBJECT_TYPES,
-                      bank)
+        msg = DelBank(obj_type if obj_type is not None else self._ALL_OBJECT_TYPES, bank)
         try:
             # `timeout or 0.5` would turn an explicit 0 -- "do not wait at all"
             # -- back into the default grace wait.
             return self._ask(msg, 0.5 if timeout is None else timeout)
         except TimeoutError:
-            return None   # no ACK is expected; the wipe still happened
+            return None  # no ACK is expected; the wipe still happened
 
     # str -> the matching Number button, for re-entering a program id.
     _DIGIT_BUTTONS = {str(d): getattr(Button, f"Number{d}") for d in range(10)}
@@ -1323,9 +1364,15 @@ class BridgeConfig:
     only have a handful of flat keys.
     """
 
-    def __init__(self, *, rig: str = "standard", port: Optional[str] = None,
-                 send_port: str = SPLIT_SEND_PORT, recv_iface: str = SPLIT_RECV_IFACE,
-                 device_id: int = DEFAULT_DEVICE_ID):
+    def __init__(
+        self,
+        *,
+        rig: str = "standard",
+        port: Optional[str] = None,
+        send_port: str = SPLIT_SEND_PORT,
+        recv_iface: str = SPLIT_RECV_IFACE,
+        device_id: int = DEFAULT_DEVICE_ID,
+    ):
         self.rig = rig
         self.port = port
         self.send_port = send_port
@@ -1368,9 +1415,11 @@ def _main(argv: List[str]) -> None:
             # Exit non-zero so a script can tell, but say why rather than
             # raising: "no MIDI backend" is a legitimate state for a container
             # or a headless host, not a bug in the caller.
-            sys.exit(f"no MIDI backend on this host ({midi_backend_error()}) — "
-                     "nothing to list. On Linux this usually means no ALSA "
-                     "sequencer (try `modprobe snd-seq`).")
+            sys.exit(
+                f"no MIDI backend on this host ({midi_backend_error()}) — "
+                "nothing to list. On Linux this usually means no ALSA "
+                "sequencer (try `modprobe snd-seq`)."
+            )
         print("MIDI inputs:")
         for name in ins:
             print(f"  {name}")

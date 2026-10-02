@@ -20,8 +20,7 @@ SCSI0 = 1
 
 
 def entry(filename, bank, mode=OVERWRITE, path="\\"):
-    return MacroEntry(drive=SCSI0, bank=bank, mode=mode, path=path,
-                      filename=filename)
+    return MacroEntry(drive=SCSI0, bank=bank, mode=mode, path=path, filename=filename)
 
 
 def table(*entries):
@@ -59,6 +58,7 @@ class FakeBridge:
 
 # --- read_live ---------------------------------------------------------------
 
+
 def test_read_live_parses_the_object_the_device_returns():
     data = serialized(entry("BOOT1.KRZ", 200), entry("BOOT2.KRZ", 300, FILL))
     live = online.read_live(FakeBridge(data))
@@ -95,6 +95,7 @@ def test_read_live_reports_the_byte_count_it_could_not_parse():
 
 # --- diff --------------------------------------------------------------------
 
+
 def test_diff_reports_identical_tables_as_identical():
     a = table(entry("A.KRZ", 200), entry("B.KRZ", 300))
     b = table(entry("A.KRZ", 200), entry("B.KRZ", 300))
@@ -114,8 +115,9 @@ def test_diff_spots_a_changed_bank():
 def test_diff_spots_a_changed_mode():
     """Overwrite versus Fill decides whether a load lands at the bank base or
     after whatever is already resident — a difference worth catching."""
-    rows = online.diff(list(table(entry("A.KRZ", 200, OVERWRITE))),
-                       list(table(entry("A.KRZ", 200, FILL))))
+    rows = online.diff(
+        list(table(entry("A.KRZ", 200, OVERWRITE))), list(table(entry("A.KRZ", 200, FILL)))
+    )
     assert not rows[0].same
 
 
@@ -132,8 +134,7 @@ def test_diff_does_not_drop_the_tail_when_lengths_differ():
 
 
 def test_diff_is_symmetric_about_which_side_is_missing():
-    short, long_ = table(entry("A.KRZ", 200)), table(entry("A.KRZ", 200),
-                                                     entry("B.KRZ", 300))
+    short, long_ = table(entry("A.KRZ", 200)), table(entry("A.KRZ", 200), entry("B.KRZ", 300))
     forward = online.diff(list(short), list(long_))
     backward = online.diff(list(long_), list(short))
     assert len(forward) == len(backward) == 2
@@ -162,8 +163,14 @@ def test_diff_reports_a_selected_object_list_as_a_difference():
     was originally written the other way round, asserting that `extra` could be
     ignored, and it failed — which is how the distinction was found."""
     plain = entry("A.KRZ", 200)
-    with_list = MacroEntry(drive=SCSI0, bank=200, mode=OVERWRITE, path="\\",
-                           filename="A.KRZ", extra=b"\x01\x02\x03\x04")
+    with_list = MacroEntry(
+        drive=SCSI0,
+        bank=200,
+        mode=OVERWRITE,
+        path="\\",
+        filename="A.KRZ",
+        extra=b"\x01\x02\x03\x04",
+    )
     assert with_list.has_object_list
     rows = online.diff([plain], [with_list])
     assert not rows[0].same
@@ -171,6 +178,7 @@ def test_diff_reports_a_selected_object_list_as_a_difference():
 
 
 # --- the object identity -----------------------------------------------------
+
 
 def test_object_identity_matches_the_offline_parser():
     """One definition of type/id, not two that can drift apart."""
@@ -194,6 +202,7 @@ def test_the_ram_layout_assumption_is_stated_by_a_round_trip():
 
 
 # --- push --------------------------------------------------------------------
+
 
 class FakeWriteBridge:
     """A bridge that stores what it is written and serves it back.
@@ -219,7 +228,7 @@ class FakeWriteBridge:
             return self.dnak
         if self.echo:
             self.stored = data
-        return object()          # a DACK carries no `code`
+        return object()  # a DACK carries no `code`
 
     def close(self):
         pass
@@ -294,6 +303,7 @@ def test_push_points_at_the_backup_when_verification_fails(tmp_path):
 
 # --- the selected marker -----------------------------------------------------
 
+
 def test_a_selected_entry_parses_and_round_trips():
     """The K2000 stores its `*` selection marker in the entry's length word.
 
@@ -305,7 +315,7 @@ def test_a_selected_entry_parses_and_round_trips():
 
     plain = serialized(entry("A.KRZ", 200), entry("B.KRZ", 300, FILL))
     marked = bytearray(plain)
-    marked[0] |= ENTRY_SELECTED >> 8          # mark the first entry
+    marked[0] |= ENTRY_SELECTED >> 8  # mark the first entry
 
     table = MacroTable.parse(bytes(marked))
     assert len(table.entries) == 2
@@ -318,8 +328,7 @@ def test_every_entry_marked_still_parses():
     """`All` marks the lot, which is the case that actually failed."""
     from k2kmaced.macfile import ENTRY_SELECTED
 
-    data = bytearray(serialized(entry("A.KRZ", 200), entry("B.KRZ", 300),
-                                entry("C.KRZ", 400)))
+    data = bytearray(serialized(entry("A.KRZ", 200), entry("B.KRZ", 300), entry("C.KRZ", 400)))
     pos = 0
     for _ in range(3):
         length = ((data[pos] << 8) | data[pos + 1]) & ~ENTRY_SELECTED

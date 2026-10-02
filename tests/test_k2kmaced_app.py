@@ -50,8 +50,8 @@ def editor(boot) -> MacroEditor:
 
 def test_cycle_wraps_in_both_directions():
     assert cycle(BANK_VALUES, 0, 1) == 100
-    assert cycle(BANK_VALUES, 0, -1) == BANK_EVERYTHING     # wraps to the end
-    assert cycle(BANK_VALUES, BANK_EVERYTHING, 1) == 0      # and back round
+    assert cycle(BANK_VALUES, 0, -1) == BANK_EVERYTHING  # wraps to the end
+    assert cycle(BANK_VALUES, BANK_EVERYTHING, 1) == 0  # and back round
 
 
 def test_cycle_recovers_from_an_unknown_value():
@@ -71,10 +71,10 @@ def test_cycling_marks_dirty_and_changes_one_entry(editor):
     editor.index = 1
     editor.cycle_bank(1)
     assert editor.dirty
-    assert editor.table[1].bank == 300     # 200 → 300
-    assert editor.table[2].bank == 300     # untouched neighbour, unchanged
+    assert editor.table[1].bank == 300  # 200 → 300
+    assert editor.table[2].bank == 300  # untouched neighbour, unchanged
     editor.cycle_mode(1)
-    assert editor.table[1].mode_label == "OvFill"   # Overwrite → OvFill
+    assert editor.table[1].mode_label == "OvFill"  # Overwrite → OvFill
     editor.cycle_drive(-1)
     assert editor.table[1].drive_label == "Floppy"  # SCSI 0 → Floppy
 
@@ -99,7 +99,7 @@ def test_editing_an_empty_macro_is_harmless(editor):
     for _ in range(len(editor.table)):
         editor.delete()
     assert editor.current is None
-    editor.cycle_bank(1)      # no entry to edit — must not raise
+    editor.cycle_bank(1)  # no entry to edit — must not raise
     editor.move(1)
     editor.delete()
     assert editor.rows() == []
@@ -119,7 +119,7 @@ def test_set_full_path_splits_directory_and_file(editor):
 
 
 def test_set_full_path_accepts_host_style_input(editor):
-    editor.set_full_path("ANALOG/SYNAPSE.KRZ")     # no leading \, unix separators
+    editor.set_full_path("ANALOG/SYNAPSE.KRZ")  # no leading \, unix separators
     assert editor.current.full_path == "\\ANALOG\\SYNAPSE.KRZ"
 
 
@@ -144,7 +144,7 @@ def test_repointed_entry_survives_a_round_trip(editor, tmp_path):
     editor.save(str(out))
     entry = PramFile.parse(out.read_bytes()).macro_table()[5]
     assert entry.full_path == "\\ANALOG\\SYNAPSE.KRZ"
-    assert entry.bank == 600 and entry.mode_label == "Overwrite"   # untouched
+    assert entry.bank == 600 and entry.mode_label == "Overwrite"  # untouched
 
 
 def test_add_inserts_after_the_cursor_and_inherits_its_settings(editor):
@@ -154,7 +154,7 @@ def test_add_inserts_after_the_cursor_and_inherits_its_settings(editor):
     assert len(editor.table) == 7
     new = editor.current
     assert new.filename == "NEW.KRZ"
-    assert new.bank == editor.table[1].bank        # inherited from the neighbour
+    assert new.bank == editor.table[1].bank  # inherited from the neighbour
     assert new.mode == editor.table[1].mode
     assert editor.dirty
 
@@ -164,7 +164,7 @@ def test_add_to_an_empty_macro(editor):
         editor.delete()
     editor.add()
     assert len(editor.table) == 1 and editor.index == 0
-    assert editor.current.mode_label == "Fill"     # the default, no neighbour
+    assert editor.current.mode_label == "Fill"  # the default, no neighbour
 
 
 def test_set_full_path_on_an_empty_macro_is_refused(editor):
@@ -227,9 +227,7 @@ def test_missing_files_helper(boot, image):
 def test_catalogue_lists_only_loadable_files(boot, image):
     editor = build_editor(str(boot), str(image))
     # BOOT.MAC and NULL.KRZ from the root, KPOWFAV.KRZ from the subdirectory.
-    assert editor.catalogue == [
-        "\\--FAVS\\KPOWFAV.KRZ", "\\BOOT.MAC", "\\NULL.KRZ"
-    ]
+    assert editor.catalogue == ["\\--FAVS\\KPOWFAV.KRZ", "\\BOOT.MAC", "\\NULL.KRZ"]
 
 
 def test_catalogue_is_empty_without_an_image(editor):
@@ -279,7 +277,7 @@ async def test_app_edits_and_saves(editor, tmp_path):
     out = tmp_path / "NEW.MAC"
     app = K2kmacedApp(editor, str(out))
     async with app.run_test() as pilot:
-        await pilot.press("down", "b")          # entry 1: bank 200 → 300
+        await pilot.press("down", "b")  # entry 1: bank 200 → 300
         await pilot.pause()
         assert app.last_status.startswith("* ")  # dirty marker
         await pilot.press("ctrl+s")
@@ -295,10 +293,10 @@ async def test_app_cycles_bank_both_ways_and_reorders(editor):
 
     app = K2kmacedApp(editor)
     async with app.run_test() as pilot:
-        await pilot.press("down", "b", "b", "B")   # 200 → 300 → 400 → 300
+        await pilot.press("down", "b", "b", "B")  # 200 → 300 → 400 → 300
         await pilot.pause()
         assert editor.table[1].bank == 300
-        await pilot.press("ctrl+down")             # entry 1 moves down one
+        await pilot.press("ctrl+down")  # entry 1 moves down one
         await pilot.pause()
         assert editor.table[2].filename == "KPOWFAV.KRZ"
 
@@ -333,10 +331,10 @@ async def test_app_keeps_the_overlay_open_on_a_bad_path(editor):
         await pilot.press("e")
         await pilot.pause()
         field = app.query_one("#pathentry", Input)
-        field.value = "\\ANALOG\\"          # no file name
+        field.value = "\\ANALOG\\"  # no file name
         await pilot.press("enter")
         await pilot.pause()
-        assert field.display                # still open, so it can be corrected
+        assert field.display  # still open, so it can be corrected
         assert "rejected:" in app.last_status
         assert editor.table[0].filename == "NULL.KRZ"
 
@@ -430,7 +428,7 @@ def test_dir_of_and_parent_dir():
     assert dir_of("\\NULL.KRZ") == "\\"
     assert parent_dir("\\--FAVS\\") == "\\"
     assert parent_dir("\\DEEP\\NEST\\") == "\\DEEP\\"
-    assert parent_dir("\\") is None          # the root has no parent
+    assert parent_dir("\\") is None  # the root has no parent
 
 
 def test_path_tree_registers_intermediate_directories():
@@ -443,7 +441,7 @@ def test_path_tree_registers_intermediate_directories():
     assert tree["\\"]["dirs"] == ["--FAVS", "-RLNDCD2", "DEEP"]
     assert tree["\\"]["files"] == ["NULL.KRZ"]
     assert tree["\\DEEP\\"]["dirs"] == ["NEST"]
-    assert tree["\\DEEP\\"]["files"] == []          # nothing loadable of its own
+    assert tree["\\DEEP\\"]["files"] == []  # nothing loadable of its own
     assert tree["\\DEEP\\NEST\\"]["files"] == ["INNER.KRZ"]
 
 
@@ -460,19 +458,18 @@ def test_browse_rows_orders_up_then_dirs_then_files():
 def test_browse_rows_at_the_root_has_no_up_entry():
     rows = browse_rows(path_tree(CATALOGUE), "\\")
     assert DIR_UP not in [label for label, _, _ in rows]
-    assert [label for label, _, _ in rows] == [
-        "--FAVS\\", "-RLNDCD2\\", "DEEP\\", "NULL.KRZ"]
+    assert [label for label, _, _ in rows] == ["--FAVS\\", "-RLNDCD2\\", "DEEP\\", "NULL.KRZ"]
     # directories are visibly directories, and descend rather than select
     assert rows[0][1] == "dir" and rows[0][2] == "\\--FAVS\\"
 
 
 def test_browse_rows_of_an_unknown_directory_is_empty_not_an_error():
     # A stale entry can point at a directory that no longer exists on the image.
-    assert browse_rows(path_tree(CATALOGUE), "\\GONE\\") == [
-        (DIR_UP, "up", "\\")]
+    assert browse_rows(path_tree(CATALOGUE), "\\GONE\\") == [(DIR_UP, "up", "\\")]
 
 
 # --- move to an explicit position -------------------------------------------
+
 
 def test_move_to_slides_the_others_along(editor):
     """4 -> 2 must leave 0,1,4,2,3 — an insert, not a swap.
@@ -484,27 +481,27 @@ def test_move_to_slides_the_others_along(editor):
     editor.index = 4
     assert editor.move_to(2) == 2
     after = [e.full_path for e in editor.table]
-    assert after == [before[0], before[1], before[4], before[2], before[3],
-                     *before[5:]]
-    assert editor.index == 2          # the cursor follows the entry it moved
+    assert after == [before[0], before[1], before[4], before[2], before[3], *before[5:]]
+    assert editor.index == 2  # the cursor follows the entry it moved
     assert editor.dirty
 
 
 def test_move_to_clamps_instead_of_raising(editor):
     editor.index = 0
     last = len(editor.table) - 1
-    assert editor.move_to(99) == last          # 99 means "last"
-    assert editor.move_to(-5) == 0             # -5 means "first"
+    assert editor.move_to(99) == last  # 99 means "last"
+    assert editor.move_to(-5) == 0  # -5 means "first"
 
 
 def test_move_to_is_a_no_op_on_a_short_table(editor):
     editor.table.entries[:] = editor.table.entries[:1]
     editor.dirty = False
     assert editor.move_to(3) == 0
-    assert not editor.dirty                    # nothing changed, nothing to save
+    assert not editor.dirty  # nothing changed, nothing to save
 
 
 # --- the write gate and install-to-image safeguards -------------------------
+
 
 @pytest.fixture
 def img_editor(boot, image):
@@ -530,6 +527,7 @@ def test_a_compressed_image_has_no_install_target(boot, tmp_path):
     """k2image reads .lzo via a temp copy, so a write would be discarded."""
     from k2kmaced.macfile import PramFile
     from k2kmaced.app import MacroEditor
+
     pram = PramFile.parse(FIXTURE.read_bytes())
     ed = MacroEditor(pram, "x", image_path="/tmp/hd0.img.lzo", member="\\BOOT.MAC")
     assert not ed.can_install
@@ -547,10 +545,11 @@ async def test_write_gate_is_off_at_startup_and_install_refuses(img_editor, imag
     async with app.run_test() as pilot:
         await pilot.pause()
         assert app.allow_write is False
-        await pilot.press("i")                 # try to install with the gate off
+        await pilot.press("i")  # try to install with the gate off
         await pilot.pause()
         assert "gate is off" in app.last_status
         from k2kmaced.app import InstallScreen
+
         assert not isinstance(app.screen, InstallScreen)
     assert image.read_bytes() == before
 
@@ -585,12 +584,12 @@ async def test_install_needs_arm_then_fire_not_one_keypress(img_editor, image):
     app = K2kmacedApp(img_editor)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("w")                 # arm the gate
-        await pilot.press("i")                 # open the install modal
+        await pilot.press("w")  # arm the gate
+        await pilot.press("i")  # open the install modal
         await pilot.pause()
         assert isinstance(app.screen, InstallScreen)
         assert app.screen.armed is False
-        await pilot.press("enter")             # fire without arming
+        await pilot.press("enter")  # fire without arming
         await pilot.pause()
         assert isinstance(app.screen, InstallScreen), "Enter alone dismissed it"
     assert image.read_bytes() == before, "nothing may be written unarmed"
@@ -602,7 +601,7 @@ async def test_install_writes_once_armed_and_fired(img_editor, image, capsys):
     from k2kmaced.k2image import DiskImage
 
     img_editor.index = 1
-    img_editor.cycle_bank(1)                   # make a change worth writing
+    img_editor.cycle_bank(1)  # make a change worth writing
     expected = img_editor.serialize()
 
     app = K2kmacedApp(img_editor)
@@ -612,10 +611,10 @@ async def test_install_writes_once_armed_and_fired(img_editor, image, capsys):
         await pilot.press("i")
         await pilot.pause()
         assert isinstance(app.screen, InstallScreen)
-        await pilot.press("i")                 # arm inside the modal
+        await pilot.press("i")  # arm inside the modal
         await pilot.pause()
         assert app.screen.armed is True
-        await pilot.press("enter")             # fire
+        await pilot.press("enter")  # fire
         await pilot.pause()
     with DiskImage.open(image) as im:
         assert im.read_file("\\BOOT.MAC") == expected
@@ -633,8 +632,8 @@ async def test_escape_in_the_install_modal_writes_nothing(img_editor, image):
         await pilot.press("w")
         await pilot.press("i")
         await pilot.pause()
-        await pilot.press("i")                 # armed...
-        await pilot.press("escape")            # ...then changed our mind
+        await pilot.press("i")  # armed...
+        await pilot.press("escape")  # ...then changed our mind
         await pilot.pause()
         assert "cancelled" in app.last_status
     assert image.read_bytes() == before
@@ -650,7 +649,7 @@ async def test_opening_a_new_file_disarms_the_gate(img_editor, image, boot):
         await pilot.pause()
         await pilot.press("w")
         assert app.allow_write is True
-        app._load(str(boot))                   # a plain .MAC this time
+        app._load(str(boot))  # a plain .MAC this time
         # The load runs on a worker thread now, so wait for it rather than
         # assuming one frame is enough.
         for _ in range(200):
@@ -681,7 +680,7 @@ async def test_starting_with_nothing_open_is_survivable(capsys):
                 break
             await pilot.pause()
         assert isinstance(app.screen, OpenScreen), "should offer to open a file"
-        await pilot.press("escape")            # dismiss it, then poke
+        await pilot.press("escape")  # dismiss it, then poke
         await pilot.pause()
         for key in ("b", "m", "d", "a", "o", "delete", "ctrl+s", "w", "i", "e", "f"):
             await pilot.press(key)
@@ -690,6 +689,7 @@ async def test_starting_with_nothing_open_is_survivable(capsys):
 
 
 # --- the key legend must not lose keys ---------------------------------------
+
 
 def test_wrap_blocks_never_splits_a_block():
     from k2kmaced.app import LEGEND_BLOCKS, wrap_blocks

@@ -203,8 +203,7 @@ class _LzoDecompressionCache:
                     # are the same silent failure without it.
                     detail = stderr.decode("utf-8", "replace").strip()
                     raise ImageError(
-                        f"lzop failed to decompress {path}"
-                        + (f": {detail}" if detail else "")
+                        f"lzop failed to decompress {path}" + (f": {detail}" if detail else "")
                     )
         except Exception:
             tmp.close()
@@ -260,8 +259,7 @@ class DiskImage:
             (root_bytes + self.bytes_per_sector - 1) // self.bytes_per_sector
         )
         want = self.fat_sectors * self.bytes_per_sector
-        self._fat = self._read_at(
-            self.reserved_sectors * self.bytes_per_sector, want)
+        self._fat = self._read_at(self.reserved_sectors * self.bytes_per_sector, want)
         if len(self._fat) < want:
             # A truncated image (an interrupted copy, a half-written download)
             # passed every boot-sector check and then surfaced as a raw
@@ -364,9 +362,7 @@ class DiskImage:
         path = path if path.startswith("\\") else "\\" + path
         prefix = path if path.endswith("\\") else path + "\\"
         if prefix == "\\":
-            raw = self._read_at(
-                self._root_sector * self.bytes_per_sector, self.root_entries * 32
-            )
+            raw = self._read_at(self._root_sector * self.bytes_per_sector, self.root_entries * 32)
         else:
             entry = self.stat(prefix.rstrip("\\"))
             if not entry.is_dir:
@@ -400,6 +396,4 @@ class DiskImage:
     def find(self, suffix: str) -> List[DirEntry]:
         """Every file whose name ends with ``suffix`` (case-insensitive)."""
         want = suffix.upper()
-        return [
-            e for e in self.walk() if not e.is_dir and e.name.upper().endswith(want)
-        ]
+        return [e for e in self.walk() if not e.is_dir and e.name.upper().endswith(want)]

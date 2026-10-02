@@ -48,9 +48,7 @@ def image(tmp_path) -> Path:
 
 def test_parse_source_splits_image_members():
     assert parse_source(r"hd0.img:\BOOT.MAC") == ("hd0.img", "\\BOOT.MAC")
-    assert parse_source(r"/backups/HD0.img.lzo:\A\B.MAC") == (
-        "/backups/HD0.img.lzo", "\\A\\B.MAC"
-    )
+    assert parse_source(r"/backups/HD0.img.lzo:\A\B.MAC") == ("/backups/HD0.img.lzo", "\\A\\B.MAC")
 
 
 def test_parse_source_leaves_plain_paths_alone():
@@ -96,8 +94,7 @@ def test_extract_from_an_image(image, tmp_path, capsys):
 
 
 def test_extract_refuses_a_non_macro(image, tmp_path, capsys):
-    assert main(["extract", str(image), "\\NULL.KRZ", "-o",
-                 str(tmp_path / "x.MAC")]) == 1
+    assert main(["extract", str(image), "\\NULL.KRZ", "-o", str(tmp_path / "x.MAC")]) == 1
     assert "error:" in capsys.readouterr().err
 
 
@@ -124,8 +121,7 @@ def test_check_reports_missing_files(boot, image, capsys):
 
 def test_edit_rebank_and_move(boot, tmp_path, capsys):
     out = tmp_path / "NEW.MAC"
-    assert main(["edit", str(boot), "-o", str(out),
-                 "--rebank", "1=700", "--move", "0=5"]) == 0
+    assert main(["edit", str(boot), "-o", str(out), "--rebank", "1=700", "--move", "0=5"]) == 0
     table = PramFile.parse(out.read_bytes()).macro_table()
     assert table[0].bank == 700 and table[0].filename == "KPOWFAV.KRZ"
     assert table[5].filename == "NULL.KRZ"
@@ -134,16 +130,17 @@ def test_edit_rebank_and_move(boot, tmp_path, capsys):
 
 def test_edit_set_mode_and_drive(boot, tmp_path):
     out = tmp_path / "NEW.MAC"
-    assert main(["edit", str(boot), "-o", str(out),
-                 "--set-mode", "0=Fill", "--set-drive", "0=SCSI 3"]) == 0
+    assert (
+        main(["edit", str(boot), "-o", str(out), "--set-mode", "0=Fill", "--set-drive", "0=SCSI 3"])
+        == 0
+    )
     entry = PramFile.parse(out.read_bytes()).macro_table()[0]
     assert entry.mode_label == "Fill" and entry.drive_label == "SCSI 3"
 
 
 def test_edit_delete_and_rebank_all(boot, tmp_path):
     out = tmp_path / "NEW.MAC"
-    assert main(["edit", str(boot), "-o", str(out),
-                 "--delete", "0", "--rebank-all", "E"]) == 0
+    assert main(["edit", str(boot), "-o", str(out), "--delete", "0", "--rebank-all", "E"]) == 0
     table = PramFile.parse(out.read_bytes()).macro_table()
     assert len(table) == 5
     assert {e.bank_label for e in table} == {"E"}
@@ -165,8 +162,7 @@ def test_edit_will_not_clobber_without_force(boot, tmp_path, capsys):
 def test_edit_never_writes_back_into_the_image(image, tmp_path):
     before = image.read_bytes()
     out = tmp_path / "NEW.MAC"
-    assert main(["edit", f"{image}:\\BOOT.MAC", "-o", str(out),
-                 "--rebank-all", "900"]) == 0
+    assert main(["edit", f"{image}:\\BOOT.MAC", "-o", str(out), "--rebank-all", "900"]) == 0
     assert image.read_bytes() == before
     assert {e.bank for e in PramFile.parse(out.read_bytes()).macro_table()} == {900}
 
@@ -176,13 +172,12 @@ def test_edit_never_writes_back_into_the_image(image, tmp_path):
 
 def test_new_builds_a_boot_macro(tmp_path, capsys):
     out = tmp_path / "BOOT.MAC"
-    assert main(["new", "-o", str(out),
-                 "\\NULL.KRZ@E:Overwrite",
-                 "\\ANALOG\\SYNAPSE.KRZ@200:Fill"]) == 0
+    assert (
+        main(["new", "-o", str(out), "\\NULL.KRZ@E:Overwrite", "\\ANALOG\\SYNAPSE.KRZ@200:Fill"])
+        == 0
+    )
     table = PramFile.parse(out.read_bytes()).macro_table()
-    assert [e.full_path for e in table] == [
-        "\\NULL.KRZ", "\\ANALOG\\SYNAPSE.KRZ"
-    ]
+    assert [e.full_path for e in table] == ["\\NULL.KRZ", "\\ANALOG\\SYNAPSE.KRZ"]
     assert [e.bank_label for e in table] == ["E", "200"]
     assert [e.mode_letter for e in table] == ["O", "F"]
     assert "wrote" in capsys.readouterr().out
@@ -196,32 +191,30 @@ def test_new_rejects_a_bad_bank(tmp_path, capsys):
 
 
 def test_edit_rejects_a_bad_mode(boot, tmp_path, capsys):
-    assert main(["edit", str(boot), "-o", str(tmp_path / "x.MAC"),
-                 "--set-mode", "0=Sideways"]) == 2
+    assert main(["edit", str(boot), "-o", str(tmp_path / "x.MAC"), "--set-mode", "0=Sideways"]) == 2
     assert "mode must be" in capsys.readouterr().err
 
 
 # --- install: the one command that writes into an image ----------------------
 
-def test_install_aborts_without_the_typed_confirmation(image, boot, capsys,
-                                                       monkeypatch):
+
+def test_install_aborts_without_the_typed_confirmation(image, boot, capsys, monkeypatch):
     """The confirmation must be a deliberate act, so anything else aborts.
 
     A y/n prompt is answered by reflex; this one wants a word typed."""
     before = image.read_bytes()
     monkeypatch.setattr("builtins.input", lambda *_: "yes")
     assert main(["install", str(boot), str(image), "\\BOOT.MAC"]) == 1
-    assert image.read_bytes() == before          # byte-for-byte untouched
+    assert image.read_bytes() == before  # byte-for-byte untouched
     assert "aborted" in capsys.readouterr().out
 
 
-def test_install_shows_the_backup_warning_before_asking(image, boot, capsys,
-                                                        monkeypatch):
+def test_install_shows_the_backup_warning_before_asking(image, boot, capsys, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda *_: "no")
     main(["install", str(boot), str(image), "\\BOOT.MAC"])
     out = capsys.readouterr().out
     assert "YOUR responsibility" in out and "does NOT make a backup" in out
-    assert "FAT untouched" in out               # the plan is shown too
+    assert "FAT untouched" in out  # the plan is shown too
 
 
 def test_install_writes_when_confirmed(image, tmp_path, capsys):
@@ -262,8 +255,7 @@ def test_parse_source_does_not_split_a_windows_drive_letter():
     assert parse_source(r"C:\Users\me\hd0.img") == (r"C:\Users\me\hd0.img", None)
     assert parse_source(r"D:\hd0.img") == (r"D:\hd0.img", None)
     # ...while a member on a Windows path still splits, at the right colon.
-    assert parse_source(r"C:\Users\me\hd0.img:\BOOT.MAC") == (
-        r"C:\Users\me\hd0.img", r"\BOOT.MAC")
+    assert parse_source(r"C:\Users\me\hd0.img:\BOOT.MAC") == (r"C:\Users\me\hd0.img", r"\BOOT.MAC")
 
 
 def test_edit_refuses_an_index_that_names_no_entry(tmp_path, capsys):
@@ -284,8 +276,7 @@ def test_edit_refuses_an_index_that_names_no_entry(tmp_path, capsys):
     assert "no entry -1" in capsys.readouterr().err
     assert not out.exists(), "a refused edit must not write anything"
 
-    assert main(["edit", str(source), "-o", str(out),
-                 "--delete", str(len(before))]) == 1
+    assert main(["edit", str(source), "-o", str(out), "--delete", str(len(before))]) == 1
     assert "no entry" in capsys.readouterr().err
 
 
@@ -310,6 +301,5 @@ def test_extract_will_not_overwrite_without_force(tmp_path, capsys, image):
     assert "pass --force" in capsys.readouterr().err
     assert out.read_bytes() == b"something the user still wants"
 
-    assert main(["extract", str(image), "\\BOOT.MAC", "-o", str(out),
-                 "--force"]) == 0
+    assert main(["extract", str(image), "\\BOOT.MAC", "-o", str(out), "--force"]) == 0
     assert out.read_bytes() != b"something the user still wants"

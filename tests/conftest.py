@@ -30,10 +30,12 @@ def _undo_the_device_id_shim():
     """
     from k2000 import messages
 
-    was = (messages.SysexMessage.decode,
-           messages.SysexMessage.has_valid_k2_headers,
-           getattr(messages, "_k2kremote_devid_tolerant", False),
-           getattr(messages, "_k2kremote_devid_originals", None))
+    was = (
+        messages.SysexMessage.decode,
+        messages.SysexMessage.has_valid_k2_headers,
+        getattr(messages, "_k2kremote_devid_tolerant", False),
+        getattr(messages, "_k2kremote_devid_originals", None),
+    )
     yield
     messages.SysexMessage.decode = was[0]
     messages.SysexMessage.has_valid_k2_headers = was[1]

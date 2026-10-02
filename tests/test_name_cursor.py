@@ -32,9 +32,9 @@ def test_clamped_to_field():
     cur.open(3, 16)
     for _ in range(NAME_MAX_LEN + 5):
         cur.move(Button.CursorRight)
-    assert cur.pos == NAME_MAX_LEN - 1          # never past the field
+    assert cur.pos == NAME_MAX_LEN - 1  # never past the field
     moved = cur.move(Button.CursorRight)
-    assert moved is False                        # already at the end
+    assert moved is False  # already at the end
     for _ in range(NAME_MAX_LEN + 5):
         cur.move(Button.CursorLeft)
     assert cur.pos == 0
@@ -45,8 +45,8 @@ def test_jump_to_end_uses_name_length():
     cur = NameCursor()
     cur.open(3, 16)
     cur.move(Button.CursorLeftRight, name_len=10)  # "CMI VOICES"
-    assert cur.pos == 9                            # last character
-    cur.move(Button.CursorLeftRight, name_len=0)   # empty name
+    assert cur.pos == 9  # last character
+    cur.move(Button.CursorLeftRight, name_len=0)  # empty name
     assert cur.pos == 0
 
 
@@ -71,7 +71,7 @@ def test_set_typed_is_relative_to_current_cursor():
     cur.move(Button.CursorRight)
     cur.move(Button.CursorRight)
     cur.move(Button.CursorRight)  # cursor moved onto cell 3 before typing
-    cur.set_typed(len("abc"))     # types abc at cells 3,4,5 -> rests on cell 5
+    cur.set_typed(len("abc"))  # types abc at cells 3,4,5 -> rests on cell 5
     assert cur.pos == 5
 
 

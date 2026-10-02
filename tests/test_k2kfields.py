@@ -45,10 +45,14 @@ def test_describe_field_decodes_lfo1_pitch_depth_in_the_exact_range():
 
 
 def test_describe_field_lfo1_pitch_depth_spot_values():
-    assert k2kfields.describe_field(ObjectType.Program, 199, bytes([79])) \
+    assert (
+        k2kfields.describe_field(ObjectType.Program, 199, bytes([79]))
         == "4f (LFO1->Pitch Depth: 1200 cents)"
-    assert k2kfields.describe_field(ObjectType.Program, 199, bytes([123])) \
+    )
+    assert (
+        k2kfields.describe_field(ObjectType.Program, 199, bytes([123]))
         == "7b (LFO1->Pitch Depth: 7200 cents)"
+    )
 
 
 def test_lfo1_pitch_depth_decodes_between_the_old_spot_values():
@@ -67,8 +71,7 @@ def test_lfo1_mnrate_reaches_past_the_wheel_stop():
     # §61 read the ceiling off the panel as byte 184 = 24.00 Hz because the
     # wheel will not move past it. The ROM table has 256 entries and SysEx
     # writes reach them; confirmed on hardware 2026-09-14 (§70).
-    for byte, hz in ((46, "2.00"), (184, "24.00"), (185, "24.50"),
-                     (186, "25.00"), (255, "25.00")):
+    for byte, hz in ((46, "2.00"), (184, "24.00"), (185, "24.50"), (186, "25.00"), (255, "25.00")):
         out = k2kfields.describe_field(ObjectType.Program, 91, bytes([byte]))
         assert out == f"{byte:02x} (LFO1 MnRate: {hz} Hz)"
 
@@ -161,10 +164,15 @@ def test_f1_coarse_matches_every_panel_reading():
     # §69: each pair was read off the device's own Coarse: field on
     # 2026-09-14, the first and last by typing an out-of-range number and
     # letting the K2000 clamp -- which is what pins the endpoints.
-    for byte, hz in ((256 - 48, 16), (256 - 26, 58), (9, 440),
-                     (24, 1047), (75, 19912), (79, 25088)):
-        out = k2kfields.describe_field(ObjectType.Program, 210,
-                                       bytes([byte]), 50)
+    for byte, hz in (
+        (256 - 48, 16),
+        (256 - 26, 58),
+        (9, 440),
+        (24, 1047),
+        (75, 19912),
+        (79, 25088),
+    ):
+        out = k2kfields.describe_field(ObjectType.Program, 210, bytes([byte]), 50)
         assert out == f"{byte:02x} (F1 Coarse: {hz} Hz)"
 
 
@@ -172,14 +180,12 @@ def test_f1_coarse_rounds_the_way_the_panel_does():
     # 1046.5 Hz shows as 1047 on the LCD; Python's round() gives 1046
     # (half-even), which would put the tool one Hz off the instrument it is
     # supposed to be mirroring.
-    assert "1047 Hz" in k2kfields.describe_field(
-        ObjectType.Program, 210, bytes([24]), 50)
+    assert "1047 Hz" in k2kfields.describe_field(ObjectType.Program, 210, bytes([24]), 50)
 
 
 def test_f1_coarse_refuses_bytes_outside_the_proven_clamps():
     for byte in (80, 100, 127, 256 - 49, 256 - 60):
-        out = k2kfields.describe_field(ObjectType.Program, 210,
-                                       bytes([byte]), 50)
+        out = k2kfields.describe_field(ObjectType.Program, 210, bytes([byte]), 50)
         assert "unmapped" in out
 
 

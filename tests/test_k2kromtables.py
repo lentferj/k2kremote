@@ -6,6 +6,7 @@
 # Tables read out of the v3.87J OS ROM. The exhaustive test needs the image
 # at ~/temp/k2k_fw/k2000_v387j.bin and skips without it; no hardware.
 
+
 def test_cents_ratio_reproduces_the_rom_table_byte_for_byte():
     """All 9601 entries, against the image itself -- not a spot check.
 
@@ -19,6 +20,7 @@ def test_cents_ratio_reproduces_the_rom_table_byte_for_byte():
     image = pathlib.Path.home() / "temp" / "k2k_fw" / "k2000_v387j.bin"
     if not image.exists():
         import pytest
+
         pytest.skip("ROM image not present")
 
     rom = image.read_bytes()

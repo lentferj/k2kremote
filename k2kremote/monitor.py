@@ -108,6 +108,7 @@ TYPE_INDEX = 4
 def message_table() -> List[Tuple[int, str, str]]:
     """``(type, class name, first docstring line)`` for every decodable message."""
     import inspect as _inspect
+
     rows = []
     for name, obj in vars(_messages).items():
         if not _inspect.isclass(obj):
@@ -174,8 +175,10 @@ def _screen_detail(message) -> str:
 
 def _info_detail(message) -> str:
     where = "RAM" if getattr(message, "in_ram", False) else "ROM"
-    return (f"{getattr(message.type, 'name', message.type)} "
-            f"id {message.idno} {message.name!r} {message.size}B {where}")
+    return (
+        f"{getattr(message.type, 'name', message.type)} "
+        f"id {message.idno} {message.name!r} {message.size}B {where}"
+    )
 
 
 def describe(data: bytes, direction: str = "") -> str:
@@ -200,8 +203,7 @@ def describe(data: bytes, direction: str = "") -> str:
     if message is None:
         known = {c for c, _, _ in message_table()}
         note = "undecodable" if code in known else "unknown type"
-        return (f"{arrow} dev {device} type 0x{code:02X} {note}, "
-                f"{len(raw)} bytes  {hexdump(raw)}")
+        return f"{arrow} dev {device} type 0x{code:02X} {note}, {len(raw)} bytes  {hexdump(raw)}"
 
     name = type(message).__name__
     if name == "Panel":
@@ -220,22 +222,24 @@ def describe(data: bytes, direction: str = "") -> str:
         # error produced entirely by a variable name.
         reason = getattr(message, "code", None)
         named = getattr(reason, "name", None)
-        detail = (f"DNAK {named}" if named else
-                  f"DNAK code {reason} (1 = object open for editing)")
+        detail = f"DNAK {named}" if named else f"DNAK code {reason} (1 = object open for editing)"
     else:
         # Skip privates: `__annotations__` on these message classes includes
         # class-level machinery (`_msg_type_int`, `_response_classes`), so an
         # empty-bodied request like AllText rendered as
         # "_msg_type_int=21, _response_classes=[]" -- implementation detail
         # presented in the position where the payload should be.
-        fields = {k: getattr(message, k, None)
-                  for k in getattr(message, "__annotations__", {})
-                  if not k.startswith("_")}
+        fields = {
+            k: getattr(message, k, None)
+            for k in getattr(message, "__annotations__", {})
+            if not k.startswith("_")
+        }
         detail = ", ".join(f"{k}={v!r}" for k, v in fields.items()) or "(no body)"
     return f"{arrow} dev {device} 0x{code:02X} {name:<20} {detail}"
 
 
 # --- live modes --------------------------------------------------------------
+
 
 def _open_bridge(port: Optional[str], rig: str):
     """Open the bridge for `--rig`/`--port`.
@@ -252,17 +256,24 @@ def _open_bridge(port: Optional[str], rig: str):
     interfaces is how a measurement ends up on another instrument.
     """
     from k2kremote.midi_bridge import MidiBridge
+
     if port:
         return MidiBridge.standard(port)
     if rig == "standard":
         raise SystemExit(
             "--rig standard needs --port NAME (there is no sensible default "
-            "on a multi-interface machine); use --rig auto to autodetect")
+            "on a multi-interface machine); use --rig auto to autodetect"
+        )
     return MidiBridge.autodetect()
 
 
-def watch(bridge, *, only_panel: bool = False, seconds: Optional[float] = None,
-          quiet_after: Optional[float] = None) -> int:
+def watch(
+    bridge,
+    *,
+    only_panel: bool = False,
+    seconds: Optional[float] = None,
+    quiet_after: Optional[float] = None,
+) -> int:
     """Print every inbound message. Sends nothing at all.
 
     Passive by design: see the module docstring. A monitor that polls would be
@@ -368,7 +379,7 @@ def _is_reply_to(data, request) -> bool:
         return False
     try:
         decoded = SysexMessage.decode(bytes(data))
-    except Exception:                                       # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return False
     expected = tuple(request._response_classes or [ScreenReply])
     return isinstance(decoded, expected)
@@ -382,6 +393,7 @@ def _read_raw(bridge, kind, idno: int, encoding):
     fault rather than a stale buffer.
     """
     from k2000.messages import Read
+
     while bridge.client.midi_in.get_message() is not None:
         pass
     started = time.monotonic()
@@ -410,22 +422,26 @@ def compare_encodings(bridge, type_name: str, idno: int) -> int:
     called a match, and ten of the sixteen were zeros on both sides.
     """
     from k2000.definitions import EncodingFormat
+
     out = {}
     for encoding in (EncodingFormat.Nibblized, EncodingFormat.BitStream):
         reply, ms = _read_raw(bridge, _object_type(type_name), idno, encoding)
         data = getattr(reply, "data", b"") or b""
         out[encoding.name] = data
-        print(f"{encoding.name:<10} {len(data):>5} bytes  ({ms:.0f} ms)  "
-              f"{hexdump(data, 16)}")
+        print(f"{encoding.name:<10} {len(data):>5} bytes  ({ms:.0f} ms)  {hexdump(data, 16)}")
 
     a, b = out["Nibblized"], out["BitStream"]
     if a == b:
-        print("\nbyte-identical — correct: `form` changes only the transmission "
-              "packing, so both forms must decode to the same bytes")
+        print(
+            "\nbyte-identical — correct: `form` changes only the transmission "
+            "packing, so both forms must decode to the same bytes"
+        )
         return 0
     print("\n!! THE TWO FORMS DISAGREE, WHICH MEANS A DECODER BUG HERE.")
-    print("   `form` selects packing only (4 bits vs 7 bits per MIDI byte); both "
-          "carry the same object, so this can never be a protocol difference.")
+    print(
+        "   `form` selects packing only (4 bits vs 7 bits per MIDI byte); both "
+        "carry the same object, so this can never be a protocol difference."
+    )
 
     # strict=False deliberately: the two encodings disagreeing in LENGTH is one
     # of the things this command exists to report, and it is reported two lines
@@ -435,27 +451,39 @@ def compare_encodings(bridge, type_name: str, idno: int) -> int:
     # Both zero at the same index is the weakest possible evidence of agreement,
     # and on these objects it is most of it.
     signal = [i for i in same if a[i]]
-    print(f"\ndiffer: {len(pairs) - len(same)} of {len(pairs)} positions"
-          f"{'' if len(a) == len(b) else f'  (lengths {len(a)} vs {len(b)})'}")
-    print(f"  equal at {len(same)} positions, but only {len(signal)} of those "
-          f"are non-zero — agreement on zeros is not agreement")
+    print(
+        f"\ndiffer: {len(pairs) - len(same)} of {len(pairs)} positions"
+        f"{'' if len(a) == len(b) else f'  (lengths {len(a)} vs {len(b)})'}"
+    )
+    print(
+        f"  equal at {len(same)} positions, but only {len(signal)} of those "
+        f"are non-zero — agreement on zeros is not agreement"
+    )
     high = sum(1 for x in b if x & 0x80)
-    print(f"  high-bit bytes: Nibblized {sum(1 for x in a if x & 0x80)}, "
-          f"BitStream {high}")
+    print(f"  high-bit bytes: Nibblized {sum(1 for x in a if x & 0x80)}, BitStream {high}")
     return 0
 
 
 def _object_type(type_name: str):
     from k2000.definitions import ObjectType
+
     try:
         return getattr(ObjectType, type_name)
     except AttributeError as exc:
-        raise SystemExit(f"unknown object type {type_name!r}; try one of: "
-                         f"{', '.join(t.name for t in ObjectType)}") from exc
+        raise SystemExit(
+            f"unknown object type {type_name!r}; try one of: "
+            f"{', '.join(t.name for t in ObjectType)}"
+        ) from exc
 
 
-def read_object(bridge, type_name: str, idno: int, encoding_name: str,
-                offset: Optional[int] = None, size: Optional[int] = None) -> int:
+def read_object(
+    bridge,
+    type_name: str,
+    idno: int,
+    encoding_name: str,
+    offset: Optional[int] = None,
+    size: Optional[int] = None,
+) -> int:
     """Dump one object's raw bytes off the device.
 
     This is the fast path, and it is worth knowing it exists before reaching for
@@ -479,17 +507,18 @@ def read_object(bridge, type_name: str, idno: int, encoding_name: str,
     """
     if offset is not None or size is not None:
         try:
-            data = bridge.read_object_bytes(
-                _object_type(type_name), idno, offset or 0, size or 1)
+            data = bridge.read_object_bytes(_object_type(type_name), idno, offset or 0, size or 1)
         except Exception as exc:
-            print(f"no object {type_name} {idno} at offset {offset or 0}: "
-                 f"{type(exc).__name__}: {exc}")
+            print(
+                f"no object {type_name} {idno} at offset {offset or 0}: {type(exc).__name__}: {exc}"
+            )
             return 1
         print(f"{type_name} {idno}  offset {offset or 0}  {len(data)} bytes")
         print(hexdump(data, 64))
         return 0
 
     from k2000.definitions import EncodingFormat
+
     encoding = getattr(EncodingFormat, encoding_name)
     try:
         reply, ms = _read_raw(bridge, _object_type(type_name), idno, encoding)
@@ -497,8 +526,10 @@ def read_object(bridge, type_name: str, idno: int, encoding_name: str,
         print(f"no object {type_name} {idno}: {type(exc).__name__}: {exc}")
         return 1
     data = getattr(reply, "data", b"") or b""
-    print(f"{type_name} {idno}  {getattr(reply, 'name', '')!r}  "
-          f"{len(data)} bytes  {encoding.name}  ({ms:.0f} ms)")
+    print(
+        f"{type_name} {idno}  {getattr(reply, 'name', '')!r}  "
+        f"{len(data)} bytes  {encoding.name}  ({ms:.0f} ms)"
+    )
     print(hexdump(data, 64))
     return 0
 
@@ -530,8 +561,9 @@ def _boxed(lines) -> str:
 _PATCH_WARNING = _boxed(_PATCH_WARNING_LINES)
 
 
-def patch_object(bridge, type_name: str, idno: int, offset: int, hex_data: str,
-                 *, yes: bool = False) -> int:
+def patch_object(
+    bridge, type_name: str, idno: int, offset: int, hex_data: str, *, yes: bool = False
+) -> int:
     """Write bytes at `offset` within an existing object, then verify. WRITES.
 
     Thin CLI wrapper around `MidiBridge.patch_object_bytes`, which already
@@ -557,8 +589,7 @@ def patch_object(bridge, type_name: str, idno: int, offset: int, hex_data: str,
     try:
         before = bridge.read_object_bytes(obj_type, idno, offset, len(data))
     except Exception as exc:
-        print(f"no object {type_name} {idno} at offset {offset}: "
-             f"{type(exc).__name__}: {exc}")
+        print(f"no object {type_name} {idno} at offset {offset}: {type(exc).__name__}: {exc}")
         return 1
 
     print(f"{type_name} {idno}  offset {offset}  {len(data)} byte(s)")
@@ -578,6 +609,7 @@ def patch_object(bridge, type_name: str, idno: int, offset: int, hex_data: str,
             return 1
 
     from k2kremote.midi_bridge import PatchUnverified
+
     try:
         after = bridge.patch_object_bytes(obj_type, idno, offset, data)
     except PatchUnverified as exc:
@@ -602,8 +634,8 @@ def run_tui(bridge, type_name: str, bank: int) -> int:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="k2kmon",
-        description="Inspect K2000 SysEx. Passive unless you ask it to send.")
+        prog="k2kmon", description="Inspect K2000 SysEx. Passive unless you ask it to send."
+    )
     parser.add_argument("--port", help="exact MIDI port name")
     parser.add_argument("--rig", choices=("standard", "auto"), default="auto")
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -613,8 +645,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--seconds", type=float, help="stop after this long")
 
     p = sub.add_parser("learn", help="press panel buttons; it names them")
-    p.add_argument("--seconds", type=float, default=120.0,
-                   help="stop after this long (default 120)")
+    p.add_argument(
+        "--seconds", type=float, default=120.0, help="stop after this long (default 120)"
+    )
 
     p = sub.add_parser("ask", help="send one request and decode the reply")
     p.add_argument("request", choices=sorted(REQUESTS))
@@ -625,13 +658,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Nibblized by default because it is the form whose decoding was verified
     # against the manual's worked example first; both must agree, and `compare`
     # is what proves it on a given build.
-    p.add_argument("--encoding", choices=("Nibblized", "BitStream"),
-                   default="Nibblized",
-                   help="wire format (they differ; the dump header records it)")
-    p.add_argument("--offset", type=int, default=None,
-                   help="byte offset -- switches to DUMP for a partial read")
-    p.add_argument("--size", type=int, default=None,
-                   help="bytes to read from --offset (default 1)")
+    p.add_argument(
+        "--encoding",
+        choices=("Nibblized", "BitStream"),
+        default="Nibblized",
+        help="wire format (they differ; the dump header records it)",
+    )
+    p.add_argument(
+        "--offset",
+        type=int,
+        default=None,
+        help="byte offset -- switches to DUMP for a partial read",
+    )
+    p.add_argument("--size", type=int, default=None, help="bytes to read from --offset (default 1)")
 
     p = sub.add_parser("compare", help="read an object BOTH ways and diff them")
     p.add_argument("type", help="object type, e.g. Program")
@@ -642,8 +681,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("idno", type=int)
     p.add_argument("offset", type=int)
     p.add_argument("data", help="hex bytes to write, e.g. 28 or 2803")
-    p.add_argument("--yes", action="store_true",
-                   help="skip the typed confirmation")
+    p.add_argument("--yes", action="store_true", help="skip the typed confirmation")
 
     sub.add_parser("types", help="the message table; read before guessing")
 
@@ -666,13 +704,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         if args.mode == "learn":
             return learn(bridge, seconds=args.seconds)
         if args.mode == "read":
-            return read_object(bridge, args.type, args.idno, args.encoding,
-                              offset=args.offset, size=args.size)
+            return read_object(
+                bridge, args.type, args.idno, args.encoding, offset=args.offset, size=args.size
+            )
         if args.mode == "compare":
             return compare_encodings(bridge, args.type, args.idno)
         if args.mode == "patch":
-            return patch_object(bridge, args.type, args.idno, args.offset,
-                               args.data, yes=args.yes)
+            return patch_object(bridge, args.type, args.idno, args.offset, args.data, yes=args.yes)
         if args.mode == "tui":
             return run_tui(bridge, args.type, args.bank)
         return ask(bridge, args.request)

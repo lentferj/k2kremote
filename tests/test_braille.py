@@ -99,7 +99,7 @@ def test_halfblock_dimensions_and_aspect():
     frame[0:2, 0] = True  # top+bottom of one column -> full block
     assert braille.render_halfblock(frame).split("\n")[0][0] == "█"
     frame[:] = False
-    frame[0, 0] = True    # top pixel only -> upper half block
+    frame[0, 0] = True  # top pixel only -> upper half block
     assert braille.render_halfblock(frame).split("\n")[0][0] == "▀"
 
 

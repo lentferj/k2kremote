@@ -70,7 +70,7 @@ SCREEN_ROWS = 8
 #: `printf` conversions the firmware actually uses, and what each can match
 #: on screen. Ordered longest-first so `%3.3d` is tried before `%d`.
 _CONVERSIONS: Sequence[Tuple[str, str]] = (
-    (r"%\d+\.\d+s", r".*?"),      # %12.12s -- a padded name
+    (r"%\d+\.\d+s", r".*?"),  # %12.12s -- a padded name
     (r"%\d+\.\d+ld", r"\s*-?\d+"),
     (r"%\d+\.\d+d", r"\s*-?\d+"),
     (r"%\d*ld", r"\s*-?\d+"),
@@ -128,8 +128,9 @@ def _to_pattern(text: str) -> Tuple[re.Pattern, bool]:
     return re.compile("".join(out) + r"\s*$"), is_format
 
 
-def extract(image: "os.PathLike | str", *, base: int = 0x100000,
-            min_len: int = 3, data_from: int = 0x188000) -> List[Message]:
+def extract(
+    image: "os.PathLike | str", *, base: int = 0x100000, min_len: int = 3, data_from: int = 0x188000
+) -> List[Message]:
     """Read the displayable strings out of a K2000 OS ROM image.
 
     `base` is where the image maps (0x100000 on v3.87J, so a ROM address is
@@ -178,14 +179,12 @@ def identify(line: str, table: Sequence[Message]) -> Optional[Match]:
     return None if best is None else best[1]
 
 
-def identify_screen(rows: Sequence[str],
-                    table: Sequence[Message]) -> List[Optional[Match]]:
+def identify_screen(rows: Sequence[str], table: Sequence[Message]) -> List[Optional[Match]]:
     """`identify` for a whole mirrored frame -- one result per row."""
     return [identify(row, table) for row in rows[:SCREEN_ROWS]]
 
 
-def unmatched(rows: Sequence[str],
-              table: Sequence[Message]) -> List[Tuple[int, str]]:
+def unmatched(rows: Sequence[str], table: Sequence[Message]) -> List[Tuple[int, str]]:
     """Screen rows that no ROM string accounts for -- `(row index, text)`.
 
     The mirror is a free, continuous check on the catalogue, and it runs in
@@ -208,8 +207,11 @@ def unmatched(rows: Sequence[str],
     Neither is an error. The point is that the set shrinks as the machine is
     used, and what is left is evidence rather than a guess.
     """
-    return [(i, row.rstrip()) for i, row in enumerate(rows[:SCREEN_ROWS])
-            if row.strip() and identify(row, table) is None]
+    return [
+        (i, row.rstrip())
+        for i, row in enumerate(rows[:SCREEN_ROWS])
+        if row.strip() and identify(row, table) is None
+    ]
 
 
 class ScreenState(enum.Enum):

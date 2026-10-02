@@ -66,7 +66,7 @@ _QUADRANTS = " ▗▖▄▝▐▞▟▘▚▌▙▀▜▛█"
 # Half-block alternative: 1 px wide x 2 px tall per cell -> a 240x32 mirror.
 # Solid blocks AND the correct wide 3.75:1 aspect (matches the hardware LCD);
 # needs a 240-column terminal. Indexed by (top<<1 | bottom).
-HALF_COLS = SCREEN_W       # 240
+HALF_COLS = SCREEN_W  # 240
 HALF_ROWS = SCREEN_H // 2  # 32
 _HALFBLOCKS = " ▄▀█"
 
@@ -130,7 +130,7 @@ def _composite(pixels: PixelInput, text_rows: Sequence[str]) -> np.ndarray:
     try:
         from k2000.image import generate_image, WHITE
 
-        rows = [(row or "")[:SCREEN_W // 6] for row in list(text_rows)[:SCREEN_H // 8]]
+        rows = [(row or "")[: SCREEN_W // 6] for row in list(text_rows)[: SCREEN_H // 8]]
         image = generate_image(np.asarray(pixels), rows)
         rgb = np.asarray(image)  # (64, 240, 3); lit pixels are WHITE
         return _fit(np.all(rgb[..., :3] == np.array(WHITE[:3]), axis=-1))
@@ -138,8 +138,7 @@ def _composite(pixels: PixelInput, text_rows: Sequence[str]) -> np.ndarray:
         return _fit(_normalize(pixels))
 
 
-def to_codes(pixels: PixelInput,
-             text_rows: Optional[Sequence[str]] = None) -> np.ndarray:
+def to_codes(pixels: PixelInput, text_rows: Optional[Sequence[str]] = None) -> np.ndarray:
     """Return the ``(16, 120)`` braille code points for a buffer.
 
     If ``text_rows`` is given, the text plane is composited on first so the
@@ -157,23 +156,20 @@ def to_codes(pixels: PixelInput,
     return codes + BRAILLE_BASE
 
 
-def render(pixels: PixelInput,
-           text_rows: Optional[Sequence[str]] = None) -> str:
+def render(pixels: PixelInput, text_rows: Optional[Sequence[str]] = None) -> str:
     """Render a 240x64 buffer as a 120x16 braille string (text plane composited
     in when ``text_rows`` is supplied)."""
     codes = to_codes(pixels, text_rows)
     return "\n".join("".join(chr(c) for c in row) for row in codes)
 
 
-def render_lines(pixels: PixelInput,
-                 text_rows: Optional[Sequence[str]] = None) -> List[str]:
+def render_lines(pixels: PixelInput, text_rows: Optional[Sequence[str]] = None) -> List[str]:
     """Like :func:`render` but return the 16 rows as a list of strings."""
     codes = to_codes(pixels, text_rows)
     return ["".join(chr(c) for c in row) for row in codes]
 
 
-def render_quadrant(pixels: PixelInput,
-                    text_rows: Optional[Sequence[str]] = None) -> str:
+def render_quadrant(pixels: PixelInput, text_rows: Optional[Sequence[str]] = None) -> str:
     """Render a 240x64 buffer as a 120x32 **quadrant-block** string.
 
     Solid 2x2 cells (no braille dot-gaps), so it reads cleaner — at the cost of
@@ -181,13 +177,11 @@ def render_quadrant(pixels: PixelInput,
     """
     arr = _composite(pixels, text_rows) if text_rows else _fit(_normalize(pixels))
     cells = arr.reshape(QUAD_ROWS, 2, QUAD_COLS, 2).astype(int)
-    idx = (cells[:, 0, :, 0] * 8 + cells[:, 0, :, 1] * 4
-           + cells[:, 1, :, 0] * 2 + cells[:, 1, :, 1])
+    idx = cells[:, 0, :, 0] * 8 + cells[:, 0, :, 1] * 4 + cells[:, 1, :, 0] * 2 + cells[:, 1, :, 1]
     return "\n".join("".join(_QUADRANTS[i] for i in row) for row in idx)
 
 
-def render_halfblock(pixels: PixelInput,
-                     text_rows: Optional[Sequence[str]] = None) -> str:
+def render_halfblock(pixels: PixelInput, text_rows: Optional[Sequence[str]] = None) -> str:
     """Render a 240x64 buffer as a 240x32 **half-block** string.
 
     Solid cells like quadrant, but 1 px wide each, so the mirror keeps the

@@ -62,14 +62,17 @@ def test_ok_is_never_among_the_labels_this_module_presses():
     import inspect
 
     source = inspect.getsource(disk_browse)
-    pressed = {line.split('"')[1]
-               for line in source.splitlines()
-               if "_press(bridge, " in line and '"' in line}
+    pressed = {
+        line.split('"')[1]
+        for line in source.splitlines()
+        if "_press(bridge, " in line and '"' in line
+    }
     assert pressed <= {"Load", "Open", "Parent", "Root"}, pressed
     assert "OK" not in pressed
 
 
 # --- positioning -------------------------------------------------------------
+
 
 class _WheelBridge:
     """Tracks a selection the way the K2000 does: clamped, never wrapping."""
@@ -85,8 +88,16 @@ class _WheelBridge:
         self.index = max(0, min(len(self.names) - 1, self.index + clicks))
 
     def get_screen_text(self):
-        rows = ["Dir:\\", "", "", f"    File to load:{self.names[self.index]}",
-                "", "", "Total: 1K", "Select  Root  Parent  Open   OK   Cancel"]
+        rows = [
+            "Dir:\\",
+            "",
+            "",
+            f"    File to load:{self.names[self.index]}",
+            "",
+            "",
+            "Total: 1K",
+            "Select  Root  Parent  Open   OK   Cancel",
+        ]
         return "\n".join(rows)
 
     def press_button(self, button):
@@ -99,7 +110,7 @@ def test_select_index_reaches_an_entry_ABOVE_the_cursor():
     never reach anything above it, and opening any directory but the last did
     nothing at all."""
     names = [f"DIR{i:02d}" for i in range(25)]
-    bridge = _WheelBridge(names, index=24)      # parked at the bottom
+    bridge = _WheelBridge(names, index=24)  # parked at the bottom
     got = disk_browse.select_index(bridge, 7, len(names))
     assert got == "DIR07"
     assert bridge.index == 7
@@ -131,6 +142,7 @@ def test_enter_refuses_when_the_device_shows_a_different_entry():
 
 # --- backing out of a dialog -------------------------------------------------
 
+
 class _PanelBridge:
     """Replays a sequence of screens, advancing when a soft key is pressed."""
 
@@ -147,11 +159,26 @@ class _PanelBridge:
             self.screens.pop(0)
 
 
-DIALOG = ["Dir:\\-GRANDPI\\    Sel:0/9    Index:   9", "", "",
-          "  File to rename:STWAYDSO .KRZ", "", "", "Total: 1K",
-          "        Root  Parent  Open   OK   Cancel"]
-DISKPAGE = ["DiskMode    Samples:1138K   Memory:414K", "Path = \\", "", "", "",
-            "", "", "<more   Load   Save  Macro  Delete more>"]
+DIALOG = [
+    "Dir:\\-GRANDPI\\    Sel:0/9    Index:   9",
+    "",
+    "",
+    "  File to rename:STWAYDSO .KRZ",
+    "",
+    "",
+    "Total: 1K",
+    "        Root  Parent  Open   OK   Cancel",
+]
+DISKPAGE = [
+    "DiskMode    Samples:1138K   Memory:414K",
+    "Path = \\",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "<more   Load   Save  Macro  Delete more>",
+]
 
 
 def test_ensure_disk_mode_cancels_out_of_a_dialog():
@@ -177,8 +204,16 @@ def test_ensure_disk_mode_never_answers_a_question():
     abandon, so only those are pressed."""
     from k2000.definitions import Button
 
-    confirm = ["", "", "", "Are you sure you want to delete", "the selected file?",
-               "", "", "                             Yes    No "]
+    confirm = [
+        "",
+        "",
+        "",
+        "Are you sure you want to delete",
+        "the selected file?",
+        "",
+        "",
+        "                             Yes    No ",
+    ]
     bridge = _PanelBridge([confirm, DISKPAGE])
     disk_browse.ensure_disk_mode(bridge)
     # No Cancel on that row, so it must fall back to Exit rather than pick Yes/No.
@@ -187,9 +222,20 @@ def test_ensure_disk_mode_never_answers_a_question():
 
 def test_counts_reads_the_instruments_own_totals():
     """The header reports how many entries there are, so nothing has to infer it."""
-    bridge = _PanelBridge([["Dir:\\      Sel:0/25   Index:  25", "", "", "",
-                            "", "", "Total: 1K",
-                            "        Root  Parent  Open   OK   Cancel"]])
+    bridge = _PanelBridge(
+        [
+            [
+                "Dir:\\      Sel:0/25   Index:  25",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Total: 1K",
+                "        Root  Parent  Open   OK   Cancel",
+            ]
+        ]
+    )
     assert disk_browse.counts(bridge) == (25, 25)
 
 
@@ -199,6 +245,7 @@ def test_counts_survives_a_screen_without_them():
 
 
 # --- path composition (the truncated-header bug) -----------------------------
+
 
 def test_descend_composes_from_the_name_alone():
     """`\\-BAESSE\\-SLAP\\` measured coming back from the K2000's own header as
@@ -262,6 +309,7 @@ def test_the_screen_never_reads_the_composed_path_back_off_the_device():
 
 # --- disk_page_path / reset_to_root ------------------------------------------
 
+
 def test_disk_page_path_reads_the_disk_pages_own_row():
     bridge = _PanelBridge([DISKPAGE])
     assert disk_browse.disk_page_path(bridge) == "\\"
@@ -278,8 +326,16 @@ def test_reset_to_root_only_ever_presses_root_and_cancel():
     """No OK, ever: this must be indistinguishable from a no-op on disk."""
     from k2000.definitions import Button
 
-    root_browser = ["Dir:\\-BAESSE\\-SLAP\\  Sel:0/6  Index:1", "", "", "", "",
-                    "", "Total: 1K", "        Root  Parent  Open   OK   Cancel"]
+    root_browser = [
+        "Dir:\\-BAESSE\\-SLAP\\  Sel:0/6  Index:1",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "Total: 1K",
+        "        Root  Parent  Open   OK   Cancel",
+    ]
     bridge = _PanelBridge([DISKPAGE, root_browser, DISKPAGE])
     disk_browse.reset_to_root(bridge)
     assert Button.SoftE not in bridge.presses, "OK must never be pressed"
@@ -337,4 +393,4 @@ def test_a_full_listing_is_marked_complete():
 
     assert len(items) == 3
     assert items.complete is True
-    assert list(i.name for i in items) == names   # still an ordinary list
+    assert list(i.name for i in items) == names  # still an ordinary list

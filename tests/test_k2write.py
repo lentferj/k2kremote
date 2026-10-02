@@ -19,7 +19,7 @@ from k2kmaced.k2write import (
 from test_k2image import build_image  # tests/ is on sys.path under pytest
 
 TREE = {
-    "": {"BOOT.MAC": b"original boot macro", "OTHER.KRZ": b"\xAA" * 4096},
+    "": {"BOOT.MAC": b"original boot macro", "OTHER.KRZ": b"\xaa" * 4096},
     "SUBDIR": {"NESTED.KRZ": b"nested original"},
 }
 
@@ -33,7 +33,7 @@ def test_replaces_the_file_and_leaves_the_others_alone(image):
     replace_file_in_image(image, "\\BOOT.MAC", b"new macro contents")
     with DiskImage.open(image) as img:
         assert img.read_file("\\BOOT.MAC") == b"new macro contents"
-        assert img.read_file("\\OTHER.KRZ") == b"\xAA" * 4096
+        assert img.read_file("\\OTHER.KRZ") == b"\xaa" * 4096
         assert img.read_file("\\SUBDIR\\NESTED.KRZ") == b"nested original"
 
 
@@ -42,7 +42,7 @@ def test_updates_the_size_field_so_a_shorter_file_reads_short(image):
     with DiskImage.open(image) as img:
         entry = img.stat("\\BOOT.MAC")
         assert entry.size == 4
-        assert img.read_file("\\BOOT.MAC") == b"tiny"   # no trailing rubbish
+        assert img.read_file("\\BOOT.MAC") == b"tiny"  # no trailing rubbish
 
 
 def test_works_on_a_file_in_a_subdirectory(image):
@@ -59,15 +59,15 @@ def test_never_writes_to_the_fat(image):
     with DiskImage.open(image) as img:
         fat_start = img.reserved_sectors * img.bytes_per_sector
         fat_len = img.num_fats * img.fat_sectors * img.bytes_per_sector
-    before = open(image, "rb").read()[fat_start:fat_start + fat_len]
+    before = open(image, "rb").read()[fat_start : fat_start + fat_len]
     replace_file_in_image(image, "\\BOOT.MAC", b"x" * 100)
-    after = open(image, "rb").read()[fat_start:fat_start + fat_len]
+    after = open(image, "rb").read()[fat_start : fat_start + fat_len]
     assert before == after
 
 
 def test_refuses_to_grow_beyond_the_clusters_the_file_owns(image):
     with DiskImage.open(image) as img:
-        capacity = img.cluster_size          # BOOT.MAC owns exactly one cluster
+        capacity = img.cluster_size  # BOOT.MAC owns exactly one cluster
     with pytest.raises(ImageWriteError, match="will not fit"):
         replace_file_in_image(image, "\\BOOT.MAC", b"z" * (capacity + 1))
     # and the original is still intact after the refusal
@@ -109,7 +109,7 @@ def test_plan_describes_the_write_without_performing_it(image):
     assert plan["new_size"] == 300
     assert len(plan["clusters"]) == 1
     assert plan["slack"] == plan["capacity"] - 300
-    with DiskImage.open(image) as img:      # nothing changed
+    with DiskImage.open(image) as img:  # nothing changed
         assert img.read_file("\\BOOT.MAC") == b"original boot macro"
 
 

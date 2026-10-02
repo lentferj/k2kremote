@@ -47,8 +47,16 @@ class FakeBridge:
         self.presses.append(button)
 
 
-DISK = ["DiskMode    Samples:1349K   Memory:414K", "Path = \\", "", "", "", "",
-        "", "<more   Load   Save  Macro  Delete more>"]
+DISK = [
+    "DiskMode    Samples:1349K   Memory:414K",
+    "Path = \\",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "<more   Load   Save  Macro  Delete more>",
+]
 
 
 def test_refuses_a_name_that_is_not_an_8_3_stem():
@@ -128,8 +136,16 @@ class ReplayBridge(FakeBridge):
         return "\n".join(rows)
 
 
-REPLACE = ["", "", "", "Replace existing file BOOT.MAC?", "", "", "",
-           "                             Yes    No "]
+REPLACE = [
+    "",
+    "",
+    "",
+    "Replace existing file BOOT.MAC?",
+    "",
+    "",
+    "",
+    "                             Yes    No ",
+]
 
 
 def test_yes_and_no_are_distinguished_on_the_replace_prompt():
@@ -180,8 +196,7 @@ def test_an_extension_is_refused_with_the_stem_to_use():
     assert "adds .MAC itself" in str(exc.value) and "'BOOT'" in str(exc.value)
 
 
-DIALOG = ["Save Macro", "", "", "", "", "", "",
-          "                       Cancel    OK  "]
+DIALOG = ["Save Macro", "", "", "", "", "", "", "                       Cancel    OK  "]
 
 
 class _ModalBridge(FakeBridge):

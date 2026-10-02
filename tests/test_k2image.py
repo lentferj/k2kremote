@@ -37,12 +37,7 @@ def _dirent(name: str, attr: int, cluster: int, size: int) -> bytes:
     else:
         stem, _, ext = name.partition(".")
         short = stem.upper().ljust(8)[:8] + ext.upper().ljust(3)[:3]
-    return (
-        short.encode("ascii")
-        + bytes([attr])
-        + bytes(14)
-        + struct.pack("<HI", cluster, size)
-    )
+    return short.encode("ascii") + bytes([attr]) + bytes(14) + struct.pack("<HI", cluster, size)
 
 
 def build_image(path: Path, tree: dict) -> Path:
@@ -65,9 +60,7 @@ def build_image(path: Path, tree: dict) -> Path:
             offset = (DATA_SECTOR + (clus - 2) * SPC) * BPS
             chunk = payload[i * BPS * SPC : (i + 1) * BPS * SPC]
             image[offset : offset + len(chunk)] = chunk
-            struct.pack_into(
-                "<H", fat, clus * 2, 0xFFFF if i == needed - 1 else clus + 1
-            )
+            struct.pack_into("<H", fat, clus * 2, 0xFFFF if i == needed - 1 else clus + 1)
         next_cluster += needed
         return first
 
@@ -97,8 +90,23 @@ def build_image(path: Path, tree: dict) -> Path:
     boot = bytearray(BPS)
     boot[0:3] = b"\xeb\x34\x90"
     boot[3:11] = b"KMSI    "
-    struct.pack_into("<HBHBHHBHHHII", boot, 0x0B, BPS, SPC, RESERVED, NFATS,
-                     ROOT_ENTRIES, 0, 0xF8, FAT_SECTORS, 0, 0, 0, TOTAL_SECTORS)
+    struct.pack_into(
+        "<HBHBHHBHHHII",
+        boot,
+        0x0B,
+        BPS,
+        SPC,
+        RESERVED,
+        NFATS,
+        ROOT_ENTRIES,
+        0,
+        0xF8,
+        FAT_SECTORS,
+        0,
+        0,
+        0,
+        TOTAL_SECTORS,
+    )
     image[0:BPS] = boot
 
     path.write_bytes(bytes(image))
@@ -125,9 +133,7 @@ def test_reads_the_boot_sector_geometry(image):
 
 def test_lists_the_root_directory(image):
     with DiskImage.open(image) as img:
-        assert sorted(e.path for e in img.listdir()) == [
-            "\\--FAVS", "\\BOOT.MAC", "\\NULL.KRZ"
-        ]
+        assert sorted(e.path for e in img.listdir()) == ["\\--FAVS", "\\BOOT.MAC", "\\NULL.KRZ"]
 
 
 def test_walks_into_subdirectories(image):
@@ -200,8 +206,9 @@ def test_cluster_loop_is_detected(image):
             img.read_file("\\--FAVS\\KPOWFAV.KRZ")
 
 
-@pytest.mark.skipif(not mpc2emu_link.available(),
-                    reason="the sibling mpc2emu checkout is not available")
+@pytest.mark.skipif(
+    not mpc2emu_link.available(), reason="the sibling mpc2emu checkout is not available"
+)
 def test_reads_an_image_written_by_mpc2emu(tmp_path):
     """Cross-check against mpc2emu's own K2000 pseudo-DOS FAT16 writer."""
     payload = (Path(__file__).parent / "fixtures" / "BOOT.MAC").read_bytes()
@@ -209,9 +216,7 @@ def test_reads_an_image_written_by_mpc2emu(tmp_path):
     source.write_bytes(payload)
     path = tmp_path / "mpc2emu.img"
 
-    volume = mpc2emu_link.format_new(
-        str(path), 8, oem=b"KMSI    ", partition=False, spc=1
-    )
+    volume = mpc2emu_link.format_new(str(path), 8, oem=b"KMSI    ", partition=False, spc=1)
     folder = volume.makedir("--FAVS")
     volume.add_file(str(source), "BOOT.MAC")
     volume.add_file(str(source), "KPOWFAV.KRZ", folder_cluster=folder)
@@ -236,8 +241,7 @@ def test_lzo_images_are_decompressed_once_and_reused(tmp_path, monkeypatch):
     from k2kmaced.k2image import _LZO_CACHE
 
     raw = build_image(tmp_path / "vol.img", {"": {"BOOT.MAC": b"x" * 40}})
-    subprocess.run(["lzop", "-q", "-o", str(tmp_path / "vol.img.lzo"), str(raw)],
-                   check=True)
+    subprocess.run(["lzop", "-q", "-o", str(tmp_path / "vol.img.lzo"), str(raw)], check=True)
     lzo = str(tmp_path / "vol.img.lzo")
 
     _LZO_CACHE.clear(force=True)

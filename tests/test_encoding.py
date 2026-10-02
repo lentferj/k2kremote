@@ -33,8 +33,7 @@ def test_the_two_forms_are_the_same_data():
     Both forms must decode to identical bytes; a difference is a bug here and can
     never be a fact about the protocol. Ours *did* differ for a while, and the
     difference was briefly mistaken for one."""
-    assert (decode_data_field(NIBBLE, 4, len(DATA))
-            == decode_data_field(BITSTREAM, 7, len(DATA)))
+    assert decode_data_field(NIBBLE, 4, len(DATA)) == decode_data_field(BITSTREAM, 7, len(DATA))
 
 
 def test_data_field_is_left_aligned_not_right():

@@ -10,6 +10,7 @@ strip().rstrip(":") leaves "Depth ", "Src1  " and goto_field() can never match
 the plain field name. Found 2026-08-31 chasing a silent goto_field(bridge,
 'Depth') failure live on hardware; see RESOLUTION_NOTES.md.
 """
+
 import pathlib
 import sys
 from types import SimpleNamespace

@@ -180,12 +180,14 @@ def test_submit_runs_a_plan_in_order_and_drops_zero_wheels():
     worker.start()
     try:
         _drain_startup(bridge)
-        worker.submit([
-            ("wheel", 5),
-            ("wheel", 0),  # dropped
-            ("press", Button.CursorRight),
-            ("wheel", -3),
-        ])
+        worker.submit(
+            [
+                ("wheel", 5),
+                ("wheel", 0),  # dropped
+                ("press", Button.CursorRight),
+                ("wheel", -3),
+            ]
+        )
         assert _wait_for(bridge, "graphics")  # settle refresh after the plan
         kinds = bridge.kinds()
         # Order kept, zero-wheel dropped — and the two wheel turns stay separate
@@ -353,8 +355,12 @@ def test_connection_recovery_transitions():
     bridge = Flaky()
     states = []
     worker = RefreshWorker(
-        bridge, on_frame=lambda f: None, on_connection=states.append,
-        heartbeat=0.05, mirror_panel=False, disconnect_grace=0.05,
+        bridge,
+        on_frame=lambda f: None,
+        on_connection=states.append,
+        heartbeat=0.05,
+        mirror_panel=False,
+        disconnect_grace=0.05,
     )
     worker.start()
     try:
@@ -401,8 +407,8 @@ def test_lookup_and_rename_program_repaints_and_refreshes():
         assert bridge.refreshed.wait(2.0)
 
         kinds = bridge.kinds()
-        assert "rename" in kinds        # the SysEx CHANGE
-        assert "reselect" in kinds      # Program repaint (re-enter the id)
+        assert "rename" in kinds  # the SysEx CHANGE
+        assert "reselect" in kinds  # Program repaint (re-enter the id)
         assert kinds.count("graphics") + kinds.count("text") > 0  # follow-up refresh
     finally:
         worker.stop()
@@ -459,17 +465,18 @@ def test_is_destructive_screen_flags_only_the_confirm_prompt():
     # LIVE (not flagged) — freezing them just forces a Ctrl+r per line while you
     # navigate the ~12-line range list.
     assert not is_destructive_screen(
-        ["Delete Selection:", "200...299|300...399|...|Everything", "", "OK  Cancel"])
+        ["Delete Selection:", "200...299|300...399|...|Everything", "", "OK  Cancel"]
+    )
     assert not is_destructive_screen(["Func:DELETE      Sel:4/4", "Select Next OK Cancel"])
-    assert not is_destructive_screen(["Select database function:",
-                                      "Move Copy Name Delete Dump Done"])
+    assert not is_destructive_screen(
+        ["Select database function:", "Move Copy Name Delete Dump Done"]
+    )
     # OK/Cancel is the *accept* button on ordinary dialogs — deliberately NOT a
     # trigger (it appears on the safe selection screen above).
     assert not is_destructive_screen(["Overwrite 201?"] + [""] * 6 + ["OK    Cancel"])
     # The name-edit dialog's six-label row (with its per-char Delete button) and a
     # plain screen are not flagged.
-    assert not is_destructive_screen(
-        ["Name: MYSOUND", "Delete Insert <<< >>> OK Cancel"])
+    assert not is_destructive_screen(["Name: MYSOUND", "Delete Insert <<< >>> OK Cancel"])
     assert not is_destructive_screen(["", "A B C D E F"])
 
 
@@ -504,8 +511,8 @@ def test_destructive_screen_auto_pauses_then_resumes_on_force_refresh():
         # Auto-paused: no reads at all, even with a fast heartbeat and a panel event.
         with bridge.lock:
             bridge.calls.clear()
-        bridge.queue_panel()        # a front-panel echo is ignored while auto-paused
-        worker.request_refresh()    # so is an ordinary refresh request
+        bridge.queue_panel()  # a front-panel echo is ignored while auto-paused
+        worker.request_refresh()  # so is an ordinary refresh request
         time.sleep(0.3)
         assert bridge.kinds().count("graphics") == 0
         # Leave the screen and force a refresh (Ctrl+r) — it reads, clears danger,
@@ -537,7 +544,7 @@ def test_force_refresh_reads_while_auto_paused_but_request_refresh_does_not():
     worker = _worker(bridge, frames, heartbeat=100.0, mirror_panel=False)
     worker.start()
     try:
-        _drain_startup(bridge)      # startup read set danger
+        _drain_startup(bridge)  # startup read set danger
         assert worker.danger
         # An ordinary refresh request is ignored while auto-paused.
         bridge.refreshed.clear()
@@ -599,7 +606,7 @@ def test_device_op_runs_on_worker_thread_even_while_paused():
         result, error = results[0]
         assert error is None
         assert result[0] == "ran"
-        assert result[1] is bridge   # fn is handed the worker's own bridge
+        assert result[1] is bridge  # fn is handed the worker's own bridge
     finally:
         worker.stop()
         worker.join(timeout=1.0)
@@ -641,6 +648,7 @@ def test_device_op_reports_errors_without_killing_the_worker():
 # not have: a heartbeat that finds it unchanged buys no 2561-byte GETGRAPHICS
 # and repaints nothing. See the refresh module docstring.
 
+
 def test_quiet_heartbeat_stops_at_the_cheap_text_read():
     bridge = FakeBridge()
     frames = []
@@ -650,9 +658,9 @@ def test_quiet_heartbeat_stops_at_the_cheap_text_read():
         assert _wait_for(bridge, "graphics")  # the startup read buys both planes
         _drain_startup(bridge)
         frames.clear()
-        assert _wait_for(bridge, "text", count=4)   # the heartbeat keeps polling
+        assert _wait_for(bridge, "text", count=4)  # the heartbeat keeps polling
         assert bridge.kinds().count("graphics") == 0  # ...but only the cheap half
-        assert frames == []                           # and the UI is left alone
+        assert frames == []  # and the UI is left alone
     finally:
         worker.stop()
         worker.join(timeout=1.0)
@@ -677,6 +685,7 @@ def test_changed_text_buys_the_pixel_plane_again():
 
 def test_reverse_video_change_alone_counts_as_a_change():
     """The cursor moving inverts a cell without altering any character."""
+
     class Attrs(FakeBridge):
         reverse = ["0" * 40] * 8
 
@@ -696,7 +705,7 @@ def test_reverse_video_change_alone_counts_as_a_change():
         _drain_startup(bridge)
         assert _wait_for(bridge, "text", count=3)
         assert bridge.kinds().count("graphics") == 0  # quiet: no pixel read
-        bridge.reverse = ["1" + "0" * 39] * 8         # only the mask moved
+        bridge.reverse = ["1" + "0" * 39] * 8  # only the mask moved
         assert _wait_for(bridge, "graphics")
     finally:
         worker.stop()
@@ -706,8 +715,7 @@ def test_reverse_video_change_alone_counts_as_a_change():
 def test_pixel_plane_is_reread_once_it_goes_stale():
     """A graphics-only change is invisible to the text compare, so bound the age."""
     bridge = FakeBridge()
-    worker = _worker(bridge, [], heartbeat=0.05, graphics_max_age=0.3,
-                     mirror_panel=False)
+    worker = _worker(bridge, [], heartbeat=0.05, graphics_max_age=0.3, mirror_panel=False)
     worker.start()
     try:
         assert _wait_for(bridge, "graphics")
@@ -740,8 +748,9 @@ def test_explicit_refresh_always_reads_both_planes():
 
 def test_settle_takes_a_second_look_before_paying_for_pixels():
     bridge = FakeBridge()
-    worker = _worker(bridge, [], settle=0.05, settle_retry=0.05, heartbeat=100.0,
-                     mirror_panel=False)
+    worker = _worker(
+        bridge, [], settle=0.05, settle_retry=0.05, heartbeat=100.0, mirror_panel=False
+    )
     worker.start()
     try:
         assert _wait_for(bridge, "graphics")
@@ -787,11 +796,16 @@ def test_a_plan_is_never_merged_or_split_by_a_keystroke():
     worker.start()
     try:
         deadline = time.time() + 2.0
-        while len([c for c in bridge.calls if c[0] in ("wheel", "press")]) < 4 \
-                and time.time() < deadline:
+        while (
+            len([c for c in bridge.calls if c[0] in ("wheel", "press")]) < 4
+            and time.time() < deadline
+        ):
             time.sleep(0.01)
         assert [c for c in bridge.calls if c[0] in ("wheel", "press")] == [
-            ("wheel", 1), ("wheel", 1), ("press", Button.Number2), ("wheel", 9),
+            ("wheel", 1),
+            ("wheel", 1),
+            ("press", Button.Number2),
+            ("wheel", 9),
         ]
     finally:
         worker.stop()
@@ -799,6 +813,7 @@ def test_a_plan_is_never_merged_or_split_by_a_keystroke():
 
 
 # --- "the device is busy" is not "the device is gone" -----------------------
+
 
 def test_is_busy_screen_only_matches_seen_wording():
     from k2kremote.refresh import is_busy_screen, is_destructive_screen
@@ -821,7 +836,7 @@ def test_busy_screen_skips_the_pixel_read():
     try:
         assert _wait_for(bridge, "text", count=3)
         assert bridge.kinds().count("graphics") == 0
-        assert worker.danger is False          # busy is not a destructive hold
+        assert worker.danger is False  # busy is not a destructive hold
         # ...and once the operation finishes, normal service resumes.
         bridge.screen_text = "\n".join([""] * 7 + ["A B C D E F"])
         assert _wait_for(bridge, "graphics")
@@ -832,6 +847,7 @@ def test_busy_screen_skips_the_pixel_read():
 
 def test_busy_screen_does_not_report_a_disconnection():
     """The reported symptom: a front-panel load made the mirror cry disconnect."""
+
     class Busy(FakeBridge):
         fail = False
 
@@ -844,14 +860,19 @@ def test_busy_screen_does_not_report_a_disconnection():
     bridge = Busy()
     bridge.screen_text = "\n".join(["Reading file"] + [""] * 7)
     states = []
-    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
-                           on_connection=states.append, heartbeat=0.05,
-                           mirror_panel=False)
+    worker = RefreshWorker(
+        bridge,
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_connection=states.append,
+        heartbeat=0.05,
+        mirror_panel=False,
+    )
     worker.start()
     try:
         assert _wait_for(bridge, "text", count=2)
-        assert states == [True]                 # connected on the first good read
-        bridge.fail = True                      # now it stops answering, mid-load
+        assert states == [True]  # connected on the first good read
+        bridge.fail = True  # now it stops answering, mid-load
         time.sleep(0.4)
         assert states == [True], "a busy device must not read as disconnected"
     finally:
@@ -861,14 +882,21 @@ def test_busy_screen_does_not_report_a_disconnection():
 
 def test_a_genuinely_absent_device_still_reports_disconnection():
     """The softening must not swallow a real disconnection on an ordinary screen."""
+
     class Gone(FakeBridge):
         def get_screen_text(self):
             raise TimeoutError("nothing there")
 
     states = []
-    worker = RefreshWorker(Gone(), on_frame=lambda f: None, on_error=lambda e: None,
-                           on_connection=states.append, heartbeat=0.05,
-                           mirror_panel=False, disconnect_grace=0.05)
+    worker = RefreshWorker(
+        Gone(),
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_connection=states.append,
+        heartbeat=0.05,
+        mirror_panel=False,
+        disconnect_grace=0.05,
+    )
     worker.start()
     try:
         deadline = time.time() + 2.0
@@ -882,6 +910,7 @@ def test_a_genuinely_absent_device_still_reports_disconnection():
 
 # --- progress screens name what they are working on -------------------------
 
+
 def test_progress_markers_match_the_variable_tail():
     """The K2000 writes "Deleting <the thing>" / "Please wait ...", so these are
     substring matches, never equality. Confirmed live 2026-08-16."""
@@ -892,8 +921,12 @@ def test_progress_markers_match_the_variable_tail():
 
     for line in ("Deleting Program 200", "Deleting SYNTHETICA 2", "Deleting ..."):
         assert is_destructive_screen(screen(line)), line
-    for line in ("Please wait ...", "Please wait - Loading BOOT.MAC",
-                 "Opening file FAVS/AFRICA", "Reading file BASS.KRZ"):
+    for line in (
+        "Please wait ...",
+        "Please wait - Loading BOOT.MAC",
+        "Opening file FAVS/AFRICA",
+        "Reading file BASS.KRZ",
+    ):
         assert is_busy_screen(screen(line)), line
 
     # A rewrite in progress is the §9 lock-up state: a hold, not merely busy.
@@ -909,6 +942,7 @@ def test_a_brief_silence_is_not_a_disconnection():
     still reported disconnections. Elapsed time needs no cooperation from a
     device that has stopped talking.
     """
+
     class Intermittent(FakeBridge):
         silent = False
 
@@ -919,9 +953,15 @@ def test_a_brief_silence_is_not_a_disconnection():
 
     bridge = Intermittent()
     states = []
-    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
-                           on_connection=states.append, heartbeat=0.02,
-                           mirror_panel=False, disconnect_grace=1.0)
+    worker = RefreshWorker(
+        bridge,
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_connection=states.append,
+        heartbeat=0.02,
+        mirror_panel=False,
+        disconnect_grace=1.0,
+    )
     worker.start()
     try:
         assert _wait_for(bridge, "text")
@@ -929,10 +969,10 @@ def test_a_brief_silence_is_not_a_disconnection():
         while states != [True] and time.time() < deadline:
             time.sleep(0.01)
         assert states == [True]
-        bridge.silent = True          # a disk op starts; no screen ever read
-        time.sleep(0.4)               # well inside the grace window
+        bridge.silent = True  # a disk op starts; no screen ever read
+        time.sleep(0.4)  # well inside the grace window
         assert states == [True], "a brief silence must not read as disconnected"
-        bridge.silent = False         # the operation finishes
+        bridge.silent = False  # the operation finishes
         time.sleep(0.2)
         assert states == [True], "and no flap on the way back"
     finally:
@@ -946,9 +986,15 @@ def test_silence_past_the_grace_window_is_a_disconnection():
             raise TimeoutError("nothing there")
 
     states = []
-    worker = RefreshWorker(Gone(), on_frame=lambda f: None, on_error=lambda e: None,
-                           on_connection=states.append, heartbeat=0.02,
-                           mirror_panel=False, disconnect_grace=0.2)
+    worker = RefreshWorker(
+        Gone(),
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_connection=states.append,
+        heartbeat=0.02,
+        mirror_panel=False,
+        disconnect_grace=0.2,
+    )
     worker.start()
     try:
         deadline = time.time() + 3.0
@@ -966,6 +1012,7 @@ def test_silence_past_the_grace_window_is_a_disconnection():
 # tell "busy" from "unplugged". The ports stay enumerated throughout, and that
 # is the only signal that still works once the device has stopped talking.
 
+
 class _SilentBridge(FakeBridge):
     """Answers nothing; reports whether its ports are still there."""
 
@@ -981,9 +1028,16 @@ class _SilentBridge(FakeBridge):
 def test_a_silent_but_plugged_in_device_reports_waiting_not_disconnected():
     bridge = _SilentBridge()
     conn, waiting = [], []
-    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
-                           on_connection=conn.append, on_waiting=waiting.append,
-                           heartbeat=0.02, mirror_panel=False, disconnect_grace=0.1)
+    worker = RefreshWorker(
+        bridge,
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_connection=conn.append,
+        on_waiting=waiting.append,
+        heartbeat=0.02,
+        mirror_panel=False,
+        disconnect_grace=0.1,
+    )
     worker.start()
     try:
         deadline = time.time() + 2.0
@@ -991,7 +1045,7 @@ def test_a_silent_but_plugged_in_device_reports_waiting_not_disconnected():
             time.sleep(0.01)
         assert waiting == [True]
         assert worker.waiting is True
-        time.sleep(0.4)                      # well past the grace window
+        time.sleep(0.4)  # well past the grace window
         assert conn == [], "a busy device must never be called disconnected"
     finally:
         worker.stop()
@@ -1002,9 +1056,15 @@ def test_ports_gone_still_reports_a_disconnection():
     bridge = _SilentBridge()
     bridge.present = False
     conn = []
-    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
-                           on_connection=conn.append, heartbeat=0.02,
-                           mirror_panel=False, disconnect_grace=0.1)
+    worker = RefreshWorker(
+        bridge,
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_connection=conn.append,
+        heartbeat=0.02,
+        mirror_panel=False,
+        disconnect_grace=0.1,
+    )
     worker.start()
     try:
         deadline = time.time() + 2.0
@@ -1019,9 +1079,14 @@ def test_ports_gone_still_reports_a_disconnection():
 def test_waiting_clears_when_the_device_comes_back():
     bridge = _SilentBridge()
     waiting = []
-    worker = RefreshWorker(bridge, on_frame=lambda f: None, on_error=lambda e: None,
-                           on_waiting=waiting.append, heartbeat=0.02,
-                           mirror_panel=False)
+    worker = RefreshWorker(
+        bridge,
+        on_frame=lambda f: None,
+        on_error=lambda e: None,
+        on_waiting=waiting.append,
+        heartbeat=0.02,
+        mirror_panel=False,
+    )
     worker.start()
     try:
         deadline = time.time() + 2.0
@@ -1049,6 +1114,7 @@ def test_stop_waits_for_the_read_in_flight_and_then_says_nothing():
     still owed the UI was marshalled with `call_from_thread` onto an event loop
     that had already stopped.
     """
+
     class _SlowBridge(FakeBridge):
         def __init__(self):
             super().__init__()
@@ -1089,8 +1155,11 @@ def test_an_error_dialog_no_longer_reads_as_a_busy_device():
     """
     from k2kremote.refresh import is_busy_screen, is_destructive_screen
 
-    for line in ("Failed writing to disk", "Problem reading file BOOT.MAC",
-                 "Not enough memory to save."):
+    for line in (
+        "Failed writing to disk",
+        "Problem reading file BOOT.MAC",
+        "Not enough memory to save.",
+    ):
         screen = [line] + [""] * 7
         assert not is_busy_screen(screen), line
         assert not is_destructive_screen(screen), line
@@ -1104,7 +1173,15 @@ def test_a_ram_wipe_now_pauses_polling_instead_of_only_slowing_it():
     """
     from k2kremote.refresh import is_busy_screen, is_destructive_screen
 
-    screen = ["Initializing all memory. Please wait...", "", "It will take a "
-              "while...", "", "", "", "", ""]
+    screen = [
+        "Initializing all memory. Please wait...",
+        "",
+        "It will take a while...",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]
     assert is_destructive_screen(screen)
     assert not is_busy_screen(screen)

@@ -53,6 +53,7 @@ Two traps, both met while mapping this:
   dialog may have repointed — see :mod:`k2kremote.macro_save`. The drive is
   reported alongside the listing rather than assumed.
 """
+
 from __future__ import annotations
 
 import time
@@ -60,8 +61,7 @@ from typing import List, NamedTuple, Optional
 
 from k2000.definitions import Button
 
-_SOFT = (Button.SoftA, Button.SoftB, Button.SoftC,
-         Button.SoftD, Button.SoftE, Button.SoftF)
+_SOFT = (Button.SoftA, Button.SoftB, Button.SoftC, Button.SoftD, Button.SoftE, Button.SoftF)
 
 #: The browser draws a six-line window in rows 1-6 with the SELECTED entry
 #: always on row 3 — rows 1-2 hold the entries above it and 4-6 those below. At
@@ -77,9 +77,9 @@ _STEP = 4
 class Item(NamedTuple):
     """One directory entry as the K2000 renders it."""
 
-    name: str          #: 8.3 name as shown, e.g. "BOOT     .MAC" or "--FAVS"
+    name: str  #: 8.3 name as shown, e.g. "BOOT     .MAC" or "--FAVS"
     is_dir: bool
-    size: str          #: as shown, e.g. ".5K" — informational only
+    size: str  #: as shown, e.g. ".5K" — informational only
 
     @property
     def filename(self) -> str:
@@ -115,7 +115,7 @@ def _rows(bridge, tries: int = 5) -> List[str]:
     for _ in range(tries):
         try:
             rows = bridge.get_screen_text().split("\n")
-        except Exception as exc:                            # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             last = exc
             time.sleep(0.8)
             continue
@@ -154,8 +154,7 @@ def _soft_index(row: str, label: str) -> Optional[int]:
             return None
         before_ok = at == 0 or not row[at - 1].isalnum()
         after = at + len(label)
-        after_ok = (after >= len(row) or not row[after].isalnum()
-                    or not label[-1].isalnum())
+        after_ok = after >= len(row) or not row[after].isalnum() or not label[-1].isalnum()
         if before_ok and after_ok:
             return min(5, int(at * 6 / 40))
         start = at + 1
@@ -256,8 +255,7 @@ def open_browser(bridge) -> str:
     """Enter Disk mode and open the Load browser. Returns its header."""
     if not ensure_disk_mode(bridge):
         raise BrowseError(
-            f"could not reach Disk mode; the panel shows "
-            f"{_rows(bridge)[0].rstrip()!r}"
+            f"could not reach Disk mode; the panel shows {_rows(bridge)[0].rstrip()!r}"
         )
     _press(bridge, "Load", settle=1.6)
     if "Dir:" not in _rows(bridge)[0]:
@@ -344,14 +342,13 @@ def listing(bridge, limit: int = 400) -> List[Item]:
     # entries that looked exactly like a directory that has none. The comment
     # here promised a trace and never left one; `complete` is that trace, in
     # the same shape as `MidiBridge.list_bank`'s own `done` flag.
-    return Listing(items, expected=total,
-                   complete=total is None or len(items) == total)
+    return Listing(items, expected=total, complete=total is None or len(items) == total)
 
 
 def _step_by_presses(bridge) -> None:
     for _ in range(_STEP):
         bridge.press_button(Button.CursorDown)
-        time.sleep(0.05)          # the bridge's own send gap does the spacing
+        time.sleep(0.05)  # the bridge's own send gap does the spacing
     time.sleep(0.25)
 
 
@@ -375,9 +372,9 @@ def selected_name(bridge) -> Optional[str]:
     return None if item is None else item.name
 
 
-def select_index(bridge, index: int, total: int,
-                 names: Optional[List[str]] = None,
-                 attempts: int = 6) -> Optional[str]:
+def select_index(
+    bridge, index: int, total: int, names: Optional[List[str]] = None, attempts: int = 6
+) -> Optional[str]:
     """Put the selection on entry `index`, checking the device as it goes.
 
     **Closed loop, deliberately.** Counting clicks from a clamped top is open
@@ -414,8 +411,7 @@ def select_index(bridge, index: int, total: int,
     return selected_name(bridge)
 
 
-def enter(bridge, index: int, total: int, expect: str,
-          names: Optional[List[str]] = None) -> str:
+def enter(bridge, index: int, total: int, expect: str, names: Optional[List[str]] = None) -> str:
     """Descend into the directory at `index`. Never presses OK.
 
     The selection is verified against what the instrument reports before anything
@@ -425,8 +421,7 @@ def enter(bridge, index: int, total: int, expect: str,
     got = select_index(bridge, index, total, names)
     if got != expect:
         raise BrowseError(
-            f"expected {expect!r} to be selected but the K2000 shows {got!r} — "
-            f"not pressing Open"
+            f"expected {expect!r} to be selected but the K2000 shows {got!r} — not pressing Open"
         )
     _press(bridge, "Open", settle=1.5)
     return header(bridge)

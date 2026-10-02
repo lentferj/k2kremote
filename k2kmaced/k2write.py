@@ -68,7 +68,7 @@ from k2kmaced.k2image import DiskImage
 
 __all__ = ["ImageWriteError", "replace_file_in_image", "plan_replacement"]
 
-_SIZE_FIELD = 28          # offset of the 4-byte size within a 32-byte record
+_SIZE_FIELD = 28  # offset of the 4-byte size within a 32-byte record
 _ATTR_LFN = 0x0F
 _ATTR_VOLUME_ID = 0x08
 
@@ -90,7 +90,7 @@ def _records(image: DiskImage, directory: str) -> Iterator[Tuple[bytes, int]]:
         base = image._root_sector * image.bytes_per_sector
         raw = image._read_at(base, image.root_entries * 32)
         for i in range(0, len(raw) - 31, 32):
-            yield raw[i:i + 32], base + i
+            yield raw[i : i + 32], base + i
         return
 
     entry = image.stat(directory.rstrip("\\"))
@@ -100,7 +100,7 @@ def _records(image: DiskImage, directory: str) -> Iterator[Tuple[bytes, int]]:
         base = image._cluster_offset(cluster)
         raw = image._read_at(base, image.cluster_size)
         for i in range(0, len(raw) - 31, 32):
-            yield raw[i:i + 32], base + i
+            yield raw[i : i + 32], base + i
 
 
 def _find_record(image: DiskImage, dos_path: str) -> int:
@@ -109,7 +109,7 @@ def _find_record(image: DiskImage, dos_path: str) -> int:
     head, _, name = dos_path.rpartition("\\")
     for record, offset in _records(image, head or "\\"):
         if record[0] == 0x00:
-            break                     # end of directory
+            break  # end of directory
         attr = record[11]
         if record[0] == 0xE5 or attr == _ATTR_LFN or attr & _ATTR_VOLUME_ID:
             continue
@@ -133,7 +133,8 @@ def plan_replacement(image_path, dos_path: str, length: int) -> dict:
         raise ImageWriteError(
             "this image is lzop-compressed; k2image reads it by decompressing to "
             "a temporary copy, so a write would edit that copy and be discarded. "
-            "Decompress it to a .img first, write to that, and recompress.")
+            "Decompress it to a .img first, write to that, and recompress."
+        )
     with DiskImage.open(image_path) as image:
         entry = image.stat(dos_path)
         if entry.is_dir:
@@ -145,7 +146,8 @@ def plan_replacement(image_path, dos_path: str, length: int) -> dict:
                 f"{length} bytes will not fit the {len(chain)} cluster(s) "
                 f"{dos_path} already owns ({capacity} bytes). Growing a file "
                 f"means allocating clusters and writing the FAT, which this "
-                f"deliberately will not do.")
+                f"deliberately will not do."
+            )
         return {
             "path": entry.path,
             "old_size": entry.size,
@@ -194,7 +196,8 @@ def replace_file_in_image(image_path, dos_path: str, data: bytes) -> dict:
     if landed != data:
         raise ImageWriteError(
             f"wrote {len(data)} bytes to {dos_path} but read back "
-            f"{len(landed)} that do not match — do not boot from this image")
+            f"{len(landed)} that do not match — do not boot from this image"
+        )
     return plan
 
 
