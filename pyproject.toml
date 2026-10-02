@@ -77,14 +77,9 @@ extend-exclude = ["k2000", "probes", "docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "S", "SIM", "UP", "C4", "PL", "RUF", "C901"]
-ignore = [
-    "E501",    # line length is the formatter's job; comments/strings are exempt
-    "PLC0415", # deliberate lazy imports: optional/heavy deps load only on use
-    "PLR2004", # protocol/RE magic numbers are meaningful, not accidental
-    "RUF001",  # ambiguous unicode: the braille/LCD renderer uses glyphs on purpose
-    "RUF002",
-    "RUF003",
-]
+# No global ignores: every currently-failing rule is baselined per file below, so
+# new files are held to the full rule set (including E501, PLC0415, PLR2004 and
+# the RUF00x ambiguous-Unicode checks).
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
@@ -105,9 +100,11 @@ max-complexity = 10
     "F401",
     "F841",
     "I001",
+    "PLC0415",
     "PLR0402",
     "PLR0913",
     "PLR1730",
+    "PLR2004",
     "PLW0108",
     "RUF012",
     "RUF100",
@@ -120,28 +117,28 @@ max-complexity = 10
     "SIM300",
     "UP031",
 ]
-"k2kmaced/app.py" = ["I001", "PLR0913", "RUF012", "RUF022", "RUF100", "UP006", "UP035", "UP037", "UP045"]
-"k2kmaced/cli.py" = ["C901", "F401", "I001", "PLR0915", "RUF022", "SIM115", "UP006", "UP035", "UP045"]
-"k2kmaced/k2image.py" = ["RUF022", "S603", "S607", "SIM105", "SIM115", "UP006", "UP035", "UP037", "UP045"]
-"k2kmaced/k2write.py" = ["RUF022", "UP006", "UP035"]
-"k2kmaced/macfile.py" = ["RUF022", "SIM102", "SIM105", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/app.py" = ["I001", "PLC0415", "PLR0913", "PLR2004", "RUF001", "RUF012", "RUF022", "RUF100", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/cli.py" = ["C901", "F401", "I001", "PLC0415", "PLR0915", "PLR2004", "RUF022", "SIM115", "UP006", "UP035", "UP045"]
+"k2kmaced/k2image.py" = ["PLR2004", "RUF022", "S603", "S607", "SIM105", "SIM115", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/k2write.py" = ["PLR2004", "RUF022", "UP006", "UP035"]
+"k2kmaced/macfile.py" = ["PLR2004", "RUF002", "RUF022", "SIM102", "SIM105", "UP006", "UP035", "UP037", "UP045"]
 "k2kmaced/mpc2emu_link.py" = ["RUF022", "UP045"]
-"k2kmaced/online.py" = ["UP006", "UP035", "UP045"]
-"k2kremote/app.py" = ["C901", "E731", "I001", "PLR0911", "PLR0912", "PLR0913", "PLR0917", "PLW0108", "RUF012", "RUF046", "RUF100", "S110", "UP006", "UP035", "UP045"]
-"k2kremote/braille.py" = ["I001", "UP006", "UP007", "UP035", "UP045"]
-"k2kremote/disk_browse.py" = ["RUF100", "UP006", "UP035", "UP045"]
-"k2kremote/k2kfields.py" = ["I001", "UP006", "UP007", "UP035", "UP045"]
-"k2kremote/k2kmessages.py" = ["F821", "UP006", "UP035", "UP037", "UP045"]
-"k2kremote/keymap.py" = ["UP006", "UP035", "UP045"]
-"k2kremote/macro_save.py" = ["C901", "I001", "PLR0912", "PLR0915", "RUF100", "S110", "SIM105", "UP006", "UP035", "UP045"]
-"k2kremote/midi_bridge.py" = ["C901", "I001", "PLR0912", "PLW0603", "RUF012", "RUF100", "S110", "S112", "SIM105", "UP006", "UP035", "UP037", "UP045"]
-"k2kremote/monitor.py" = ["PLR0911", "PLR0913", "PLR0917", "RUF022", "RUF100", "UP006", "UP035", "UP045"]
-"k2kremote/monitor_tui.py" = ["I001", "PLR0913", "PLR0917", "RUF012", "RUF100", "UP006", "UP035", "UP037", "UP045"]
+"k2kmaced/online.py" = ["PLC0415", "UP006", "UP035", "UP045"]
+"k2kremote/app.py" = ["C901", "E731", "I001", "PLC0415", "PLR0911", "PLR0912", "PLR0913", "PLR0917", "PLR2004", "PLW0108", "RUF003", "RUF012", "RUF046", "RUF100", "S110", "UP006", "UP035", "UP045"]
+"k2kremote/braille.py" = ["I001", "PLC0415", "PLR2004", "UP006", "UP007", "UP035", "UP045"]
+"k2kremote/disk_browse.py" = ["PLR2004", "RUF100", "UP006", "UP035", "UP045"]
+"k2kremote/k2kfields.py" = ["I001", "PLR2004", "UP006", "UP007", "UP035", "UP045"]
+"k2kremote/k2kmessages.py" = ["PLC0415", "UP006", "UP035", "UP037", "UP045"]
+"k2kremote/k2kromtables.py" = ["PLR2004"]
+"k2kremote/keymap.py" = ["RUF001", "UP006", "UP035", "UP045"]
+"k2kremote/macro_save.py" = ["C901", "E501", "I001", "PLC0415", "PLR0912", "PLR0915", "PLR2004", "RUF100", "S110", "SIM105", "UP006", "UP035", "UP045"]
+"k2kremote/midi_bridge.py" = ["C901", "I001", "PLC0415", "PLR0912", "PLR2004", "PLW0603", "RUF012", "RUF100", "S110", "S112", "SIM105", "UP006", "UP035", "UP037", "UP045"]
+"k2kremote/monitor.py" = ["PLC0415", "PLR0911", "PLR0913", "PLR0917", "PLR2004", "RUF022", "RUF100", "UP006", "UP035", "UP045"]
+"k2kremote/monitor_tui.py" = ["I001", "PLR0913", "PLR0917", "PLR2004", "RUF012", "RUF100", "UP006", "UP035", "UP037", "UP045"]
 "k2kremote/name_cursor.py" = ["UP006", "UP035"]
-"k2kremote/refresh.py" = ["C901", "I001", "PLR0912", "PLR0913", "UP006", "UP035", "UP045"]
-"k2kremote/screenshot.py" = ["UP037"]
+"k2kremote/refresh.py" = ["C901", "I001", "PLC0415", "PLR0912", "PLR0913", "UP006", "UP035", "UP045"]
+"k2kremote/screenshot.py" = ["PLC0415", "UP037"]
 "k2kremote/text_entry.py" = ["C901", "PLR0913", "PLR0917", "UP006", "UP035", "UP045"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

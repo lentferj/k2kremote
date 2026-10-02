@@ -58,6 +58,7 @@ A format string matches the line it produced: ``'%s to bank:'`` identifies
 from __future__ import annotations
 
 import enum
+import os
 import re
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
