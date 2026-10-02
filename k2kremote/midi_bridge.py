@@ -325,10 +325,18 @@ class ThrottledOut:
             # clock), and on Windows `time.time()` ticks in ~15.6 ms steps --
             # coarser than a fifth of the floor this exists to enforce, so the
             # gap it measured could be short by more than a tenth of itself.
-            wait = self._gap - (time.monotonic() - self._last)
-            if wait > 0:
+            # Re-check after every sleep. `time.sleep()` may return early -- a
+            # single pass would then let the next message land inside the gap
+            # the K2000's CPU needs. On Windows the clock's ~15.6 ms tick can
+            # make one pass read short by more than a tenth of the floor, which
+            # is exactly the failure this loop closes.
+            waiting_from = time.monotonic()
+            while True:
+                wait = self._gap - (time.monotonic() - self._last)
+                if wait <= 0:
+                    break
                 time.sleep(wait)
-                self.throttled_seconds += wait
+            self.throttled_seconds += time.monotonic() - waiting_from
             self._port.send_message(message)
             self._last = time.monotonic()
 
