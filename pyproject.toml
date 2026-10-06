@@ -25,7 +25,35 @@ dependencies = [
     "rich>=13",
     # The psobot/k2000 SysEx protocol library is VENDORED in-tree (see ./k2000,
     # MIT-licensed) so there is no separate manual/git install step.
+    #
+    # The shared base of this family of terminal instrument tools: the
+    # settings cache, the keymap and legend widget, the command line, the MIDI
+    # port listing and the clean-exit handler. k2kremote is the ancestor the
+    # rest of the family ported from, so this project is where all of those
+    # originally lived -- and its settings writer, which emitted port names
+    # unescaped, is one of the three bugs the shared copy exists to fix.
+    "vinsynlib>=0.1.0",
 ]
+
+# NO committed `[tool.uv.sources]` override, deliberately.
+#
+# The obvious thing to put here is `vinsynlib = { path = "../vinsynlib",
+# editable = true }`, and it is what this project used while the library was
+# being written beside it. It must not ship: a user who only has this
+# repository -- which is every user who has ever cloned it -- would get
+# `error: Distribution not found at: file:///.../vinsynlib` on `uv sync` or
+# `pip install`, and an ImportError at run time if they pulled without
+# reinstalling. Adding a dependency may cost an existing clone a reinstall; it
+# may not cost it a sibling checkout it does not have.
+#
+# So the library comes from the index, like everything else. To develop
+# against a *working copy* of it, install that alongside, which shadows the
+# published version in this environment only:
+#
+#     uv pip install --python .venv/bin/python --no-deps -e ../vinsynlib
+#
+# Nothing in this file needs to change for that, and nothing in it assumes a
+# sibling directory exists.
 
 [project.optional-dependencies]
 # Dev/quality tools, pinned exactly (the repo has no lockfile; these exact pins
@@ -84,6 +112,14 @@ select = ["E", "F", "I", "B", "S", "SIM", "UP", "C4", "PL", "RUF", "C901", "W"]
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+[tool.ruff.lint.isort]
+# vinsynlib is listed as first-party because it is: the shared library of this
+# family, developed alongside k2kremote rather than vendored from an index.
+# Left out, ruff sorts its imports into a separate third-party block and the
+# family's own code ends up visually separated from k2kremote's, which is the
+# opposite of what it is.
+known-first-party = ["k2kremote", "k2kmaced", "k2000", "vinsynlib"]
+
 # Existing debt is baselined per file so that `ruff check` passes on the current
 # tree while still flagging new rules/files. Generated from a one-off run; see
 # the "Development checks" section of README.md.
@@ -117,6 +153,11 @@ max-complexity = 10
     "SIM300",
     "UP031",
 ]
+# The vinsynlib import is deliberately inside _diagnose's try: it is the guard
+# itself, and it has to run before any project module is imported. Hoisting it
+# to the top of the file would import the very thing the module exists to
+# check for, which is the failure this file is written to avoid.
+"k2kremote/entry.py" = ["PLC0415"]
 "k2kmaced/app.py" = ["I001", "PLC0415", "PLR0913", "PLR2004", "RUF001", "RUF012", "RUF022", "RUF100", "UP006", "UP035", "UP037", "UP045"]
 "k2kmaced/cli.py" = ["C901", "F401", "I001", "PLC0415", "PLR0915", "PLR2004", "RUF022", "SIM115", "UP006", "UP035", "UP045"]
 "k2kmaced/k2image.py" = ["PLR2004", "RUF022", "S603", "S607", "SIM105", "SIM115", "UP006", "UP035", "UP037", "UP045"]

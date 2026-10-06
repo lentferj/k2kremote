@@ -63,6 +63,18 @@ jobs:
       # passes python-version explicitly regardless).
       - uses: actions/checkout@v7
 
+      # The shared library, as a SIBLING of this checkout -- not a
+      # subdirectory. It is the family's own source; a copy under the tree
+      # would let an edit to the library reach this project's CI without ever
+      # being committed here, so it is checked out beside this repository.
+      # Until vinsynlib is published to an index this step is what makes the
+      # dependency resolvable on a clean runner; without it the install fails
+      # with "Distribution not found" for a package no runner has.
+      - uses: actions/checkout@v7
+        with:
+          repository: lentferj/vinsynlib
+          path: ../vinsynlib
+
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -152,6 +164,18 @@ jobs:
     name: make check
     steps:
       - uses: actions/checkout@v7
+
+      # The shared library, as a SIBLING of this checkout -- not a
+      # subdirectory. It is the family's own source; a copy under the tree
+      # would let an edit to the library reach this project's CI without ever
+      # being committed here, so it is checked out beside this repository.
+      # Until vinsynlib is published to an index this step is what makes the
+      # dependency resolvable on a clean runner; without it the install fails
+      # with "Distribution not found" for a package no runner has.
+      - uses: actions/checkout@v7
+        with:
+          repository: lentferj/vinsynlib
+          path: ../vinsynlib
 
       - uses: actions/setup-python@v7
         with:
