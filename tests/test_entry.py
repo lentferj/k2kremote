@@ -51,7 +51,7 @@ def _hide_vinsynlib(monkeypatch: Any) -> None:
 
 def test_a_missing_library_is_diagnosed(monkeypatch: Any) -> None:
     _hide_vinsynlib(monkeypatch)
-    problem = entry._diagnose()
+    problem = entry._diagnose("k2kmon")
     assert problem is not None
     for bit in REQUIRED_BITS:
         assert bit in problem, bit
@@ -97,12 +97,12 @@ def test_a_missing_module_that_is_not_ours_is_not_blamed_on_us(
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(ModuleNotFoundError, match="some_dep"):
-        entry._diagnose()
+        entry._diagnose("k2kmon")
 
 
 def test_an_installed_library_is_reported_healthy() -> None:
     """The normal case, in this very environment."""
-    assert entry._diagnose() is None
+    assert entry._diagnose("k2kmon") is None
 
 
 def test_an_older_library_is_named_rather_than_ignored(
@@ -113,7 +113,7 @@ def test_an_older_library_is_named_rather_than_ignored(
     import vinsynlib
 
     monkeypatch.setattr(vinsynlib, "__version__", "0.0.9")
-    problem = entry._diagnose()
+    problem = entry._diagnose("k2kmon")
     assert problem is not None
     assert "0.1.0" in problem
     assert "0.0.9" in problem
@@ -124,7 +124,7 @@ def test_a_current_library_passes(monkeypatch: Any) -> None:
 
     wanted = ".".join(str(part) for part in entry.MINIMUM)
     monkeypatch.setattr(vinsynlib, "__version__", wanted)
-    assert entry._diagnose() is None
+    assert entry._diagnose("k2kmon") is None
 
 
 def test_the_diagnosis_imports_nothing_from_this_project() -> None:
@@ -138,3 +138,31 @@ def test_the_diagnosis_imports_nothing_from_this_project() -> None:
     source = __import__("pathlib").Path(entry.__file__).read_text(encoding="utf-8")
     for banned in ("from k2kremote", "import k2kremote", "from k2kmaced", "import k2kmaced"):
         assert banned not in source, banned
+
+
+def test_the_message_names_the_command_that_was_typed(monkeypatch: Any, capsys: Any) -> None:
+    """Three of the four commands are not called `k2kremote`.
+
+    A message telling somebody running `k2kmon` that `k2kremote` cannot
+    start sends them looking for the wrong problem, and the four commands
+    here share one distribution name and one launcher.
+    """
+    _hide_vinsynlib(monkeypatch)
+    assert entry.monitor() == 1
+    err = capsys.readouterr().err
+    assert "error: k2kmon cannot start" in err
+    # Names the distribution too, so it is clear where k2kmon comes from.
+    assert "k2kremote" in err
+
+
+def test_every_command_names_itself(monkeypatch: Any, capsys: Any) -> None:
+    _hide_vinsynlib(monkeypatch)
+    for fn, command in (
+        (entry.app, "k2kremote"),
+        (entry.monitor, "k2kmon"),
+        (entry.maced, "k2kmaced"),
+        (entry.macli, "k2kmacli"),
+    ):
+        assert fn() == 1
+        err = capsys.readouterr().err
+        assert f"error: {command} cannot start" in err, (command, err)

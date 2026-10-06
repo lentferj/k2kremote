@@ -43,9 +43,17 @@ MINIMUM = (0, 1, 0)
 #: appears in the message twice and must not drift.
 SOURCE = "vinsynlib @ git+https://github.com/lentferj/vinsynlib"
 
+#: The distribution these four commands all come from.
+PACKAGE = "k2kremote"
 
-def _diagnose() -> str | None:
+
+def _diagnose(command: str) -> str | None:
     """``None`` if the shared library is usable, else what to tell the user.
+
+    ``command`` is the name the user typed -- ``k2kmon``, not ``k2kremote``.
+    The two differ for three of these four commands, and a message that tells
+    somebody running ``k2kmon`` that ``k2kremote`` cannot start sends them
+    looking for the wrong problem.
 
     ``ModuleNotFoundError.name`` is checked before blaming ourselves: a
     ``ModuleNotFoundError`` for something else is a bug in ``vinsynlib`` and a
@@ -56,16 +64,16 @@ def _diagnose() -> str | None:
     except ModuleNotFoundError as exc:
         if exc.name and not exc.name.startswith("vinsynlib"):
             raise
-        return _missing()
+        return _missing(command)
     version = getattr(vinsynlib, "__version__", None)
     if not isinstance(version, str):
-        return _missing()
+        return _missing(command)
     try:
         current = tuple(int(part) for part in version.split(".")[:3])
     except ValueError:
         return None
     if current < MINIMUM:
-        return _too_old(version)
+        return _too_old(command, version)
     return None
 
 
@@ -82,23 +90,23 @@ def _how_to_install() -> str:
     )
 
 
-def _missing() -> str:
+def _missing(command: str) -> str:
     return (
-        "error: k2kremote cannot start: the shared library "
+        f"error: {command} cannot start: the shared library "
         '"vinsynlib" is not installed.\n'
         "\n"
-        "k2kremote is the ancestor of a family of terminal instrument\n"
-        "tools that share this library for the settings cache, the keymap,\n"
-        "the command line, the MIDI port listing and the clean-exit handler,\n"
-        "so it cannot run without it.\n"
+        f"{command} comes from {PACKAGE}, the ancestor of a family of\n"
+        "terminal instrument tools that share this library for the settings\n"
+        "cache, the keymap, the command line, the MIDI port listing and the\n"
+        "clean-exit handler, so it cannot run without it.\n"
         "\n" + _how_to_install()
     )
 
 
-def _too_old(found: str) -> str:
+def _too_old(command: str, found: str) -> str:
     wanted = ".".join(str(part) for part in MINIMUM)
     return (
-        f"error: k2kremote needs vinsynlib {wanted} or newer, and {found} is "
+        f"error: {command} needs vinsynlib {wanted} or newer, and {found} is "
         "installed.\n"
         "\n"
         "Something installed an older copy, most likely as a dependency of\n"
@@ -108,9 +116,9 @@ def _too_old(found: str) -> str:
     )
 
 
-def _run(target: str) -> int:
+def _run(command: str, target: str) -> int:
     """Check the library, then hand over to the real entry point."""
-    problem = _diagnose()
+    problem = _diagnose(command)
     if problem is not None:
         # stderr, and exit code 1: the family's error convention. A missing
         # dependency is not a wrong command line, which would be 2.
@@ -127,19 +135,19 @@ def _run(target: str) -> int:
 
 def app() -> int:
     """The ``k2kremote`` command (the LCD mirror)."""
-    return _run("k2kremote.app:main")
+    return _run("k2kremote", "k2kremote.app:main")
 
 
 def monitor() -> int:
     """The ``k2kmon`` command (the SysEx inspector)."""
-    return _run("k2kremote.monitor:main")
+    return _run("k2kmon", "k2kremote.monitor:main")
 
 
 def maced() -> int:
     """The ``k2kmaced`` command (the macro editor TUI)."""
-    return _run("k2kmaced.app:main")
+    return _run("k2kmaced", "k2kmaced.app:main")
 
 
 def macli() -> int:
     """The ``k2kmacli`` command (the macro editor pipe front end)."""
-    return _run("k2kmaced.cli:main")
+    return _run("k2kmacli", "k2kmaced.cli:main")
