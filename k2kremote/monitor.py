@@ -91,6 +91,7 @@ from typing import List, Optional, Tuple
 
 from k2000 import messages as _messages
 from k2000.messages import SysexMessage
+from vinsynlib.cli import add_common_arguments, make_parser
 from vinsynlib.midi import install_clean_exit
 
 __all__ = ["describe", "hexdump", "message_table", "decode", "main"]
@@ -633,11 +634,16 @@ def run_tui(bridge, type_name: str, bank: int) -> int:
     return 0
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="k2kmon", description="Inspect K2000 SysEx. Passive unless you ask it to send."
-    )
-    parser.add_argument("--port", help="exact MIDI port name")
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, built the family's way.
+
+    ``--port`` is the family's spelling and help text; ``--rig`` is this
+    program's own. It has no settings cache and no demo device, so neither is
+    offered, and no shared numeric option for
+    :func:`vinsynlib.cli.validate_common` to range-check.
+    """
+    parser = make_parser("k2kmon", "Inspect K2000 SysEx. Passive unless you ask it to send.")
+    add_common_arguments(parser, port=True, channel=False, config=False, demo=False)
     parser.add_argument("--rig", choices=("standard", "auto"), default="auto")
     sub = parser.add_subparsers(dest="mode", required=True)
 
@@ -690,7 +696,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--type", default="Program", help="starting object type")
     p.add_argument("--bank", type=int, default=2, help="starting bank")
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
 
     if args.mode == "types":
         print(f"{'type':>5}  {'class':<22} description")

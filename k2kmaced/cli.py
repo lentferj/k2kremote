@@ -66,6 +66,7 @@ from k2kmaced.macfile import (
     PramFile,
     write_bytes_atomic,
 )
+from vinsynlib.cli import add_common_arguments, make_parser
 
 __all__ = ["parse_source", "load_macro", "format_table", "main"]
 
@@ -503,9 +504,9 @@ def _cmd_new(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="k2kmacli",
-        description="Inspect and edit Kurzweil K2000 .MAC macro files.",
+    parser = make_parser(
+        "k2kmacli",
+        "Inspect and edit Kurzweil K2000 .MAC macro files.",
         epilog="A macro source is either a .MAC path or IMAGE:\\PATH.MAC inside "
         "a K2000 disk image. Images are opened read-only.",
     )
@@ -516,13 +517,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_list)
 
     p = sub.add_parser("live", help="show the RUNNING K2000's macro table (read-only)")
-    p.add_argument("--port", help="exact MIDI port name")
+    # The three device-touching commands take the family's --port, so their
+    # help text is the family's. --rig is this project's own.
+    add_common_arguments(p, port=True, channel=False, config=False, demo=False)
     p.add_argument("--rig", choices=("standard", "auto"), default="auto")
     p.set_defaults(func=_cmd_live)
 
     p = sub.add_parser("diff", help="compare the live macro table against a .MAC (read-only)")
     p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
-    p.add_argument("--port", help="exact MIDI port name")
+    add_common_arguments(p, port=True, channel=False, config=False, demo=False)
     p.add_argument("--rig", choices=("standard", "auto"), default="auto")
     p.set_defaults(func=_cmd_diff)
 
@@ -552,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("push", help="WRITES: replace the running K2000's macro table over MIDI")
     p.add_argument("source", help="FILE.MAC or IMAGE:\\PATH.MAC")
-    p.add_argument("--port", help="exact MIDI port name")
+    add_common_arguments(p, port=True, channel=False, config=False, demo=False)
     p.add_argument("--rig", choices=("standard", "auto"), default="auto")
     p.add_argument("--backup", help="where to save the current table first")
     p.add_argument("--yes", action="store_true", help="skip the typed confirmation")

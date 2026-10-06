@@ -57,7 +57,10 @@ from k2000.definitions import Button, ObjectType
 from k2kremote import braille, keymap, name_cursor, screenshot, text_entry
 from k2kremote.name_cursor import NameCursor
 from k2kremote.refresh import Frame, RefreshWorker
+from vinsynlib.cli import add_common_arguments, make_parser
+from vinsynlib.keys import wrap_blocks
 from vinsynlib.midi import install_clean_exit
+from vinsynlib.ui.hints import KeyHints as _KeyHints
 
 try:  # optional: pixel-perfect image mode via kitty/sixel (textual-image)
     import textual_image.widget as _ti_widget
@@ -92,28 +95,10 @@ def _detected_image_protocol() -> str:
 
 _BAR_SEP = " · "  # block separator in the legend / mode bar
 
-
-def wrap_blocks(blocks: List[str], width: int, sep: str = _BAR_SEP) -> str:
-    """Pack ``blocks`` into lines no wider than ``width``, joined by ``sep``.
-
-    Breaks happen only *between* blocks, never inside one, so a label such as
-    "Alt+X panic" or "[F5:Format]" is never split across a line. (A non-breaking
-    space inside a block isn't enough — Rich/Textual still treats it as a wrap
-    point — so we fold here and render the result with wrapping disabled.)
-    A block longer than ``width`` simply occupies its own line.
-    """
-    lines: List[str] = []
-    current = ""
-    for block in blocks:
-        candidate = block if not current else current + sep + block
-        if width and len(candidate) > width and current:
-            lines.append(current)
-            current = block
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    return "\n".join(lines)
+#: The settings cache this project has always used. vinsynlib's --config
+#: option has no argparse default (a library cannot know a tool's path), so
+#: the tool applies this one wherever args.config is None.
+DEFAULT_CONFIG_PATH = "config.toml"
 
 
 def align_blocks(
@@ -192,6 +177,35 @@ def wrap_groups(groups, width: int, sep: str = _BAR_SEP) -> str:
     if current:
         lines.append(current)
     return "\n".join(lines)
+
+
+class KeyHints(_KeyHints):
+    """The legend, folded to the terminal's width, breaking between groups.
+
+    The widget is the family's (:class:`vinsynlib.ui.hints.KeyHints`), which
+    folds with :func:`vinsynlib.keys.wrap_blocks`, re-renders on resize and
+    wraps rather than truncating. What this subclass adds is the one thing the
+    shared widget does not do: this project's legend is *grouped*, so a fold
+    never orphans one member of a run. A plain greedy fold put "F7 Edit" at
+    the end of the navigation line and began the next with "F8 Exit", and F7
+    was reported missing; :func:`wrap_groups` keeps the run together.
+
+    The truncation this replaces was real in the other direction too: the
+    legend was a ``Static`` whose text was folded once at compose time, when
+    the window width is not yet known, and rendered with ``no_wrap`` -- so a
+    hint that did not fit was dropped and the user never learned the key
+    existed. Height ``auto`` and a re-render on resize fix that; a footer that
+    silently drops its last keys teaches the user those keys do not exist.
+    """
+
+    def __init__(self, groups, *, id: Optional[str] = None):
+        self._groups = tuple(tuple(group) for group in groups)
+        super().__init__([block for group in self._groups for block in group], id=id)
+
+    def _render_hints(self) -> None:
+        # NOT named _render: Widget._render is Textual's own.
+        width = max(self.size.width - 2, 20)
+        self.update(wrap_groups(self._groups, width, self._separator))
 
 
 # The bottom text row carries the K2000's own soft-key labels.
@@ -1964,8 +1978,11 @@ class K2KRemoteApp(App):
         yield bar
         yield Static(Text(self._mode_bar_text(), no_wrap=True), id="modebar")
         # The key-hint legend lives on its own persistent line so transient
-        # status messages (below) can never bury it.
-        yield Static(Text(self._legend_text(), no_wrap=True), id="keyhints")
+        # status messages (below) can never bury it. KeyHints folds it to the
+        # window width and wraps rather than truncating, so no key is silently
+        # dropped; see the class for why it is a subclass rather than the bare
+        # family widget.
+        yield KeyHints(self._legend_groups(), id="keyhints")
         yield Static("", id="status")
 
     def on_mount(self) -> None:
@@ -2493,14 +2510,22 @@ class K2KRemoteApp(App):
         """Width to fold the legend / mode bar to (full window width)."""
         return self.size.width or 0
 
+    def _legend_groups(self):
+        """This project's legend, grouped so a fold never splits a run."""
+        return keymap.LEGEND_GROUPS_ALT if self._alt_keys else keymap.LEGEND_GROUPS
+
     def _legend_text(self) -> str:
-        groups = keymap.LEGEND_GROUPS_ALT if self._alt_keys else keymap.LEGEND_GROUPS
-        return " " + wrap_groups(groups, max(self._bar_width() - 1, 0))
+        return " " + wrap_groups(self._legend_groups(), max(self._bar_width() - 1, 0))
 
     def _render_keyhints(self) -> None:
-        """(Re)draw the persistent key-hint legend on its own line."""
+        """Record the persistent key-hint legend for readers of this object.
+
+        The ``#keyhints`` widget is a :class:`KeyHints`, which folds and
+        re-renders itself on mount and resize; this only keeps
+        :attr:`last_keyhints` in step for tests and callers that want the
+        current text without reaching into Textual.
+        """
         self.last_keyhints = self._legend_text()
-        self.query_one("#keyhints", Static).update(Text(self.last_keyhints, no_wrap=True))
 
     def _show_legend(self) -> None:
         """Clear any transient status message; the hints stay on the #keyhints
@@ -2618,9 +2643,10 @@ def resolve_config(args):
     """
     from k2kremote.midi_bridge import BridgeConfig
 
+    path = args.config or DEFAULT_CONFIG_PATH
     config = BridgeConfig()
-    if args.config and os.path.exists(args.config):
-        config = BridgeConfig.load(args.config)
+    if os.path.exists(path):
+        config = BridgeConfig.load(path)
 
     if args.rig == "auto":
         config.rig = args.rig
@@ -2647,8 +2673,8 @@ def _build_bridge(args):
         bridge = MidiBridge.from_config(config, gap=gap)
     except RuntimeError as exc:
         sys.exit(str(exc))
-    if args.save_config and args.config:
-        config.save(args.config)
+    if args.save_config:
+        config.save(args.config or DEFAULT_CONFIG_PATH)
     return bridge
 
 
@@ -2841,16 +2867,26 @@ SAFETY — USE AT YOUR OWN RISK
 """
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="k2kremote",
-        description="Terminal remote for the Kurzweil K2000 / K2000R — mirrors the "
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, built the family's way.
+
+    The shared options (--port, --config, --demo) come from
+    :func:`vinsynlib.cli.add_common_arguments`, so they carry the family's
+    names and help text; every option below is this program's own and is
+    unchanged. This program offers none of the family's numeric options -- no
+    --channel, --device-id or --timeout -- so there is nothing for
+    :func:`vinsynlib.cli.validate_common` to range-check.
+    """
+    parser = make_parser(
+        "k2kremote",
+        "Terminal remote for the Kurzweil K2000 / K2000R — mirrors the "
         "hardware LCD over MIDI SysEx and drives the front panel from the "
         "keyboard.",
         epilog="Run with --long-help for a full prose user manual (setup, terminals, "
         "controls, and safety). Inside the app, F1-F6 are the live soft keys; "
         "press Ctrl+r to refresh and Alt+x to panic.",
     )
+    add_common_arguments(parser, port=True, channel=False, demo=True, config=True)
     conn = parser.add_argument_group("connection")
     conn.add_argument(
         "--rig",
@@ -2859,19 +2895,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="how to find the K2000: 'standard' (default) uses one "
         "bidirectional MIDI port; 'auto' probes every port for a "
         "K2000 that answers SysEx",
-    )
-    conn.add_argument(
-        "--port",
-        metavar="NAME",
-        help="exact MIDI port name to use (implies --rig standard); "
-        "list names with: python -m k2kremote.midi_bridge ports",
-    )
-    conn.add_argument(
-        "--config",
-        default="config.toml",
-        metavar="FILE",
-        help="TOML file remembering the port/rig selection "
-        "(default: config.toml; ignored if absent)",
     )
     conn.add_argument(
         "--save-config",
@@ -2980,12 +3003,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         "delete/save (the heartbeat can lock up the unit there)",
     )
     misc.add_argument(
-        "--demo",
-        action="store_true",
-        help="run against a static synthetic frame with no MIDI — try "
-        "the UI and render modes without any hardware",
-    )
-    misc.add_argument(
         "--print-size",
         action="store_true",
         help="print the terminal size to open at as COLSxROWS and "
@@ -2998,7 +3015,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--long-help", action="store_true", help="print a full prose user manual and exit"
     )
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
     if args.print_size:
         cols, rows = startup_size()
         print(f"{cols}x{rows}")

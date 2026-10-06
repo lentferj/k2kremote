@@ -93,6 +93,9 @@ from k2kmaced.macfile import (
     write_bytes_atomic,
 )
 from k2kmaced.cli import load_macro, parse_source
+from vinsynlib.cli import make_parser
+from vinsynlib.keys import wrap_blocks as _wrap_blocks
+from vinsynlib.ui.hints import KeyHints
 
 __all__ = ["BANK_VALUES", "cycle", "MacroEditor", "K2kmacedApp", "main"]
 
@@ -205,24 +208,15 @@ _BAR_SEP = " · "
 def wrap_blocks(blocks: Sequence[str], width: int, sep: str = _BAR_SEP) -> str:
     """Pack ``blocks`` into lines no wider than ``width``, joined by ``sep``.
 
-    Breaks happen only *between* blocks, so "ctrl+↑↓ nudge" is never split. The
-    mirror has the same function for the same reason; it is duplicated rather
-    than shared because k2kmaced deliberately imports nothing from k2kremote —
-    twelve lines is a cheaper price than a dependency between two programs that
-    are meant to be independent.
+    Re-exported from :func:`vinsynlib.keys.wrap_blocks`, which every tool in
+    this family now uses. Kept as a name here because two tests call it
+    directly, and the legend widget below is the family's
+    :class:`vinsynlib.ui.hints.KeyHints`, which folds with the same function.
+    The copy this replaces was duplicated rather than shared on the argument
+    that k2kmaced imports nothing from k2kremote; the family's library is
+    neither program, so sharing it costs no dependency between the two.
     """
-    lines: List[str] = []
-    current = ""
-    for block in blocks:
-        candidate = block if not current else current + sep + block
-        if width and len(candidate) > width and current:
-            lines.append(current)
-            current = block
-        else:
-            current = candidate
-    if current:
-        lines.append(current)
-    return "\n".join(lines)
+    return _wrap_blocks(blocks, width, sep)
 
 
 def cycle(values: Sequence[int], current: int, step: int) -> int:
@@ -871,12 +865,15 @@ else:
             move = Input(placeholder="move to position #", id="moveentry")
             move.display = False
             yield move
-            yield Static("", id="legend")
+            # The family's legend widget: it folds to the terminal's width and
+            # wraps rather than truncating, so `w` and `i` -- the two keys that
+            # can change a disk image -- cannot be dropped off the end of the
+            # line the way Textual's one-line Footer dropped them.
+            yield KeyHints(LEGEND_BLOCKS, id="legend")
 
         def on_mount(self) -> None:
             table = self.query_one(DataTable)
             table.add_columns(*self.COLUMNS)
-            self.refresh_legend()
             self.refresh_banner()
             self.refresh_rows()
             if self.editor is None:
@@ -1199,15 +1196,6 @@ else:
 
         # -- writing back into the image ------------------------------------
 
-        def refresh_legend(self) -> None:
-            """Fold the key legend to the current width, so none of it is lost."""
-            legend = self.query_one("#legend", Static)
-            width = max(self.size.width - 1, 20)
-            legend.update(wrap_blocks(list(LEGEND_BLOCKS), width))
-
-        def on_resize(self, event) -> None:
-            self.refresh_legend()
-
         def refresh_banner(self) -> None:
             """Redraw the source line, including the write-gate state.
 
@@ -1283,10 +1271,16 @@ else:
 # --- entry point -----------------------------------------------------------
 
 
-def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="k2kmaced",
-        description="Edit a Kurzweil K2000 .MAC macro. Never opens a MIDI port. "
+def build_parser() -> argparse.ArgumentParser:
+    """The command line, built the family's way.
+
+    This program uses none of the family's shared options: it never opens a
+    MIDI port and has no settings cache or demo device. ``--allow-write`` is
+    this project's own wording for the write gate, kept as it is.
+    """
+    parser = make_parser(
+        "k2kmaced",
+        "Edit a Kurzweil K2000 .MAC macro. Never opens a MIDI port. "
         "Run with no arguments and pick the file in the app.",
     )
     parser.add_argument(
@@ -1303,7 +1297,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "default, because writing back edits the disk image "
         "in place",
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
 
     editor = None
     if args.source:
