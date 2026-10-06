@@ -65,6 +65,8 @@ import rtmidi  # noqa: E402
 from k2000.client import K2000Client  # noqa: E402
 from k2000.definitions import Button, ButtonEventType, EncodingFormat, ObjectType  # noqa: E402
 from k2000.messages import ButtonEvent, Change, Del, DelBank, Dump, Load, Panel  # noqa: E402
+from vinsynlib import midi as shared_midi  # noqa: E402
+from vinsynlib.config import Settings  # noqa: E402
 
 if TYPE_CHECKING:  # `Info` appears only in an annotation; importing it at
     from k2000.messages import Info  # runtime would be a needless cycle
@@ -419,16 +421,34 @@ def _high_bit_rows(text: str) -> List[str]:
 
 
 def list_ports() -> Tuple[List[str], List[str]]:
-    """Return ``(input_port_names, output_port_names)`` available on this host."""
-    return _enum_in(), _enum_out()
+    """Return ``(input_port_names, output_port_names)`` available on this host.
+
+    Delegates to the family's enumeration (:func:`vinsynlib.midi.list_ports`),
+    which closes both clients before returning -- an rtmidi backend handle
+    leaked here shows up later as a port that cannot be reopened. What stays
+    local is the backend-error bookkeeping the `ports` command explains
+    itself with.
+    """
+    global _BACKEND_ERROR
+    try:
+        ports = shared_midi.list_ports()
+    except Exception as exc:  # no ALSA sequencer, no CoreMIDI, no WinMM
+        _BACKEND_ERROR = f"{type(exc).__name__}: {exc}"
+        return [], []
+    _BACKEND_ERROR = None
+    return ports
 
 
 def bidirectional_ports() -> List[str]:
-    """Names present as both an input and an output (candidate standard ports)."""
-    ins, outs = list_ports()
-    # Preserve output order; a stable list is friendlier for "pick a number" UIs.
-    in_set = set(ins)
-    return [name for name in outs if name in in_set]
+    """Names present as both an input and an output (candidate standard ports).
+
+    The family's :func:`vinsynlib.midi.bidirectional_ports`, handed the list
+    this module already enumerated rather than enumerating a second time.
+    BEHAVIOUR CHANGE: the order is now the *input* order, where this project
+    used to preserve the output order. The library decides it once for the
+    whole family; nothing here depends on the order.
+    """
+    return shared_midi.bidirectional_ports(list_ports())
 
 
 def _index_of(names: List[str], wanted: str, skip: int = 0) -> Optional[int]:
@@ -1365,11 +1385,27 @@ class MidiBridge:
 
 
 # --- config -----------------------------------------------------------------
+#: One settings cache for this application, over the family's store. The
+#: escaping and the read-modify-write live in :class:`vinsynlib.config.Settings`;
+#: this instance is only the name the "cannot save" warning is printed under.
+_SETTINGS = Settings("k2kremote")
+
+
 class BridgeConfig:
     """The saved port selection and rig mode, persisted to ``config.toml``.
 
-    Hand-written TOML I/O: ``tomllib`` (3.11+) reads but cannot write, and we
-    only have a handful of flat keys.
+    The storage is :class:`vinsynlib.config.Settings`, which the whole family
+    shares because the traps in *storing a preference* are the same in every
+    tool. This class was the original copy, and it had the writer bug the
+    library exists to fix: it wrote ``port = "{name}"`` with no escaping, so a
+    port name containing a quote -- an ALSA client name is whatever the device
+    reports -- produced a file that is not TOML, and ``load`` then raised on it.
+    The library escapes every value and refuses to overwrite a file it cannot
+    parse, so the cache heals instead of staying broken until somebody deletes
+    it by hand.
+
+    The keys are unchanged: ``rig``, ``port``, ``send_port``, ``recv_iface``
+    and ``device_id``, with the same defaults.
     """
 
     def __init__(
@@ -1389,30 +1425,45 @@ class BridgeConfig:
 
     @classmethod
     def load(cls, path: str) -> "BridgeConfig":
-        import tomllib
+        """Read the cache, falling back to the defaults for anything unusable.
 
-        with open(path, "rb") as handle:
-            data = tomllib.load(handle)
+        A key of the wrong type is treated as absent rather than coerced: TOML
+        lets a hand-edited ``device_id = true`` through, and a bool is device 1
+        on the wire, which is a real device and the wrong one. The library's
+        own accessor does that range-and-type check.
+        """
+        data = _SETTINGS.read(path)[0]
+
+        rig = data.get("rig")
+        send_port = data.get("send_port")
+        recv_iface = data.get("recv_iface")
+        remembered_port = data.get("port")
+        device_id = _SETTINGS.load_device_id(path)
         return cls(
-            rig=data.get("rig", "standard"),
-            port=data.get("port"),
-            send_port=data.get("send_port", SPLIT_SEND_PORT),
-            recv_iface=data.get("recv_iface", SPLIT_RECV_IFACE),
-            device_id=int(data.get("device_id", DEFAULT_DEVICE_ID)),
+            rig=rig if isinstance(rig, str) else "standard",
+            port=remembered_port if isinstance(remembered_port, str) and remembered_port else None,
+            send_port=send_port if isinstance(send_port, str) else SPLIT_SEND_PORT,
+            recv_iface=recv_iface if isinstance(recv_iface, str) else SPLIT_RECV_IFACE,
+            device_id=DEFAULT_DEVICE_ID if device_id is None else device_id,
         )
 
     def save(self, path: str) -> None:
-        lines = [
-            "# k2kremote MIDI bridge configuration",
-            f'rig = "{self.rig}"',
-        ]
+        """Merge this selection into the cache, escaping every string.
+
+        One write, through the library, which refuses to overwrite a file it
+        cannot parse and escapes a quote or a backslash in a port name rather
+        than producing a file that is not TOML. ``port`` is omitted when unset
+        so an output-less split rig keeps no output key.
+        """
+        changes: dict = {
+            "rig": self.rig,
+            "send_port": self.send_port,
+            "recv_iface": self.recv_iface,
+            "device_id": self.device_id,
+        }
         if self.port is not None:
-            lines.append(f'port = "{self.port}"')
-        lines.append(f'send_port = "{self.send_port}"')
-        lines.append(f'recv_iface = "{self.recv_iface}"')
-        lines.append(f"device_id = {self.device_id}")
-        with open(path, "w") as handle:
-            handle.write("\n".join(lines) + "\n")
+            changes["port"] = self.port
+        _SETTINGS.update(path, **changes)
 
 
 def _main(argv: List[str]) -> None:

@@ -91,6 +91,7 @@ from typing import List, Optional, Tuple
 
 from k2000 import messages as _messages
 from k2000.messages import SysexMessage
+from vinsynlib.midi import install_clean_exit
 
 __all__ = ["describe", "hexdump", "message_table", "decode", "main"]
 
@@ -698,6 +699,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     bridge = _open_bridge(args.port, args.rig)
+    # SIGTERM would otherwise end the process with the port still open, which
+    # on ALSA keeps the next program out until the session is logged out.
+    install_clean_exit(bridge.close)
     try:
         if args.mode == "watch":
             return watch(bridge, only_panel=args.panel, seconds=args.seconds)

@@ -231,6 +231,33 @@ def test_bridge_config_split_rig_defaults(tmp_path):
     assert loaded.recv_iface == midi_bridge.SPLIT_RECV_IFACE
 
 
+def test_bridge_config_escapes_a_quote_and_a_backslash(tmp_path):
+    """A port name is whatever ALSA reports, quote and backslash included.
+
+    The writer this replaces emitted ``port = "{name}"`` with no escaping, so a
+    quote produced a file that is not TOML -- and because the writer refuses to
+    overwrite a file it cannot parse, the cache then never healed until
+    somebody deleted it by hand. The shared store escapes every value; this
+    proves the file still parses and the name survives the round trip.
+    """
+    import tomllib
+
+    path = tmp_path / "config.toml"
+    name = 'Port "A" \\ back'
+    BridgeConfig(rig="standard", port=name, send_port='a"b', recv_iface="c\\d").save(str(path))
+
+    with open(path, "rb") as handle:
+        data = tomllib.load(handle)  # parses, or the file is not TOML
+    assert data["port"] == name
+    assert data["send_port"] == 'a"b'
+    assert data["recv_iface"] == "c\\d"
+
+    loaded = BridgeConfig.load(str(path))
+    assert loaded.port == name
+    assert loaded.send_port == 'a"b'
+    assert loaded.recv_iface == "c\\d"
+
+
 def _stub_bridge():
     """A MidiBridge whose client only needs a recording midi_out."""
     return MidiBridge(SimpleNamespace(midi_out=FakeOut(), midi_in=None), "stub")

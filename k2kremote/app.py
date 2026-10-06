@@ -57,6 +57,7 @@ from k2000.definitions import Button, ObjectType
 from k2kremote import braille, keymap, name_cursor, screenshot, text_entry
 from k2kremote.name_cursor import NameCursor
 from k2kremote.refresh import Frame, RefreshWorker
+from vinsynlib.midi import install_clean_exit
 
 try:  # optional: pixel-perfect image mode via kitty/sixel (textual-image)
     import textual_image.widget as _ti_widget
@@ -3007,6 +3008,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     bridge = None if args.demo else _build_bridge(args)
+    # Ctrl-C already unwinds and closes the bridge. SIGTERM does not: its
+    # default action ends the process where it stands, leaving the MIDI port
+    # open -- and on ALSA that makes it unavailable to the next program until
+    # the session is logged out. The family's handler closes it first.
+    if bridge is not None:
+        install_clean_exit(bridge.close)
     settle = args.settle / 1000.0 if args.settle is not None else None
     heartbeat = args.heartbeat / 1000.0 if args.heartbeat is not None else None
     app = K2KRemoteApp(
