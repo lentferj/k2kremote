@@ -74,15 +74,21 @@ dev = [
 image = ["textual-image>=0.6"]
 
 [project.scripts]
-k2kremote = "k2kremote.app:main"
+# Console scripts go through k2kremote.entry, which checks the shared library
+# is installed before any project module (and therefore before any import of
+# vinsynlib) runs. Without that check a clone that was pulled without a
+# reinstall produced a bare ModuleNotFoundError traceback naming a package the
+# user never asked for -- and on Windows the console script closes before the
+# traceback can be read, so nothing was said at all.
+k2kremote = "k2kremote.entry:app"
 # k2kmaced is a separate program that ships alongside the mirror: the macro
 # editor needs the instrument switched OFF and its disk in the computer, so it
 # and the mirror can essentially never run usefully at the same time.
-k2kmaced = "k2kmaced.app:main"
-k2kmacli = "k2kmaced.cli:main"
+k2kmaced = "k2kremote.entry:maced"
+k2kmacli = "k2kremote.entry:macli"
 # The inspector is passive by default and safe to leave running next to nothing
 # else — but it still opens the port, so it counts as "driving the instrument".
-k2kmon = "k2kremote.monitor:main"
+k2kmon = "k2kremote.entry:monitor"
 
 [tool.setuptools]
 # "k2000" is the vendored psobot/k2000 library (MIT); shipped so the app runs

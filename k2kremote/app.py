@@ -2840,7 +2840,7 @@ SAFETY — USE AT YOUR OWN RISK
 """
 
 
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="k2kremote",
         description="Terminal remote for the Kurzweil K2000 / K2000R — mirrors the "
@@ -3001,10 +3001,10 @@ def main(argv: Optional[List[str]] = None) -> None:
     if args.print_size:
         cols, rows = startup_size()
         print(f"{cols}x{rows}")
-        return
+        return 0
     if args.long_help:
         print(LONG_HELP.strip())
-        return
+        return 0
 
     bridge = None if args.demo else _build_bridge(args)
     settle = args.settle / 1000.0 if args.settle is not None else None
@@ -3028,7 +3028,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     finally:
         if bridge is not None:
             bridge.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
