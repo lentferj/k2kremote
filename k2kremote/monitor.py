@@ -642,7 +642,11 @@ def build_parser() -> argparse.ArgumentParser:
     offered, and no shared numeric option for
     :func:`vinsynlib.cli.validate_common` to range-check.
     """
-    parser = make_parser("k2kmon", "Inspect K2000 SysEx. Passive unless you ask it to send.")
+    parser = make_parser(
+        "k2kmon",
+        "Inspect K2000 SysEx. Passive unless you ask it to send.",
+        distribution="k2kremote",
+    )
     add_common_arguments(parser, port=True, channel=False, config=False, demo=False)
     parser.add_argument("--rig", choices=("standard", "auto"), default="auto")
     sub = parser.add_subparsers(dest="mode", required=True)

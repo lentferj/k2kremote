@@ -507,6 +507,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = make_parser(
         "k2kmacli",
         "Inspect and edit Kurzweil K2000 .MAC macro files.",
+        distribution="k2kremote",
         epilog="A macro source is either a .MAC path or IMAGE:\\PATH.MAC inside "
         "a K2000 disk image. Images are opened read-only.",
     )

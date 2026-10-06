@@ -1282,6 +1282,7 @@ def build_parser() -> argparse.ArgumentParser:
         "k2kmaced",
         "Edit a Kurzweil K2000 .MAC macro. Never opens a MIDI port. "
         "Run with no arguments and pick the file in the app.",
+        distribution="k2kremote",
     )
     parser.add_argument(
         "source",

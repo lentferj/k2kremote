@@ -143,3 +143,26 @@ async def test_the_macro_legend_wraps_and_loses_no_key() -> None:
         rendered = str(widget.render())
     missing = [block for block in macro_app.LEGEND_BLOCKS if block not in rendered]
     assert not missing, missing
+
+
+@pytest.mark.parametrize(
+    "name,builder",
+    [
+        ("k2kremote", mirror_app.build_parser),
+        ("k2kmon", monitor.build_parser),
+        ("k2kmaced", macro_app.build_parser),
+        ("k2kmacli", macro_cli.build_parser),
+    ],
+)
+def test_every_command_can_report_its_version(name: str, builder) -> None:
+    """All four come from one distribution, and three are named differently.
+
+    `--version` is found from the installed distribution, and the lookup
+    uses the program's name unless the parser is told otherwise. With one
+    distribution and four command names, three of them found no version and
+    silently had no `--version` at all -- so this walks all four and checks
+    the option is there and answers with a number.
+    """
+    parser = builder()
+    options = {opt for action in parser._actions for opt in action.option_strings}
+    assert "--version" in options, f"{name} has no --version"
