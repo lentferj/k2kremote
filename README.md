@@ -477,22 +477,34 @@ git clone https://github.com/lentferj/k2kremote.git
 cd k2kremote
 ```
 
-**3. Create an isolated environment and install it**
+**3. Get the shared library, then create an environment and install**
+
+k2kremote and its sibling tools share one library, **vinsynlib** — the
+settings cache, the keymap, the command line and the port listing. It is
+**not on PyPI**, so it comes from a checkout beside this repository.
 
 ```bash
+git clone https://github.com/lentferj/vinsynlib.git ../vinsynlib
+
 python3 -m venv .venv                 # create a private virtual environment
 source .venv/bin/activate             # Windows: .venv\Scripts\activate
 pip install --upgrade pip
 
+pip install --no-deps -e ../vinsynlib # the shared library, installed first
 pip install -e .                      # k2kremote + all its dependencies
 
 # optional — pixel-perfect "image" render mode (needs a graphics terminal):
 pip install -e ".[image]"
 ```
 
+`--no-deps` on the library because its dependencies are k2kremote's too, and a
+second copy of `textual` in the same environment is a version skew to
+diagnose somewhere else. `uv sync` reads the path from `[tool.uv.sources]` in
+`pyproject.toml` instead, so with `uv` the checkout only has to exist.
+
 The Kurzweil SysEx protocol library (psobot/k2000, MIT) is **vendored in-tree**
-(see [`k2000/`](k2000)), so there is **no separate manual or git install** — one
-`pip install -e .` pulls everything from PyPI and you are ready to go.
+(see [`k2000/`](k2000)), so that one needs **no separate manual or git
+install**.
 
 > On Debian/Ubuntu you can save build time by reusing system packages for the
 > heavier dependencies: `sudo apt install python3-rtmidi python3-numpy`, then
