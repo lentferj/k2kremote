@@ -119,6 +119,25 @@ def test_an_older_library_is_named_rather_than_ignored(
     assert "0.0.9" in problem
 
 
+def test_a_library_without_the_version_helper_is_named_not_crashed(
+    monkeypatch: Any,
+) -> None:
+    """An old copy has no ``is_compatible_version``; the guard must still work.
+
+    A library from before that function existed reports a version at least as
+    new as the minimum in some cases -- or the same version -- so the *call*
+    is what fails. Without the getattr guard this raises AttributeError, which
+    is the traceback the module exists to replace.
+    """
+    import vinsynlib  # noqa: PLC0415
+
+    monkeypatch.setattr(vinsynlib, "__version__", "0.1.0")
+    monkeypatch.delattr(vinsynlib, "is_compatible_version", raising=False)
+    problem = entry._diagnose("k2kmon")
+    assert problem is not None
+    assert "0.1.0" in problem
+
+
 def test_a_current_library_passes(monkeypatch: Any) -> None:
     import vinsynlib  # noqa: PLC0415
 

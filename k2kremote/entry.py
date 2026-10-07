@@ -68,7 +68,13 @@ def _diagnose(command: str) -> str | None:
     version = getattr(vinsynlib, "__version__", None)
     if not isinstance(version, str):
         return _missing(command)
-    if not vinsynlib.is_compatible_version(version, MINIMUM):
+    # The check must not assume the library is new enough to contain the check:
+    # an older copy simply has no ``is_compatible_version``, which is exactly
+    # the case this guard exists for. Treat its absence as "cannot confirm new
+    # enough", and say so, rather than raising the AttributeError this module
+    # was written to keep from a user.
+    compatible = getattr(vinsynlib, "is_compatible_version", None)
+    if compatible is None or not compatible(version, MINIMUM):
         return _too_old(command, version)
     return None
 
