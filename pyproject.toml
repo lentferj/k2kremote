@@ -46,9 +46,9 @@ dependencies = [
 # reinstalling. Adding a dependency may cost an existing clone a reinstall; it
 # may not cost it a sibling checkout it does not have.
 #
-# So the library comes from the index, like everything else. To develop
-# against a *working copy* of it, install that alongside, which shadows the
-# published version in this environment only:
+# So the library must be obtained from a sibling checkout or from the index
+# once published. To develop against a *working copy* of it, install that
+# alongside, which shadows the published version in this environment only:
 #
 #     uv pip install --python .venv/bin/python --no-deps -e ../vinsynlib
 #
