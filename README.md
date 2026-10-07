@@ -627,7 +627,7 @@ and `Alt+letter` for their own menus — that's what `--alt-keys` /
 ### Other things you can run (no hardware needed)
 
 ```bash
-k2kremote --demo    # braille renderer self-test
+python -m k2kremote.braille    # braille renderer self-test
 python -m pytest               # the test suite — all synthetic, never opens MIDI
 
 # The macro (.MAC) tool — entirely offline; images read-only except 'install'
@@ -899,7 +899,7 @@ Most dependencies are installed automatically by `pip install -e .`; exceptions 
 - [`attrs`](https://pypi.org/project/attrs/)
 - [`pillow`](https://pypi.org/project/pillow/)
 - the [psobot/k2000](https://github.com/psobot/k2000) SysEx protocol library — **vendored in-tree** ([`k2000/`](k2000), MIT), no separate install
-- [`vinsynlib`](https://github.com/lentferj/vinsynlib) — shared settings cache, command line, and MIDI port listing — **must be installed from a sibling checkout** (see **Setup** section above)
+- [`vinsynlib`](https://github.com/lentferj/vinsynlib) — the family's shared settings cache, command line and port listing — **not on PyPI**; install from a sibling checkout (see **Setup** above)
 - _optional:_ [`textual-image`](https://pypi.org/project/textual-image/) for pixel-perfect image mode (`pip install -e ".[image]"`)
 
 ---
