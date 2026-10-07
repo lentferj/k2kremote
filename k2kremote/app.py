@@ -23,10 +23,10 @@
 
 Run it::
 
-    python -m k2kremote.app                # first bidirectional MIDI port
-    python -m k2kremote.app --rig jan       # Jan's split send/receive rig
-    python -m k2kremote.app --port "My Port"
-    python -m k2kremote.app --demo          # no hardware: a static frame
+    k2kremote                  # first bidirectional MIDI port
+    k2kremote --rig standard   # one bidirectional MIDI port
+    k2kremote --port "My Port" # an exact port by name
+    k2kremote --demo           # no hardware: a static frame
 
 A keypress resolves through :mod:`k2kremote.keymap` and is handed to the
 :class:`~k2kremote.refresh.RefreshWorker`, which serializes it onto the single
@@ -52,12 +52,18 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Input, Select, Static
 
+# Imported for its side effect: registering this project's vocabulary with the
+# family, which the shared conformance checks read. A library cannot know the
+# name of the program using it, so the tool declares its own, and importing it
+# here is what makes the declaration happen at launch rather than only in the
+# tests that import it directly.
+import k2kremote.terms  # noqa: F401
 from k2000.definitions import Button, ObjectType
 
 from k2kremote import braille, keymap, name_cursor, screenshot, text_entry
 from k2kremote.name_cursor import NameCursor
 from k2kremote.refresh import Frame, RefreshWorker
-from vinsynlib.cli import add_common_arguments, make_parser
+from vinsynlib.cli import add_common_arguments, append_flag_help, make_parser
 from vinsynlib.keys import wrap_blocks
 from vinsynlib.midi import install_clean_exit
 from vinsynlib.ui.hints import KeyHints as _KeyHints
@@ -2742,20 +2748,20 @@ TERMINAL / CONSOLE RECOMMENDATIONS
 
 CONNECTING
   No hardware, just to look around:
-      python -m k2kremote.app --demo
+      k2kremote --demo
 
   List the MIDI ports your system exposes, and probe for a K2000:
       python -m k2kremote.midi_bridge ports
       python -m k2kremote.midi_bridge probe
 
   Connect (pick one):
-      python -m k2kremote.app                     # first bidirectional MIDI port
-      python -m k2kremote.app --rig auto          # probe every port for a K2000
-      python -m k2kremote.app --port "Your Port"  # an exact port by name
+      k2kremote                     # first bidirectional MIDI port
+      k2kremote --rig auto          # probe every port for a K2000
+      k2kremote --port "Your Port"  # an exact port by name
 
   Remember the choice so later runs need no flags:
-      python -m k2kremote.app --port "Your Port" --save-config
-      python -m k2kremote.app                     # reuses config.toml
+      k2kremote --port "Your Port" --save-config
+      k2kremote                     # reuses config.toml
 
 RENDER MODES (press F10 to cycle: auto -> braille -> blocks -> text -> image)
   - auto    On a graphics-capable terminal shows the image for graphics pages and
@@ -2889,17 +2895,14 @@ def build_parser() -> argparse.ArgumentParser:
         "press Ctrl+r to refresh and Alt+x to panic.",
     )
     add_common_arguments(parser, port=True, channel=False, demo=True, config=True)
-    # Override help for --port to restore the useful hints
-    port_action = None
-    for action in parser._actions:
-        if getattr(action, "dest", None) == "port":
-            port_action = action
-            break
-    if port_action is not None:
-        port_action.help += (
-            " exact MIDI port name to use (implies --rig standard); "
-            "list names with: python -m k2kremote.midi_bridge ports"
-        )
+    # One thing this tool has to add to the family's --port: naming one skips
+    # the probe, and this is where the names come from. Appended rather than
+    # rewritten, so the family's wording stays the prefix.
+    append_flag_help(
+        parser,
+        "port",
+        "(implies --rig standard; list names with: python -m k2kremote.midi_bridge ports)",
+    )
     conn = parser.add_argument_group("connection")
     conn.add_argument(
         "--rig",
