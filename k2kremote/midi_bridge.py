@@ -1452,18 +1452,20 @@ class BridgeConfig:
 
         One write, through the library, which refuses to overwrite a file it
         cannot parse and escapes a quote or a backslash in a port name rather
-        than producing a file that is not TOML. The ``port`` key is only written
-        when set; existing keys in the cache are preserved.
+        than producing a file that is not TOML. ``port`` is passed through
+        even when ``None``: the library treats a ``None`` value as "remove
+        this key", so a split rig saved after a standard one drops the stale
+        output port instead of leaving it to be read back as the next run's
+        selection. Every other key is merged, so existing keys are preserved.
         """
-        changes: dict = {
-            "rig": self.rig,
-            "send_port": self.send_port,
-            "recv_iface": self.recv_iface,
-            "device_id": self.device_id,
-        }
-        if self.port is not None:
-            changes["port"] = self.port
-        _SETTINGS.update(path, **changes)
+        _SETTINGS.update(
+            path,
+            rig=self.rig,
+            port=self.port,
+            send_port=self.send_port,
+            recv_iface=self.recv_iface,
+            device_id=self.device_id,
+        )
 
 
 def _main(argv: List[str]) -> None:

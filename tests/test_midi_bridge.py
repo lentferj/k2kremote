@@ -231,6 +231,28 @@ def test_bridge_config_split_rig_defaults(tmp_path):
     assert loaded.recv_iface == midi_bridge.SPLIT_RECV_IFACE
 
 
+def test_bridge_config_clears_a_port_that_is_no_longer_set(tmp_path):
+    """A split rig saved after a standard one must not keep the old output port.
+
+    The store merges, and an earlier version of ``save`` skipped the key when
+    ``port`` was None, so the previous port survived and the next load handed
+    it back -- a port the user had moved away from. The library's ``update``
+    removes a key whose value is None, and ``save`` now passes the value
+    through, so the key is gone rather than stale.
+    """
+    import tomllib
+
+    path = tmp_path / "config.toml"
+    BridgeConfig(rig="standard", port="Output A").save(str(path))
+    assert BridgeConfig.load(str(path)).port == "Output A"
+
+    BridgeConfig(rig="split", port=None).save(str(path))
+    with open(path, "rb") as handle:
+        data = tomllib.load(handle)
+    assert "port" not in data
+    assert BridgeConfig.load(str(path)).port is None
+
+
 def test_bridge_config_escapes_a_quote_and_a_backslash(tmp_path):
     """A port name is whatever ALSA reports, quote and backslash included.
 
