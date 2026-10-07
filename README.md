@@ -544,8 +544,8 @@ pip install -e ".[image]"
 
 `--no-deps` on the library because its dependencies are k2kremote's too, and a
 second copy of `textual` in the same environment is a version skew to
-diagnose somewhere else. `uv sync` reads the path from `[tool.uv.sources]` in
-`pyproject.toml` instead, so with `uv` the checkout only has to exist.
+diagnose somewhere else. To use a local checkout with `uv`, run:
+`uv pip install --python .venv/bin/python --no-deps -e ../vinsynlib`
 
 The Kurzweil SysEx protocol library (psobot/k2000, MIT) is **vendored in-tree**
 (see [`k2000/`](k2000)), so that one needs **no separate manual or git
@@ -571,14 +571,19 @@ cd k2kremote                          # if not already there
 source .venv/bin/activate             # Windows: .venv\Scripts\activate
 ```
 
-(Alternatively, skip activation and call the venv's interpreter directly:
-`.venv/bin/python -m k2kremote.app ...`, Windows: `.venv\Scripts\python -m k2kremote.app ...`.)
+After activation, the `k2kremote` command is on PATH:
+
+```bash
+k2kremote --help                     # show CLI
+k2kremote --demo                     # run in demo mode (no hardware)
+k2kremote --long-help                # full prose manual
+```
 
 **Recommended first run — no hardware needed:**
 
 ```bash
-python -m k2kremote.app --demo        # explore the UI; press F10 to cycle modes
-python -m k2kremote.app --long-help   # full prose manual: setup, controls, safety
+k2kremote --demo        # explore the UI; press F10 to cycle modes
+k2kremote --long-help   # full prose manual: setup, controls, safety
 ```
 
 `Ctrl+c` quits. When that works, connect your K2000 (see "With a K2000 attached"
@@ -622,7 +627,7 @@ and `Alt+letter` for their own menus — that's what `--alt-keys` /
 ### Other things you can run (no hardware needed)
 
 ```bash
-python -m k2kremote.braille    # braille renderer self-test
+k2kremote --demo    # braille renderer self-test
 python -m pytest               # the test suite — all synthetic, never opens MIDI
 
 # The macro (.MAC) tool — entirely offline; images read-only except 'install'
@@ -650,15 +655,15 @@ touch.
 ### With a K2000 attached
 
 ```bash
-python -m k2kremote.app                  # first bidirectional MIDI port
-python -m k2kremote.app --rig auto       # probe every port for the K2000
-python -m k2kremote.app --port "My Port" # an exact port by name
+k2kremote                  # first bidirectional MIDI port
+k2kremote --rig auto       # probe every port for the K2000
+k2kremote --port "My Port" # an exact port by name
 python -m k2kremote.midi_bridge ports    # list MIDI ports
 python -m k2kremote.midi_bridge probe    # auto-probe and report what answered
 
 # Remember the selection in config.toml, then just run with no args next time
-python -m k2kremote.app --port "My Port" --save-config
-python -m k2kremote.app                  # reuses the saved port/rig
+k2kremote --port "My Port" --save-config
+k2kremote                  # reuses the saved port/rig
 ```
 
 Selection precedence: an explicit `--port` / `--rig auto` overrides the config
@@ -729,7 +734,7 @@ discipline, and a toggle-able watch pane sharing `watch`'s decoder. It needs
 
 ## Command-line options
 
-Run `python -m k2kremote.app --help` for this list, or `--long-help` for a full
+Run `k2kremote --help` for this list, or `--long-help` for a full
 prose manual (setup, terminals, controls, safety).
 
 **Connection**
@@ -885,7 +890,7 @@ items.
 
 ## Requirements
 
-All installed automatically by `pip install -e .`:
+Most dependencies are installed automatically by `pip install -e .`; exceptions are noted below.
 
 - Python 3.11 or later
 - [`textual`](https://pypi.org/project/textual/) — the TUI
@@ -894,6 +899,7 @@ All installed automatically by `pip install -e .`:
 - [`attrs`](https://pypi.org/project/attrs/)
 - [`pillow`](https://pypi.org/project/pillow/)
 - the [psobot/k2000](https://github.com/psobot/k2000) SysEx protocol library — **vendored in-tree** ([`k2000/`](k2000), MIT), no separate install
+- [`vinsynlib`](https://github.com/lentferj/vinsynlib) — shared settings cache, command line, and MIDI port listing — **must be installed from a sibling checkout** (see **Setup** section above)
 - _optional:_ [`textual-image`](https://pypi.org/project/textual-image/) for pixel-perfect image mode (`pip install -e ".[image]"`)
 
 ---
