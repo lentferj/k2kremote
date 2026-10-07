@@ -81,7 +81,7 @@ kitty's graphics protocol (or sixel), so there is nothing in the character grid
 to export. To retake docs/img/mirror-image.png:
 
   1. run the mirror in kitty against the instrument:
-       .venv/bin/python -m k2kremote.app --rig auto
+       k2kremote --rig auto
   2. press F10 until the title bar says "image"
   3. capture the window (any of these is on this machine):
        import -window "$(xdotool getactivewindow)" docs/img/mirror-image.png
