@@ -91,12 +91,12 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      # `image` too: the pixel render mode is optional at runtime but its tests
-      # skip silently without it, and a mode that only ever runs on the author's
-      # kitty terminal is the one most likely to rot unnoticed.
+      # Install the shared library first, then k2kremote and its dependencies.
+      # Order matters: the library must be present for pip install -e . to succeed.
       - name: Install
         run: |
           python -m pip install --upgrade pip
+          python -m pip install --no-deps -e ../vinsynlib
           python -m pip install -e ".[dev,image]"
 
       - name: Run the suite
@@ -185,9 +185,12 @@ jobs:
       - name: Install ALSA headers (needed for any python-rtmidi source build)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
+      # Install the shared library first, then k2kremote and its dependencies.
+      # Order matters: the library must be present for pip install -e . to succeed.
       - name: Install
         run: |
           python -m pip install --upgrade pip
+          python -m pip install --no-deps -e ../vinsynlib
           python -m pip install -e ".[dev,image]"
 
       - name: make check
