@@ -46,14 +46,12 @@ test:  ## Run the test suite with coverage
 # audited without anyone editing this file.
 audit:  ## Vulnerability, dead-code, dependency and secret scans
 	@echo "== pip-audit (project dependencies, vinsynlib filtered out)"
-	@$(PYTHON) -c "import pathlib, tomllib; \
+	@req=$$(mktemp) && trap 'rm -f "$$req"' EXIT && \
+	    $(PYTHON) -c "import tomllib; \
 	    data = tomllib.load(open('pyproject.toml', 'rb')); \
-	    pathlib.Path('.audit-runtime-req.txt').write_text(\
-	        ''.join(r + chr(10) for r in data['project']['dependencies'] \
-	        if not r.startswith('vinsynlib')))"
-	@$(PIP_AUDIT) --progress-spinner off -r .audit-runtime-req.txt || \
-	    (rm -f .audit-runtime-req.txt; exit 1)
-	@rm -f .audit-runtime-req.txt
+	    print(chr(10).join(r for r in data['project']['dependencies'] \
+	    if not r.startswith('vinsynlib')))" > "$$req" && \
+	    $(PIP_AUDIT) --progress-spinner off -r "$$req"
 	$(VULTURE)
 	$(DEPTRY) .
 	git ls-files -z --cached --others --exclude-standard | xargs -0 $(SECRETS) --baseline .secrets.baseline
