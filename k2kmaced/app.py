@@ -95,7 +95,6 @@ from k2kmaced.macfile import (
 from k2kmaced.cli import load_macro, parse_source
 from vinsynlib.cli import make_parser
 from vinsynlib.keys import wrap_blocks as _wrap_blocks
-from vinsynlib.ui.hints import KeyHints
 
 __all__ = ["BANK_VALUES", "cycle", "MacroEditor", "K2kmacedApp", "main"]
 
@@ -482,6 +481,7 @@ try:  # Textual is optional here: the model above is useful without it.
     from textual.containers import Vertical
     from textual.screen import ModalScreen
     from textual.widgets import DataTable, Header, Input, OptionList, Static
+    from vinsynlib.ui.hints import KeyHints
 except ImportError:  # pragma: no cover - exercised only without textual
     App = object  # type: ignore
     ComposeResult = object  # type: ignore
