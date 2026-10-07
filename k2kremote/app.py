@@ -2701,8 +2701,10 @@ REQUIREMENTS
   - The K2000's SysEx must be enabled and its "SysX Device ID" known (this unit
     answers as device id 0). MIDI sysex IDs are independent of the MIDI channel.
   - Python packages: textual, python-rtmidi, numpy, attrs, and the psobot/k2000
-    protocol library (installed editable from a local checkout). The optional
-    pixel-perfect image mode additionally needs textual-image and pillow.
+    protocol library (vendored in-tree; no separate install). The required
+    vinsynlib shared library must be installed from a sibling checkout (see
+    the Setup section). The optional pixel-perfect image mode additionally
+    needs textual-image and pillow.
 
 TERMINAL / CONSOLE RECOMMENDATIONS
   The text/braille/blocks render modes work in any reasonably modern terminal
@@ -2887,6 +2889,17 @@ def build_parser() -> argparse.ArgumentParser:
         "press Ctrl+r to refresh and Alt+x to panic.",
     )
     add_common_arguments(parser, port=True, channel=False, demo=True, config=True)
+    # Override help for --port to restore the useful hints
+    port_action = None
+    for action in parser._actions:
+        if getattr(action, "dest", None) == "port":
+            port_action = action
+            break
+    if port_action is not None:
+        port_action.help += (
+            " exact MIDI port name to use (implies --rig standard); "
+            "list names with: python -m k2kremote.midi_bridge ports"
+        )
     conn = parser.add_argument_group("connection")
     conn.add_argument(
         "--rig",
