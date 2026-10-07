@@ -1452,8 +1452,8 @@ class BridgeConfig:
 
         One write, through the library, which refuses to overwrite a file it
         cannot parse and escapes a quote or a backslash in a port name rather
-        than producing a file that is not TOML. ``port`` is omitted when unset
-        so an output-less split rig keeps no output key.
+        than producing a file that is not TOML. The ``port`` key is only written
+        when set; existing keys in the cache are preserved.
         """
         changes: dict = {
             "rig": self.rig,
