@@ -522,30 +522,27 @@ git clone https://github.com/lentferj/k2kremote.git
 cd k2kremote
 ```
 
-**3. Get the shared library, then create an environment and install**
+**3. Create an environment and install**
 
 k2kremote and its sibling tools share one library, **vinsynlib** — the
-settings cache, the keymap, the command line and the port listing. It is
-**not on PyPI**, so it comes from a checkout beside this repository.
+settings cache, the keymap, the command line and the port listing. It comes
+from PyPI with the rest.
 
 ```bash
-git clone https://github.com/lentferj/vinsynlib.git ../vinsynlib
-
 python3 -m venv .venv                 # create a private virtual environment
 source .venv/bin/activate             # Windows: .venv\Scripts\activate
 pip install --upgrade pip
 
-pip install --no-deps -e ../vinsynlib # the shared library, installed first
 pip install -e .                      # k2kremote + all its dependencies
 
 # optional — pixel-perfect "image" render mode (needs a graphics terminal):
 pip install -e ".[image]"
 ```
 
-`--no-deps` on the library because its dependencies are k2kremote's too, and a
-second copy of `textual` in the same environment is a version skew to
-diagnose somewhere else. To use a local checkout with `uv`, run:
-`uv pip install --python .venv/bin/python --no-deps -e ../vinsynlib`
+To develop against a *working copy* of `vinsynlib` rather than the published
+one, install that alongside — it shadows the published version in this
+environment only: `pip install --no-deps -e ../vinsynlib` (or with `uv`,
+`uv pip install --python .venv/bin/python --no-deps -e ../vinsynlib`).
 
 The Kurzweil SysEx protocol library (psobot/k2000, MIT) is **vendored in-tree**
 (see [`k2000/`](k2000)), so that one needs **no separate manual or git
@@ -899,7 +896,7 @@ Most dependencies are installed automatically by `pip install -e .`; exceptions 
 - [`attrs`](https://pypi.org/project/attrs/)
 - [`pillow`](https://pypi.org/project/pillow/)
 - the [psobot/k2000](https://github.com/psobot/k2000) SysEx protocol library — **vendored in-tree** ([`k2000/`](k2000), MIT), no separate install
-- [`vinsynlib`](https://github.com/lentferj/vinsynlib) — the family's shared settings cache, command line and port listing — **not on PyPI**; install from a sibling checkout (see **Setup** above)
+- [`vinsynlib`](https://pypi.org/project/vinsynlib/) — the family's shared settings cache, command line and port listing
 - _optional:_ [`textual-image`](https://pypi.org/project/textual-image/) for pixel-perfect image mode (`pip install -e ".[image]"`)
 
 ---

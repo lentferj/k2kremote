@@ -35,12 +35,6 @@ jobs:
   pytest:
     runs-on: ${{ matrix.os }}
     name: pytest (${{ matrix.os }}, ${{ matrix.python-version }})
-    # The project is checked out into its own directory so that ../vinsynlib
-    # is a real sibling (see the checkout steps below); run everything inside
-    # it so the relative path and the Makefile both resolve.
-    defaults:
-      run:
-        working-directory: k2kremote
     strategy:
       fail-fast: false
       matrix:
@@ -68,29 +62,11 @@ jobs:
       # `.python-version` more eagerly, and this repo has no such file (and
       # passes python-version explicitly regardless).
       - uses: actions/checkout@v7
-        with:
-          path: k2kremote
-
-      # vinsynlib is checked out as a genuine sibling of this project, with
-      # both repositories under $GITHUB_WORKSPACE. checkout@v7 refuses a path
-      # outside the workspace ("Repository path ... is not under ..."), so the
-      # two cannot be siblings at the workspace level; instead the project
-      # lives in its own directory and every command runs from inside it, where
-      # ../vinsynlib is the library. Until vinsynlib is on an index this is what
-      # makes the dependency resolvable on a clean runner; without it the
-      # install fails with "Distribution not found" for a package no runner has.
-      - uses: actions/checkout@v7
-        with:
-          repository: lentferj/vinsynlib
-          path: vinsynlib
 
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-          # The project is in a subdirectory, so setup-python has to be told
-          # where to hash for the pip cache.
-          cache-dependency-path: k2kremote/pyproject.toml
 
       # python-rtmidi is imported at module scope by k2kremote.midi_bridge, so
       # it has to be installed even though nothing here opens a port. On Linux
@@ -103,12 +79,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      # Install the shared library first, then k2kremote and its dependencies.
-      # Order matters: the library must be present for pip install -e . to succeed.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-deps -e ../vinsynlib
           python -m pip install -e ".[dev,image]"
 
       - name: Run the suite
@@ -174,44 +147,20 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     name: make check
-    # Same sibling layout as the pytest job: project in k2kremote/, library in
-    # vinsynlib/, commands run from the project directory.
-    defaults:
-      run:
-        working-directory: k2kremote
     steps:
       - uses: actions/checkout@v7
-        with:
-          path: k2kremote
-
-      # vinsynlib is checked out as a genuine sibling of this project, with
-      # both repositories under $GITHUB_WORKSPACE. checkout@v7 refuses a path
-      # outside the workspace ("Repository path ... is not under ..."), so the
-      # two cannot be siblings at the workspace level; instead the project
-      # lives in its own directory and every command runs from inside it, where
-      # ../vinsynlib is the library. Until vinsynlib is on an index this is what
-      # makes the dependency resolvable on a clean runner; without it the
-      # install fails with "Distribution not found" for a package no runner has.
-      - uses: actions/checkout@v7
-        with:
-          repository: lentferj/vinsynlib
-          path: vinsynlib
 
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: k2kremote/pyproject.toml
 
       - name: Install ALSA headers (needed for any python-rtmidi source build)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
 
-      # Install the shared library first, then k2kremote and its dependencies.
-      # Order matters: the library must be present for pip install -e . to succeed.
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --no-deps -e ../vinsynlib
           python -m pip install -e ".[dev,image]"
 
       - name: make check

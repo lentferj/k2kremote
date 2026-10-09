@@ -36,21 +36,19 @@ test:  ## Run the test suite with coverage
 # Audits THIS PROJECT's dependency closure, not the ambient environment, so it
 # is `pip-audit -r <the declared dependencies>` rather than a bare `pip-audit`.
 #
-# vinsynlib is filtered out of the list handed to pip-audit. It is this
-# family's own library and, in a checkout beside it, an editable local install
-# rather than a package on an index -- so pip cannot resolve it and pip-audit
-# would fail *resolving*, reporting nothing about anything and failing the gate
-# for a reason that is not a vulnerability. It is reviewed where it lives.
-# Auditing what is *declared* is the point of this target, so every other
-# declared dependency is still audited, and a new dependency added later is
-# audited without anyone editing this file.
+# vinsynlib is a normal index dependency now (it is on PyPI), so it is audited
+# with the rest. It used to be filtered out, because as an editable local
+# install from a sibling checkout pip could not resolve it and pip-audit would
+# fail *resolving* rather than reporting anything.
+# Auditing what is *declared* is the point of this target, so every declared
+# dependency is audited, and a new dependency added later is audited without
+# anyone editing this file.
 audit:  ## Vulnerability, dead-code, dependency and secret scans
-	@echo "== pip-audit (project dependencies, vinsynlib filtered out)"
+	@echo "== pip-audit (project dependencies)"
 	@req=$$(mktemp) && trap 'rm -f "$$req"' EXIT && \
 	    $(PYTHON) -c "import tomllib; \
 	    data = tomllib.load(open('pyproject.toml', 'rb')); \
-	    print(chr(10).join(r for r in data['project']['dependencies'] \
-	    if not r.startswith('vinsynlib')))" > "$$req" && \
+	    print(chr(10).join(data['project']['dependencies']))" > "$$req" && \
 	    $(PIP_AUDIT) --progress-spinner off -r "$$req"
 	$(VULTURE)
 	$(DEPTRY) .

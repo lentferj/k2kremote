@@ -32,7 +32,7 @@ dependencies = [
     # rest of the family ported from, so this project is where all of those
     # originally lived -- and its settings writer, which emitted port names
     # unescaped, is one of the three bugs the shared copy exists to fix.
-    "vinsynlib>=0.1.0",
+    "vinsynlib>=0.2.0",
 ]
 
 # NO committed `[tool.uv.sources]` override, deliberately.
