@@ -118,7 +118,14 @@ def test_both_legends_are_produced_through_the_shared_code() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_mirror_legend_wraps_and_loses_no_key() -> None:
+async def test_the_mirror_legend_caps_and_points_at_the_rest() -> None:
+    """At 80 columns the legend is capped, and says where the rest are.
+
+    The keys are not lost: ``widget.blocks`` is the whole legend, which is
+    what the pointer promises the user can still reach. What must not happen
+    is a half hint on the last line, or the tail vanishing without a word --
+    the truncation the old ``Static`` did.
+    """
     from k2kremote.app import K2KRemoteApp
 
     app = K2KRemoteApp(demo=True, text_mode=True)
@@ -127,9 +134,16 @@ async def test_the_mirror_legend_wraps_and_loses_no_key() -> None:
         widget = app.query_one("#keyhints")
         assert isinstance(widget, family_key_hints)
         rendered = str(widget.render())
-    # The last block of the flat legend: with truncation it was the one a
-    # narrow window dropped, so it is the one that proves wrapping.
-    assert "Ctrl+c quit" in rendered
+        blocks = widget.blocks
+        more = widget.MORE
+    lines = rendered.split("\n")
+    assert len(lines) <= widget.MAX_LINES
+    assert lines[-1].endswith(more)
+    # The last block of the flat legend is exactly what a 78-column fold hides.
+    assert "Ctrl+c quit" in blocks
+    for line in lines:
+        body = line[: -len(more)].rstrip() if line.endswith(more) else line
+        assert any(body == block or body.endswith(block) for block in blocks), line
 
 
 @pytest.mark.asyncio

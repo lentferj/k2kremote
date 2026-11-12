@@ -32,7 +32,7 @@ REQUIRED_BITS = (
     "error:",
     "vinsynlib",
     "pip install",
-    "vinsynlib>=0.2.0",
+    "vinsynlib>=0.4.4",
 )
 
 
@@ -114,7 +114,7 @@ def test_an_older_library_is_named_rather_than_ignored(
     monkeypatch.setattr(vinsynlib, "__version__", "0.0.9")
     problem = entry._diagnose("k2kmon")
     assert problem is not None
-    assert "0.2.0" in problem
+    assert "0.4.4" in problem
     assert "0.0.9" in problem
 
 
@@ -134,7 +134,7 @@ def test_a_library_without_the_version_helper_is_named_not_crashed(
     monkeypatch.delattr(vinsynlib, "is_compatible_version", raising=False)
     problem = entry._diagnose("k2kmon")
     assert problem is not None
-    assert "0.2.0" in problem
+    assert "0.4.4" in problem
 
 
 def test_a_current_library_passes(monkeypatch: Any) -> None:
@@ -203,7 +203,7 @@ def test_a_library_that_cannot_report_a_version_reads_as_missing(
 
 
 def test_a_pre_release_at_the_floor_is_not_called_too_old() -> None:
-    """A pre-release marker is not a version: ``0.2rc1`` is ``0.2``."""
-    assert entry._release_parts("0.2rc1", 3) == (0, 2, 0)
-    assert entry._release_parts("0.2", 3) == (0, 2, 0)
+    """A pre-release marker is not a version: ``0.4rc1`` is ``0.4``."""
+    assert entry._release_parts("0.4rc1", 3) == (0, 4, 0)
+    assert entry._release_parts("0.4", 3) == (0, 4, 0)
     assert entry._release_parts("0.1.x", 3) is None

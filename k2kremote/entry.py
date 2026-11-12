@@ -36,16 +36,18 @@ from __future__ import annotations
 import sys
 from importlib import import_module
 
-#: The minimum that has the API this project was written against.
+#: The minimum that has the API this project is written against.
 #:
-#: ``0.2.0`` is the version that added ``midi.open_remembered_or_swept``'s
-#: ``on_fallback`` hook, the per-file ownership guard in the settings cache,
-#: and the ``__version__`` whose absence used to be undetectable.
-MINIMUM = (0, 2, 0)
+#: ``0.4.4`` is the version that caps the shared legend at
+#: ``KeyHints.MAX_LINES`` and points at the rest with ``KeyHints.MORE``. This
+#: project raises that cap and appends that pointer, both read at import, so a
+#: library older than this fails with an AttributeError instead of showing a
+#: legend -- which is exactly what this gate exists to turn into a sentence.
+MINIMUM = (0, 4, 4)
 
 #: Where to get it; on PyPI since 0.2.0. Kept in one place because it
 #: appears in the message twice and must not drift.
-SOURCE = "vinsynlib>=0.2.0"
+SOURCE = "vinsynlib>=0.4.4"
 
 #: The distribution these four commands all come from.
 PACKAGE = "k2kremote"

@@ -185,24 +185,80 @@ def wrap_groups(groups, width: int, sep: str = _BAR_SEP) -> str:
     return "\n".join(lines)
 
 
+#: How many legend lines are shown before the pointer. Four is what this
+#: project's grouped legend needs at 98 usable columns (a 100-column window):
+#: the normal and the ``--alt-keys`` groupings both take four there and are
+#: then shown whole, so only a narrower window is capped.
+LEGEND_MAX_LINES = 4
+
+
+def cap_hint_lines(
+    text: str,
+    width: int,
+    separator: str = _BAR_SEP,
+    *,
+    max_lines: int = LEGEND_MAX_LINES,
+    more: str = _KeyHints.MORE,
+) -> str:
+    """Cut a wrapped legend to ``max_lines``, ending it with ``more``.
+
+    Mirrors :meth:`vinsynlib.ui.hints.KeyHints._render_hints`. This project's
+    legend is wrapped by :func:`wrap_groups` instead of the library's
+    ``wrap_blocks``, so it never reaches the library's own cap; the rule is
+    kept identical anyway, so the family behaves the same everywhere.
+
+    A legend already within ``max_lines`` is returned unchanged. Otherwise the
+    first ``max_lines - 1`` lines are kept and the next is cut back to its last
+    complete hint -- the last ``separator`` in it -- before ``more`` is
+    appended, so a partial hint is never shown. The cut lands on a hint
+    boundary whatever the grouping did; the grouping only shapes the wrap.
+    """
+    lines = text.split("\n")
+    cap = max(max_lines, 1)
+    if len(lines) <= cap:
+        return text
+    kept = lines[: cap - 1]
+    # Room for the pointer plus the space before it. Sliced to the width once
+    # more below so nothing can overflow even if the pointer itself is wide.
+    head = lines[cap - 1][: max(width - len(more) - 1, 0)]
+    # Cut back to the last complete hint. With no separator at all (one hint
+    # wider than the line) there is nothing to cut back to, so the width-based
+    # slice stands -- the same rule as the library's.
+    cut = head.rfind(separator)
+    if cut != -1:
+        head = head[:cut]
+    kept.append((head + " " + more)[:width])
+    return "\n".join(kept)
+
+
 class KeyHints(_KeyHints):
-    """The legend, folded to the terminal's width, breaking between groups.
+    """The legend, folded between groups and capped with a pointer.
 
     The widget is the family's (:class:`vinsynlib.ui.hints.KeyHints`), which
     folds with :func:`vinsynlib.keys.wrap_blocks`, re-renders on resize and
-    wraps rather than truncating. What this subclass adds is the one thing the
-    shared widget does not do: this project's legend is *grouped*, so a fold
-    never orphans one member of a run. A plain greedy fold put "F7 Edit" at
-    the end of the navigation line and began the next with "F8 Exit", and F7
+    caps the result at ``MAX_LINES``, ending the last line with ``MORE`` so the
+    user knows the rest of the keys exist. What this subclass adds is the one
+    thing the shared widget does not do: this project's legend is *grouped*, so
+    a fold never orphans one member of a run. A plain greedy fold put "F7 Edit"
+    at the end of the navigation line and began the next with "F8 Exit", and F7
     was reported missing; :func:`wrap_groups` keeps the run together.
+
+    ``MAX_LINES`` is raised from the family default of two to four, the number
+    this legend takes at 98 usable columns: both groupings are shown whole in a
+    100-column window, and only a narrower one is capped. The cut itself is the
+    family's (:func:`cap_hint_lines`): whole wrapped lines are kept, the next is
+    cut back to its last complete hint, and ``MORE`` is appended -- never a half
+    hint, and no key dropped silently, because the pointer says where the rest
+    live.
 
     The truncation this replaces was real in the other direction too: the
     legend was a ``Static`` whose text was folded once at compose time, when
     the window width is not yet known, and rendered with ``no_wrap`` -- so a
     hint that did not fit was dropped and the user never learned the key
-    existed. Height ``auto`` and a re-render on resize fix that; a footer that
-    silently drops its last keys teaches the user those keys do not exist.
+    existed. Height ``auto`` and a re-render on resize fix that.
     """
+
+    MAX_LINES = LEGEND_MAX_LINES
 
     def __init__(self, groups, *, id: Optional[str] = None):
         self._groups = tuple(tuple(group) for group in groups)
@@ -211,7 +267,16 @@ class KeyHints(_KeyHints):
     def _render_hints(self) -> None:
         # NOT named _render: Widget._render is Textual's own.
         width = max(self.size.width - 2, 20)
-        self.update(wrap_groups(self._groups, width, self._separator))
+        text = wrap_groups(self._groups, width, self._separator)
+        self.update(
+            cap_hint_lines(
+                text,
+                width,
+                self._separator,
+                max_lines=self.MAX_LINES,
+                more=self.MORE,
+            )
+        )
 
 
 # The bottom text row carries the K2000's own soft-key labels.
@@ -1985,9 +2050,9 @@ class K2KRemoteApp(App):
         yield Static(Text(self._mode_bar_text(), no_wrap=True), id="modebar")
         # The key-hint legend lives on its own persistent line so transient
         # status messages (below) can never bury it. KeyHints folds it to the
-        # window width and wraps rather than truncating, so no key is silently
-        # dropped; see the class for why it is a subclass rather than the bare
-        # family widget.
+        # window width, and on a narrow window caps it with a pointer to the
+        # rest rather than dropping keys silently; see the class for why it is
+        # a subclass rather than the bare family widget.
         yield KeyHints(self._legend_groups(), id="keyhints")
         yield Static("", id="status")
 

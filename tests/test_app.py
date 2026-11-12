@@ -1554,6 +1554,71 @@ def test_wrap_groups_prefers_a_group_break_over_a_greedy_fit():
     assert wrap_groups(groups, 40) == "aaa · bbb · ccc · ddd"
 
 
+def test_the_grouped_legend_is_capped_at_four_lines_with_a_pointer():
+    """The family caps the legend; this project picks four lines and keeps the
+    fold group-aware.
+
+    Four is measured, not guessed: at 98 usable columns -- a 100-column window
+    -- both the normal and the ``--alt-keys`` grouping take exactly four lines,
+    so they are shown whole there. Narrower, the family's cut applies: whole
+    lines are kept, the next is cut back to its last complete hint, and the
+    pointer is appended. No half hint is ever shown, and no key is dropped
+    silently -- the pointer says where the rest live.
+    """
+    from k2kremote import keymap
+    from k2kremote.app import KeyHints, cap_hint_lines, wrap_groups
+    from vinsynlib.ui.hints import KeyHints as family_key_hints
+
+    assert KeyHints.MAX_LINES == 4
+    # The pointer is the library's, not a second literal that can drift.
+    assert KeyHints.MORE is family_key_hints.MORE
+    more = KeyHints.MORE
+
+    # At 98 usable columns both legends fit whole: four lines, no pointer.
+    for groups in (keymap.LEGEND_GROUPS, keymap.LEGEND_GROUPS_ALT):
+        rendered = cap_hint_lines(
+            wrap_groups(groups, 98), 98, " · ", max_lines=KeyHints.MAX_LINES, more=more
+        )
+        lines = rendered.split("\n")
+        assert len(lines) <= 4
+        assert more not in rendered
+        for block in (b for group in groups for b in group):
+            assert block in rendered
+
+    # Narrower than that the cap applies -- between hints, never inside one.
+    for groups in (keymap.LEGEND_GROUPS, keymap.LEGEND_GROUPS_ALT):
+        flat = tuple(block for group in groups for block in group)
+        raw = wrap_groups(groups, 40)
+        assert len(raw.split("\n")) > 4, "this width must exercise the cap"
+        rendered = cap_hint_lines(raw, 40, " · ", max_lines=KeyHints.MAX_LINES, more=more)
+        lines = rendered.split("\n")
+        assert len(lines) == 4
+        assert lines[-1].endswith(more)
+        # The cap cuts, it does not re-fold: the kept lines are the folded ones.
+        assert lines[:3] == raw.split("\n")[:3]
+        for line in lines:
+            assert len(line) <= 40, line
+            body = line[: -len(more)].rstrip() if line.endswith(more) else line
+            assert any(body == block or body.endswith(block) for block in flat), (
+                f"line ends mid-hint: {line!r}"
+            )
+
+
+@pytest.mark.asyncio
+async def test_the_keyhints_widget_caps_a_narrow_legend():
+    """`_render_hints` applies the cap, not just the pure helper."""
+    from k2kremote.app import K2KRemoteApp, KeyHints
+
+    app = K2KRemoteApp(demo=True, text_mode=True)
+    async with app.run_test(size=(42, 30)) as pilot:
+        await pilot.pause()
+        widget = app.query_one("#keyhints", KeyHints)
+        rendered = str(widget.render())
+    lines = rendered.split("\n")
+    assert len(lines) <= KeyHints.MAX_LINES
+    assert lines[-1].endswith(widget.MORE)
+
+
 def test_legend_groups_and_flat_blocks_stay_in_sync():
     from k2kremote import keymap
 

@@ -491,6 +491,14 @@ except ImportError:  # pragma: no cover - exercised only without textual
             raise RuntimeError("the macro editor UI needs Textual installed")
 
 else:
+    # The family's widget caps the legend at ``MAX_LINES`` and ends the last
+    # line with a pointer to the full list. The library default of two is right
+    # for the canonical list, but this one needs three lines at 70 columns (two
+    # at 98), so at the width the tests and a normal terminal use, two would
+    # hide `w` and `i` -- the two keys that can change a disk image -- behind
+    # the pointer. Four shows the whole list there and still caps it when the
+    # window is narrower.
+    KeyHints.MAX_LINES = 4
 
     class PickFileScreen(ModalScreen):
         """Browse the image's loadable files by directory and pick one.
@@ -866,9 +874,10 @@ else:
             move.display = False
             yield move
             # The family's legend widget: it folds to the terminal's width and
-            # wraps rather than truncating, so `w` and `i` -- the two keys that
-            # can change a disk image -- cannot be dropped off the end of the
-            # line the way Textual's one-line Footer dropped them.
+            # caps itself with a pointer to the full list rather than
+            # truncating silently, so `w` and `i` -- the two keys that can
+            # change a disk image -- are never dropped off the end the way
+            # Textual's one-line Footer dropped them.
             yield KeyHints(LEGEND_BLOCKS, id="legend")
 
         def on_mount(self) -> None:
