@@ -1567,11 +1567,14 @@ def test_the_grouped_legend_is_capped_at_four_lines_with_a_pointer():
     """
     from k2kremote import keymap
     from k2kremote.app import KeyHints, cap_hint_lines, wrap_groups
-    from vinsynlib.ui.hints import KeyHints as family_key_hints
 
     assert KeyHints.MAX_LINES == 4
-    # The pointer is the library's, not a second literal that can drift.
-    assert KeyHints.MORE is family_key_hints.MORE
+    # The family pointer names `?`, which this app does not bind: a pointer
+    # must not promise a key that does nothing, so this one asks for a wider
+    # window instead. (Not compared against the family default: k2kmaced
+    # overrides that in place when the macro editor is imported.)
+    assert KeyHints.MORE == "… widen to see all"
+    assert "?" not in KeyHints.MORE
     more = KeyHints.MORE
 
     # At 98 usable columns both legends fit whole: four lines, no pointer.

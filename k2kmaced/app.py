@@ -499,6 +499,10 @@ else:
     # the pointer. Four shows the whole list there and still caps it when the
     # window is narrower.
     KeyHints.MAX_LINES = 4
+    # The family pointer says "… ? for all keys", but this editor binds no `?`
+    # help screen: a pointer must ask for something the user can do, so it asks
+    # for a wider window instead. Same text as k2kremote's legend.
+    KeyHints.MORE = "… widen to see all"
 
     class PickFileScreen(ModalScreen):
         """Browse the image's loadable files by directory and pick one.

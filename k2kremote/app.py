@@ -251,6 +251,13 @@ class KeyHints(_KeyHints):
     hint, and no key dropped silently, because the pointer says where the rest
     live.
 
+    ``MORE`` is overridden too. The family default reads "… ? for all keys",
+    but this program binds no ``?`` help screen, and a pointer that names a key
+    which does nothing is worse than a terse one: it sends the user pressing a
+    key that was never there. This one asks for the action that does reveal the
+    rest -- a wider window -- and stays short enough to fit the widget's
+    20-column floor with its leading space.
+
     The truncation this replaces was real in the other direction too: the
     legend was a ``Static`` whose text was folded once at compose time, when
     the window width is not yet known, and rendered with ``no_wrap`` -- so a
@@ -259,6 +266,9 @@ class KeyHints(_KeyHints):
     """
 
     MAX_LINES = LEGEND_MAX_LINES
+    # The family default names `?`, which this app does not bind; the pointer
+    # must be an action the user can take, not a key that does nothing.
+    MORE = "… widen to see all"
 
     def __init__(self, groups, *, id: Optional[str] = None):
         self._groups = tuple(tuple(group) for group in groups)

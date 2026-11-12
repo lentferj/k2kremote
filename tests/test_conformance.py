@@ -117,6 +117,23 @@ def test_both_legends_are_produced_through_the_shared_code() -> None:
     assert macro_app.KeyHints is family_key_hints
 
 
+def test_both_legend_pointers_name_an_action_this_program_has() -> None:
+    """Neither of this distribution's legends may promise a `?` help key.
+
+    The family default is "… ? for all keys", which is right for the siblings
+    that bind `?` to a help screen. The mirror and the macro editor do not, so
+    the pointer would name a key that does nothing -- worse than a terse
+    pointer, because it sends the user pressing a key that was never there.
+    Both override it, and both ask for the one thing that does reveal the rest:
+    a wider window.
+    """
+    pointer = "… widen to see all"
+    assert mirror_app.KeyHints.MORE == pointer
+    assert macro_app.KeyHints.MORE == pointer
+    assert "?" not in pointer
+    assert "widen" in pointer
+
+
 @pytest.mark.asyncio
 async def test_the_mirror_legend_caps_and_points_at_the_rest() -> None:
     """At 80 columns the legend is capped, and says where the rest are.
